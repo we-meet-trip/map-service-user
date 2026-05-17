@@ -35,6 +35,6 @@ management:
         enabled: true
 
 jwt:
-  secret: ${JWT_SECRET:}
+  secret: ${JWT_SECRET}
   access-ttl: ${JWT_ACCESS_TTL:3600}
   refresh-ttl: ${JWT_REFRESH_TTL:2592000}
