@@ -14,6 +14,10 @@ Thumbs.db
 .env.*
 !.env.example
 
+# === 로컬 개발 설정 (절대 커밋 금지) ===
+**/application-local.yaml
+**/application-local.yml
+
 HELP.md
 .gradle
 build/
@@ -51,3 +55,10 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# Claude Code / AI 도구
+.claude/
+codex-work/
+
+# REST Docs 빌드 산출물 (CI로 생성)
+docs/api/

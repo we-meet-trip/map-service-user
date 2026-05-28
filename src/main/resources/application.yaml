@@ -1,3 +1,57 @@
 spring:
   application:
     name: service-user
+
+  threads:
+    virtual:
+      enabled: true  # JDK 21 Virtual Threads (Spring Boot 3.2+)
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/map_user}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:localdev}  # 로컬 기본값. 운영은 DB_PASSWORD 환경변수로 주입
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: user_service
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    default-schema: user_service
+    create-schemas: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: 1  # DB1 = JWT blacklist (DB0=session, DB2=pubsub, DB3=streams)
+      password: ${REDIS_PASSWORD:}
+
+jwt:
+  private-key: ${JWT_PRIVATE_KEY:}  # Base64-encoded PKCS8 RSA private key. 미설정 시 임시 키 자동 생성
+  public-key: ${JWT_PUBLIC_KEY:}    # Base64-encoded X509 RSA public key
+  access-token-expiry-seconds: 3600      # 1 hour
+  refresh-token-expiry-seconds: 2592000  # 30 days
+
+kakao:
+  client-id: ${KAKAO_CLIENT_ID:}
+  client-secret: ${KAKAO_CLIENT_SECRET:}
+  redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
+  token-uri: https://kauth.kakao.com/oauth/token
+  user-info-uri: https://kapi.kakao.com/v2/user/me
+
+cors:
+  allowed-origins: "*"  # 운영 환경에서는 application-prod.yaml에서 실제 도메인으로 교체
+
+encryption:
+  # Base64-encoded 32바이트 AES-256 키. 미설정 시 암호화 비활성화 (로컬 개발용)
+  # 운영/스테이징: ENCRYPTION_OAUTH_TOKEN_KEY 환경변수로 주입
+  oauth-token-key: ${ENCRYPTION_OAUTH_TOKEN_KEY:}

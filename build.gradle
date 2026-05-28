@@ -2,14 +2,20 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.4.2'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.asciidoctor.jvm.convert' version '3.3.2'
 }
 
 group = 'map'
 version = '0.0.1-SNAPSHOT'
 
+// Windows: 한글 경로에서 Gradle 테스트 워커가 classpath를 읽지 못하는 문제 우회
+if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+    layout.buildDirectory = file("C:/tmp/map-service-user-build")
+}
+
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
@@ -17,18 +23,73 @@ repositories {
     mavenCentral()
 }
 
+configurations {
+    asciidoctorExt
+}
+
+ext {
+    // JUnitRestDocumentation writes to project-root/build/generated-snippets (not Gradle buildDir)
+    snippetsDir = file('build/generated-snippets')
+}
+
 dependencies {
-    //implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Web + Security + Validation
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // JPA + PostgreSQL
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Redis (JWT blacklist, rate limit)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // Flyway (DB migration)
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // JWT (RS256)
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // Lombok
     compileOnly 'org.projectlombok:lombok'
-    //runtimeOnly 'com.mysql:mysql-connector-j'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'com.h2database:h2'
+    testImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    testRuntimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    testRuntimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
     testCompileOnly 'org.projectlombok:lombok'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // REST Docs
+    testImplementation 'org.springframework.restdocs:spring-restdocs-mockmvc'
+    asciidoctorExt 'org.springframework.restdocs:spring-restdocs-asciidoctor'
 }
 
 tasks.named('test') {
+    outputs.dir snippetsDir
     useJUnitPlatform()
+    jvmArgs '-Dfile.encoding=UTF-8', '-Dsun.stdout.encoding=UTF-8', '-Dsun.stderr.encoding=UTF-8'
+    systemProperty 'file.encoding', 'UTF-8'
+}
+
+tasks.named('asciidoctor') {
+    inputs.dir snippetsDir
+    configurations 'asciidoctorExt'
+    dependsOn test
+}
+
+// 생성된 HTML을 프로젝트 docs/ 폴더로 복사 (버전 관리용)
+tasks.register('copyDocs', Copy) {
+    dependsOn asciidoctor
+    from "${layout.buildDirectory.get()}/docs/asciidoc/"
+    into 'docs/api'
 }

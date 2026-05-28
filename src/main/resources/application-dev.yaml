@@ -1,0 +1,6 @@
+# 개발 환경
+# 실행: ./gradlew bootRun --args='--spring.profiles.active=dev,local'
+
+spring:
+  jpa:
+    show-sql: true
