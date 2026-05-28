@@ -8,7 +8,7 @@ SET search_path TO user_service;
 
 -- ──────────────────────────────────────────────────────────
 -- users
--- auth_provider: email | kakao | apple  (소문자)
+-- auth_provider: EMAIL | KAKAO | APPLE  (JPA EnumType.STRING 저장값 기준)
 -- password_hash: BCrypt 60자, Kakao 단독 사용자는 NULL
 -- ──────────────────────────────────────────────────────────
 CREATE TABLE users (
@@ -17,7 +17,7 @@ CREATE TABLE users (
     nickname          VARCHAR(50)  NOT NULL,
     profile_image_url TEXT,
     password_hash     VARCHAR(60),
-    auth_provider     VARCHAR(16)  NOT NULL DEFAULT 'email',
+    auth_provider     VARCHAR(16)  NOT NULL DEFAULT 'EMAIL',
     is_email_verified BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()

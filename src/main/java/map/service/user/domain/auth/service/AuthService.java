@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.HexFormat;
 
 @Service
@@ -37,6 +37,7 @@ public class AuthService {
     private final UserDeviceRepository   userDeviceRepository;
     private final PasswordEncoder        passwordEncoder;
     private final JwtService             jwtService;
+    private final TokenRevokeService     tokenRevokeService;
 
     // ── 이메일 회원가입 ───────────────────────────────────────────────────────
 
@@ -94,16 +95,15 @@ public class AuthService {
 
     // ── Refresh Token 회전 ────────────────────────────────────────────────────
 
-    // noRollbackFor: 재사용 탐지 시 revokeAllByUserId가 롤백되지 않도록
-    @Transactional(noRollbackFor = CustomException.class)
+    @Transactional
     public AuthResponse refreshTokens(TokenRefreshRequest request) {
         String hash = sha256Hex(request.getRefreshToken());
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new CustomException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
 
         if (stored.isRevoked()) {
-            // 재사용 탐지: 해당 사용자의 모든 refresh token 폐기 후 예외
-            refreshTokenRepository.revokeAllByUserId(stored.getUser().getId(), LocalDateTime.now());
+            // 재사용 탐지: REQUIRES_NEW로 즉시 커밋 (메인 트랜잭션 롤백과 무관하게 폐기 보장)
+            tokenRevokeService.revokeAllForUser(stored.getUser().getId());
             throw new CustomException(ErrorCode.REFRESH_TOKEN_REVOKED);
         }
 
@@ -125,7 +125,7 @@ public class AuthService {
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .tokenHash(sha256Hex(rawRefresh))
-                .expiresAt(LocalDateTime.now().plusSeconds(jwtService.getRefreshTokenExpirySeconds()))
+                .expiresAt(OffsetDateTime.now().plusSeconds(jwtService.getRefreshTokenExpirySeconds()))
                 .build();
 
         refreshTokenRepository.save(refreshToken);

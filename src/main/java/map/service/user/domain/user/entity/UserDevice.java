@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Entity
 @Table(name = "user_devices")
@@ -32,7 +32,7 @@ public class UserDevice {
     private DeviceType deviceType;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Builder
     public UserDevice(User user, String deviceToken, DeviceType deviceType) {
@@ -43,6 +43,6 @@ public class UserDevice {
 
     @PrePersist
     private void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now();
     }
 }

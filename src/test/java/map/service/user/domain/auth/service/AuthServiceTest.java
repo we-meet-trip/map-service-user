@@ -24,7 +24,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +43,7 @@ class AuthServiceTest {
     @Mock private UserDeviceRepository   userDeviceRepository;
     @Mock private PasswordEncoder        passwordEncoder;
     @Mock private JwtService             jwtService;
+    @Mock private TokenRevokeService     tokenRevokeService;
 
     @InjectMocks
     private AuthService authService;
@@ -147,7 +148,7 @@ class AuthServiceTest {
         RefreshToken stored = RefreshToken.builder()
                 .user(testUser)
                 .tokenHash(hash)
-                .expiresAt(LocalDateTime.now().plusDays(7))
+                .expiresAt(OffsetDateTime.now().plusDays(7))
                 .build();
 
         when(refreshTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(stored));

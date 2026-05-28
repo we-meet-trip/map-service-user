@@ -71,6 +71,7 @@ public class AesEncryptionConverter implements AttributeConverter<String, String
 
         try {
             String[] parts = dbValue.split(DELIMITER, 2);
+            if (parts.length < 2) return dbValue;  // 암호화되지 않은 레거시 데이터 대응
             byte[] iv         = Base64.getDecoder().decode(parts[0]);
             byte[] ciphertext = Base64.getDecoder().decode(parts[1]);
 

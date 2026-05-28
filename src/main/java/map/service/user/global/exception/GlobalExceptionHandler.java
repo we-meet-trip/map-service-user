@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException e) {
         String message = e.getBindingResult().getFieldErrors().stream()
-                .map(FieldError::getDefaultMessage)
+                .map(error -> error.getDefaultMessage() != null ? error.getDefaultMessage() : "잘못된 입력값입니다.")
                 .collect(Collectors.joining(", "));
 
         return ResponseEntity.badRequest().body(

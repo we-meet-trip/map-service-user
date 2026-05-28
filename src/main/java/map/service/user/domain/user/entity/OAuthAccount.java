@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Entity
 @Table(name = "oauth_accounts")
@@ -35,17 +35,17 @@ public class OAuthAccount {
     private String scope;
 
     @Column(name = "connected_at")
-    private LocalDateTime connectedAt;
+    private OffsetDateTime connectedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     @Builder
     public OAuthAccount(User user, AuthProvider provider, Long providerUserId,
-                        String scope, LocalDateTime connectedAt) {
+                        String scope, OffsetDateTime connectedAt) {
         this.user = user;
         this.provider = provider;
         this.providerUserId = providerUserId;
@@ -55,12 +55,12 @@ public class OAuthAccount {
 
     @PrePersist
     private void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now();
+        this.updatedAt = OffsetDateTime.now();
     }
 
     @PreUpdate
     private void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt = OffsetDateTime.now();
     }
 }

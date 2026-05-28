@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Entity
 @Table(name = "refresh_tokens")
@@ -28,17 +28,17 @@ public class RefreshToken {
     private String tokenHash;
 
     @Column(name = "expires_at", nullable = false)
-    private LocalDateTime expiresAt;
+    private OffsetDateTime expiresAt;
 
     /** NULL = 유효, NOT NULL = 폐기 (폐기 시각 기록) */
     @Column(name = "revoked_at")
-    private LocalDateTime revokedAt;
+    private OffsetDateTime revokedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Builder
-    public RefreshToken(User user, String tokenHash, LocalDateTime expiresAt) {
+    public RefreshToken(User user, String tokenHash, OffsetDateTime expiresAt) {
         this.user = user;
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
@@ -46,11 +46,11 @@ public class RefreshToken {
 
     @PrePersist
     private void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now();
     }
 
     public void revoke() {
-        this.revokedAt = LocalDateTime.now();
+        this.revokedAt = OffsetDateTime.now();
     }
 
     public boolean isRevoked() {
@@ -58,6 +58,6 @@ public class RefreshToken {
     }
 
     public boolean isExpired() {
-        return LocalDateTime.now().isAfter(this.expiresAt);
+        return OffsetDateTime.now().isAfter(this.expiresAt);
     }
 }

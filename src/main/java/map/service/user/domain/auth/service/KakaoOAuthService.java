@@ -16,6 +16,7 @@ import map.service.user.domain.user.repository.UserRepository;
 import map.service.user.global.config.KakaoProperties;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +25,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 
@@ -41,19 +41,6 @@ public class KakaoOAuthService {
     private final AuthService            authService;
     private final RestClient             kakaoRestClient;
 
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    /**
-     * 카카오 인가 코드를 받아 로그인 처리 후 JWT 반환.
-     *
-     * 흐름:
-     *   1. 인가 코드 → 카카오 access token 교환
-     *   2. 카카오 사용자 정보 조회
-     *   3. oauth_accounts에서 기존 사용자 조회
-     *      - 있으면: 기존 연동 정보 사용 후 JWT 발급
-     *      - 없으면: 이메일로 기존 users 조회 → 연동 또는 신규 생성
-     *   4. 디바이스 등록 (선택)
-     */
     @Transactional
     public AuthResponse processLogin(KakaoLoginRequest request) {
         KakaoTokenResponse kakaoToken = exchangeCodeForToken(request.getCode());
@@ -83,7 +70,15 @@ public class KakaoOAuthService {
                     .connectedAt(parseConnectedAt(userInfo.getConnectedAt()))
                     .build();
 
-            oauthAccountRepository.save(newOAuth);
+            try {
+                oauthAccountRepository.save(newOAuth);
+            } catch (DataIntegrityViolationException e) {
+                // 동시 로그인 레이스 컨디션 — 이미 저장된 계정 재조회
+                user = oauthAccountRepository
+                        .findByProviderAndProviderUserId(AuthProvider.KAKAO, userInfo.getId())
+                        .map(OAuthAccount::getUser)
+                        .orElseThrow(() -> new CustomException(ErrorCode.INTERNAL_SERVER_ERROR));
+            }
         }
 
         if (request.getDeviceToken() != null && request.getDeviceType() != null
@@ -97,8 +92,6 @@ public class KakaoOAuthService {
 
         return authService.buildAuthResponse(user);
     }
-
-    // ── Private ───────────────────────────────────────────────────────────────
 
     private KakaoTokenResponse exchangeCodeForToken(String code) {
         try {
@@ -153,7 +146,13 @@ public class KakaoOAuthService {
                 .emailVerified(email != null)
                 .build();
 
-        return userRepository.save(newUser);
+        try {
+            return userRepository.save(newUser);
+        } catch (DataIntegrityViolationException e) {
+            // 동시 회원가입 레이스 컨디션 — 이미 저장된 사용자 재조회
+            return userRepository.findByEmail(email)
+                    .orElseThrow(() -> new CustomException(ErrorCode.INTERNAL_SERVER_ERROR));
+        }
     }
 
     private String resolveNickname(KakaoUserInfoResponse userInfo) {
@@ -163,10 +162,10 @@ public class KakaoOAuthService {
         return "kakao_" + idStr.substring(0, Math.min(8, idStr.length()));
     }
 
-    private LocalDateTime parseConnectedAt(String connectedAt) {
+    private OffsetDateTime parseConnectedAt(String connectedAt) {
         if (connectedAt == null) return null;
         try {
-            return OffsetDateTime.parse(connectedAt).toLocalDateTime();
+            return OffsetDateTime.parse(connectedAt);
         } catch (Exception e) {
             return null;
         }
