@@ -111,10 +111,13 @@ Client                          Server
 
 ```
 revoked_at IS NOT NULL 확인
-→ 해당 user의 모든 refresh_tokens SET revoked_at = now()
+→ TokenRevokeService (REQUIRES_NEW 별도 트랜잭션)
+  해당 user의 모든 refresh_tokens SET revoked_at = now() — 즉시 커밋, 롤백 없음
 → 401 REFRESH_TOKEN_REVOKED
 → 클라이언트: 재로그인 필요
 ```
+
+> 폐기 트랜잭션을 별도 `REQUIRES_NEW`로 분리하여 메인 트랜잭션 롤백 여부와 무관하게 폐기가 항상 커밋됨.
 
 ---
 
