@@ -18,6 +18,14 @@ Thumbs.db
 **/application-local.yaml
 **/application-local.yml
 
+# === Python (방어적) ===
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 HELP.md
 .gradle
 build/

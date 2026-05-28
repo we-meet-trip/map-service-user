@@ -36,6 +36,7 @@ dependencies {
     // Web + Security + Validation
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
     // JPA + PostgreSQL
@@ -92,4 +93,8 @@ tasks.register('copyDocs', Copy) {
     dependsOn asciidoctor
     from "${layout.buildDirectory.get()}/docs/asciidoc/"
     into 'docs/api'
+}
+
+jar {
+    enabled = false
 }
