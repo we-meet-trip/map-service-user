@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: service-user
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:map}?currentSchema=user_service
+    username: ${POSTGRES_USER:map}
+    password: ${POSTGRES_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.default_schema: user_service
+  flyway:
+    enabled: true
+    schemas: user_service
+    default-schema: user_service
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-ttl: ${JWT_ACCESS_TTL:3600}
+  refresh-ttl: ${JWT_REFRESH_TTL:2592000}

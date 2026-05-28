@@ -1,12 +1,17 @@
-# map-service-user — Docker 빌드 스켈레톤
-#
-# 본 파일은 의도적으로 비어 있다. 실제 코드 작성 단계에서 아래 항목을 채운다.
-#
-# 작성 예정:
-#   1. builder 스테이지   — gradle:8.x-jdk21, gradle bootJar (테스트 스킵 옵션 검토)
-#   2. runtime 스테이지   — eclipse-temurin:21-jre 슬림
-#   3. 비-root 사용자     — groupadd/useradd app
-#   4. COPY --from=builder /workspace/build/libs/*.jar /app/app.jar
-#   5. EXPOSE 8080
-#   6. HEALTHCHECK        — curl /actuator/health
-#   7. ENTRYPOINT         — java -jar /app/app.jar
+# syntax=docker/dockerfile:1.7
+# map-service-user — Spring Boot 3.4.2 + JDK 17 BFF (E1)
+
+FROM gradle:8.10-jdk17 AS builder
+WORKDIR /workspace
+COPY --chown=gradle:gradle . .
+RUN gradle clean bootJar -x test --no-daemon
+
+FROM eclipse-temurin:17-jre AS runtime
+RUN groupadd -r app && useradd -r -g app -u 10001 app
+WORKDIR /app
+COPY --from=builder /workspace/build/libs/*.jar /app/app.jar
+USER app
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD wget -qO- http://localhost:8080/actuator/health | grep -q '"status":"UP"' || exit 1
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
