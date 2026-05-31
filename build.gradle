@@ -15,7 +15,7 @@ if (System.getProperty('os.name').toLowerCase().contains('windows')) {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
