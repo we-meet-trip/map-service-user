@@ -1,0 +1,13 @@
+# 운영 환경
+# 시스템 환경변수: SPRING_PROFILES_ACTIVE=prod
+
+spring:
+  jpa:
+    show-sql: false
+
+cors:
+  # 운영 도메인 확정 후 실제 값으로 교체. 복수 도메인은 쉼표 없이 YAML 리스트로:
+  # allowed-origins:
+  #   - https://map.example.com
+  #   - https://www.map.example.com
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:https://map.example.com}

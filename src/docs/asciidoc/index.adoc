@@ -1,0 +1,102 @@
+= MAP 서비스 — 사용자/인증 API
+:doctype: book
+:icons: font
+:source-highlighter: highlightjs
+:toc: left
+:toclevels: 2
+:sectlinks:
+:snippets: {snippets}
+
+MAP 여행 서비스의 사용자/인증 도메인 API 문서입니다. +
+모든 API는 `/api/v1/auth` 경로 아래에 위치합니다.
+
+== 공통
+
+=== 인증 방식
+모든 인증이 필요한 요청에는 `Authorization: Bearer {accessToken}` 헤더를 포함합니다.
+
+=== 에러 응답 형식
+[source,json]
+----
+{
+  "code": "AUTH_001",
+  "message": "이미 사용 중인 이메일입니다."
+}
+----
+
+---
+
+== 이메일 회원가입
+
+`POST /api/v1/auth/signup`
+
+=== 요청
+include::{snippets}/auth/signup/http-request.adoc[]
+include::{snippets}/auth/signup/request-fields.adoc[]
+
+=== 응답
+include::{snippets}/auth/signup/http-response.adoc[]
+include::{snippets}/auth/signup/response-fields.adoc[]
+
+---
+
+== 이메일 로그인
+
+`POST /api/v1/auth/login`
+
+=== 요청
+include::{snippets}/auth/login/http-request.adoc[]
+include::{snippets}/auth/login/request-fields.adoc[]
+
+=== 응답
+include::{snippets}/auth/login/http-response.adoc[]
+include::{snippets}/auth/login/response-fields.adoc[]
+
+---
+
+== 카카오 로그인 (인가 코드 방식)
+
+`POST /api/v1/auth/kakao/callback`
+
+Flutter SDK가 발급한 카카오 인가 코드를 서버로 전달하면, 서버가 카카오 API와 교환하여 JWT를 발급합니다. +
+신규 사용자는 자동 가입되며, 이메일 동의 거부 시 `user.email` 은 null 입니다.
+
+=== 요청
+include::{snippets}/auth/kakao-callback/http-request.adoc[]
+include::{snippets}/auth/kakao-callback/request-fields.adoc[]
+
+=== 응답
+include::{snippets}/auth/kakao-callback/http-response.adoc[]
+include::{snippets}/auth/kakao-callback/response-fields.adoc[]
+
+---
+
+== 로그아웃
+
+`POST /api/v1/auth/logout`
+
+Access Token을 Redis blacklist에 등록하여 즉시 무효화합니다.
+
+=== 요청
+include::{snippets}/auth/logout/http-request.adoc[]
+include::{snippets}/auth/logout/request-headers.adoc[]
+
+=== 응답
+include::{snippets}/auth/logout/http-response.adoc[]
+
+---
+
+== 토큰 재발급 (Refresh Token Rotation)
+
+`POST /api/v1/auth/token/refresh`
+
+Refresh Token을 검증하고 새 Access Token + Refresh Token을 발급합니다. +
+**재사용이 탐지되면 해당 계정의 모든 토큰이 즉시 무효화됩니다.**
+
+=== 요청
+include::{snippets}/auth/token-refresh/http-request.adoc[]
+include::{snippets}/auth/token-refresh/request-fields.adoc[]
+
+=== 응답
+include::{snippets}/auth/token-refresh/http-response.adoc[]
+include::{snippets}/auth/token-refresh/response-fields.adoc[]

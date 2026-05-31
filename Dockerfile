@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# map-service-user — Spring Boot 3.4.2 + JDK 17 BFF (E1)
+# map-service-user — Spring Boot 3.4.2 + JDK 17 BFF
 
-FROM gradle:8.10-jdk17 AS builder
+FROM gradle:8.12-jdk17 AS builder
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
 RUN gradle clean bootJar -x test --no-daemon

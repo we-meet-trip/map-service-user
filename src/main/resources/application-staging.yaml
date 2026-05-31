@@ -1,0 +1,6 @@
+# 시연 서버 환경
+# 시스템 환경변수: SPRING_PROFILES_ACTIVE=staging
+
+spring:
+  jpa:
+    show-sql: false
