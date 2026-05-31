@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# map-service-user — Spring Boot 3.4.2 + JDK 17 BFF (E1)
+# map-service-user — Spring Boot 3.4.2 + JDK 21 BFF
 
-FROM gradle:8.10-jdk17 AS builder
+FROM gradle:8.12-jdk21 AS builder
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
 RUN gradle clean bootJar -x test --no-daemon
 
-FROM eclipse-temurin:17-jre AS runtime
+FROM eclipse-temurin:21-jre AS runtime
 RUN groupadd -r app && useradd -r -g app -u 10001 app
 WORKDIR /app
 COPY --from=builder /workspace/build/libs/*.jar /app/app.jar
