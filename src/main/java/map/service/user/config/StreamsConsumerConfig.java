@@ -2,6 +2,7 @@ package map.service.user.config;
 
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
+import java.util.Map;
 import map.service.user.recommend.RecommendJobsConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.stream.StreamMessageListenerContainer;
 
@@ -85,6 +87,11 @@ public class StreamsConsumerConfig {
     /**
      * 컨슈머 그룹을 보장한다 (없으면 생성, 이미 있으면 무시).
      *
+     * - Stream 키가 아직 없으면(agent 가 첫 XADD 하기 전 BFF 가 먼저 기동한 경우)
+     *   XGROUP CREATE 가 "key must exist"(MKSTREAM 안내) 오류로 실패하고 그룹이
+     *   만들어지지 않는다. 이를 막기 위해 키 존재를 먼저 확인하고, 없으면 더미
+     *   레코드를 추가해 빈 Stream 을 만든 뒤 그룹을 생성한다. 더미는 job_id/payload
+     *   가 없어 RecommendJobsConsumer.onMessage 가 ack 후 폐기하므로 안전하다.
      * - XGROUP CREATE 를 ReadOffset.from("0") 으로 호출하여 처음부터 읽도록 그룹을 만든다.
      * - 이미 그룹이 존재하면 BUSYGROUP 예외가 발생하며, 이 경우 정보 로그만 남기고 무시한다.
      * - 그 외 예외는 경고 로그를 남기고 계속 진행한다 (애플리케이션 기동을 막지 않는다).
@@ -93,17 +100,46 @@ public class StreamsConsumerConfig {
     public void ensureGroup() {
         StringRedisTemplate t = new StringRedisTemplate(factory);
         try {
+            if (Boolean.FALSE.equals(t.hasKey(stream))) {
+                MapRecord<String, String, String> init = StreamRecords
+                        .mapBacked(Map.of("_init", "1"))
+                        .withStreamKey(stream);
+                t.opsForStream().add(init);
+                log.info("stream initialized with placeholder stream={}", stream);
+            }
             t.opsForStream().createGroup(stream, ReadOffset.from("0"), group);
             log.info("stream group created stream={} group={}", stream, group);
         } catch (RuntimeException e) {
-            String message = e.getMessage();
-            if (message != null && message.contains("BUSYGROUP")) {
+            // Lettuce 는 Redis 오류를 래핑하여 getMessage() 가 "Error in execution"
+            // 처럼 모호할 수 있으므로, 원인 체인 전체를 훑어 BUSYGROUP(그룹 기존재)을
+            // 판정한다. 기존재는 정상으로 간주하고 정보 로그만 남긴다.
+            if (causeChainContains(e, "BUSYGROUP")) {
                 log.info("stream group already exists stream={} group={}", stream, group);
             } else {
                 log.warn("createGroup failed stream={} group={} reason={}",
-                        stream, group, message);
+                        stream, group, rootCauseMessage(e));
             }
         }
+    }
+
+    /** 예외 원인 체인에 needle 을 포함하는 메시지가 있으면 true. */
+    private static boolean causeChainContains(Throwable e, String needle) {
+        for (Throwable c = e; c != null; c = c.getCause()) {
+            String m = c.getMessage();
+            if (m != null && m.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 예외 원인 체인 최하위(가장 구체적인 Redis 오류) 메시지를 반환한다. */
+    private static String rootCauseMessage(Throwable e) {
+        Throwable c = e;
+        while (c.getCause() != null) {
+            c = c.getCause();
+        }
+        return c.getMessage();
     }
 
     /**

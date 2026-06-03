@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.UUID;
 import map.service.user.recommend.DraftStore;
 import org.springframework.stereotype.Service;
@@ -67,7 +68,8 @@ public class ScheduleService {
         LocalDate start = request.dateStart();
         LocalDate end = request.dateEnd();
         if (start == null) {
-            start = LocalDate.now();
+            // 서버 JVM 기본 TZ(예: UTC)에 의존하지 않도록 KST 로 오늘 날짜를 구한다.
+            start = LocalDate.now(ZoneId.of("Asia/Seoul"));
         }
         if (end == null) {
             end = start;
