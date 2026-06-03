@@ -1,9 +1,21 @@
+# =============================================================================
+# qodana.yaml — Qodana 정적 분석 설정
+#
+# 책임:
+# - Qodana 가 본 프로젝트를 분석할 때 사용할 검사 프로필 / JDK / 린터 지정.
+# - include / exclude / failureConditions / bootstrap / plugins 는 모두 옵션이며,
+#   필요 시 주석 해제하여 정책을 강화한다.
+# =============================================================================
+
 #-------------------------------------------------------------------------------#
 #               Qodana analysis is configured by qodana.yaml file               #
 #             https://www.jetbrains.com/help/qodana/qodana-yaml.html            #
 #-------------------------------------------------------------------------------#
+# version : qodana.yaml 자체의 스키마 버전
 version: "1.0"
 
+# profile : 코드 분석에 사용할 검사 프로필 이름.
+#           qodana.starter 는 기본 시작 프로필이다.
 #Specify inspection profile for code analysis
 profile:
   name: qodana.starter
@@ -18,6 +30,7 @@ profile:
 #    paths:
 #      - <path/where/not/run/inspection>
 
+# projectJDK : CI/CD 파이프라인에서 Qodana 가 사용할 JDK 메이저 버전.
 projectJDK: "17" #(Applied in CI/CD pipeline)
 
 #Execute shell command before Qodana execution (Applied in CI/CD pipeline)
@@ -41,4 +54,5 @@ projectJDK: "17" #(Applied in CI/CD pipeline)
   
 #Qodana supports other languages, for example, Python, JavaScript, TypeScript, Go, C#, PHP
 #For all supported languages see https://www.jetbrains.com/help/qodana/linters.html
+# linter : 실제 분석을 수행할 Qodana 컨테이너 린터 이미지.
 linter: jetbrains/qodana-jvm-community:2025.2
