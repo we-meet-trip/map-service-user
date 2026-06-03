@@ -38,6 +38,8 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     /** 클라이언트에 노출하는 upstream 본문 최대 길이(문자 수). */
     private static final int CLIENT_BODY_MAX = 100;
+    /** 서버 로그에 남기는 upstream 본문 최대 길이(문자 수). 과대 응답 로그 폭주 방지. */
+    private static final int LOG_BODY_MAX = 1000;
 
     /**
      * agent 가 비정상 응답을 반환했을 때 호출된다.
@@ -53,7 +55,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleAgentRequest(
             AgentRequestException ex
     ) {
-        log.warn("agent upstream error status={} body={}", ex.statusCode(), ex.body());
+        log.warn("agent upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "agent upstream error");
         body.put("upstream_status", ex.statusCode());
@@ -64,9 +67,9 @@ public class GlobalExceptionHandler {
     /**
      * agent 에 접근하지 못하거나 응답이 타임아웃된 경우 호출된다.
      *
-     * - 예외 메시지를 WARN 로그로 남긴다.
-     * - 클라이언트에는 504 Gateway Timeout 응답을 반환한다.
-     * - detail 은 예외 메시지를 그대로 노출하되, null 이면 "timeout" 으로 대체한다.
+     * - 예외 메시지(내부 호스트/URL 포함 가능)는 WARN 로그에만 남긴다.
+     * - 클라이언트에는 504 Gateway Timeout + 고정 detail("upstream request
+     *   timed out") 만 반환한다(인프라 정보 누출 차단).
      *
      * @param ex  RestClient 가 던진 ResourceAccessException
      * @return    504 응답 ResponseEntity
@@ -75,10 +78,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleTimeout(
             ResourceAccessException ex
     ) {
+        // 원인 메시지(예: "I/O error on POST request for http://agent:8000...")는
+        // 내부 호스트/URL 을 노출하므로 서버 로그에만 남기고, 클라이언트에는
+        // 고정 문구만 반환한다(정보 누출 차단).
         log.warn("agent unreachable: {}", ex.getMessage());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "agent unreachable");
-        body.put("detail", ex.getMessage() != null ? ex.getMessage() : "timeout");
+        body.put("detail", "upstream request timed out");
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(body);
     }
 }

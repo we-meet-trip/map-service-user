@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -42,6 +43,7 @@ import org.springframework.data.redis.stream.StreamMessageListenerContainer;
  * - 명시적 ACK 는 본 설정이 아닌 RecommendJobsConsumer 의 책임이다.
  */
 @Configuration
+@EnableScheduling
 public class StreamsConsumerConfig {
 
     private static final Logger log = LoggerFactory.getLogger(StreamsConsumerConfig.class);

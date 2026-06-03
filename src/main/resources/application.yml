@@ -90,15 +90,21 @@ agent:
 # - recommend-group      : 컨슈머 그룹명
 # - recommend-consumer   : 컨슈머명 (예: user-1, user-2 형태)
 # - recommend-dlq-stream : 재시도 초과 메시지를 적재하는 DLQ Stream 키
-# - recommend-max-retry  : 최대 재시도 횟수
-# - dlq-maxlen           : DLQ Stream 의 보존 길이 (XADD MAXLEN ~ N)
+# - recommend-max-retry  : 최대 재시도 횟수 (Redis delivery count 기준)
+# - recommend-dlq-maxlen : DLQ Stream 의 보존 길이 (XADD MAXLEN ~ N)
+# - recommend-min-idle-ms        : reclaim 대상 최소 idle(ms)
+# - recommend-reclaim-interval-ms: PEL reclaim 스케줄 주기(ms)
+# - recommend-reclaim-batch      : reclaim 라운드당 XPENDING 조회 건수
 streams:
   recommend-stream: ${STREAM_NAME:agent:jobs:done}
   recommend-group: ${STREAM_GROUP:bff-result}
   recommend-consumer: ${STREAM_CONSUMER:user-1}
   recommend-dlq-stream: ${STREAM_DLQ:agent:jobs:done:dlq}
   recommend-max-retry: ${STREAM_MAX_RETRY:3}
-  dlq-maxlen: ${STREAM_MAXLEN:2000}
+  recommend-dlq-maxlen: ${STREAM_MAXLEN:2000}
+  recommend-min-idle-ms: ${STREAM_MIN_IDLE_MS:60000}
+  recommend-reclaim-interval-ms: ${STREAM_RECLAIM_INTERVAL_MS:30000}
+  recommend-reclaim-batch: ${STREAM_RECLAIM_BATCH:64}
 
 # ---- redis : 용도별 Redis 논리 DB 번호 매핑 ----
 # RedisConfig 가 본 섹션을 참조하여 용도별 ConnectionFactory 의 DB 번호를 결정한다.

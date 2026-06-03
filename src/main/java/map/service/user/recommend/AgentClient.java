@@ -23,6 +23,9 @@ public class AgentClient {
 
     private final RestClient client;
 
+    /** 오류 응답 본문을 메모리에 읽을 최대 바이트(과대 응답 OOM 방지). */
+    private static final int ERROR_BODY_MAX = 4096;
+
     public AgentClient(@Qualifier("agentRestClient") RestClient client) {
         this.client = client;
     }
@@ -56,6 +59,8 @@ public class AgentClient {
      * 응답 본문 InputStream 을 UTF-8 문자열로 안전하게 변환.
      *
      * stream 이 null 이거나 IOException 이 발생하면 빈 문자열을 반환한다.
+     * 오류 본문은 진단 요약 용도이므로 ERROR_BODY_MAX(4KB)까지만 읽어
+     * 비정상적으로 큰 응답이 메모리에 무제한 버퍼링되는 것을 막는다.
      * try-with-resources 로 스트림을 닫는다.
      *
      * stream: 응답 본문 입력 스트림. null 가능.
@@ -65,7 +70,8 @@ public class AgentClient {
             return "";
         }
         try (stream) {
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            return new String(
+                    stream.readNBytes(ERROR_BODY_MAX), StandardCharsets.UTF_8);
         } catch (java.io.IOException e) {
             return "";
         }

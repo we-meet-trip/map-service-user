@@ -2,6 +2,9 @@ package map.service.user.config;
 
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
+import io.lettuce.core.resource.ClientResources;
+import io.lettuce.core.resource.DefaultClientResources;
+import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -45,6 +48,12 @@ public class RedisConfig {
     private final String host;
     /** Redis 포트. spring.data.redis.port 프로퍼티에서 주입. */
     private final int port;
+    /**
+     * 3개 ConnectionFactory 가 공유하는 Lettuce 리소스(Netty 이벤트 루프·스레드풀).
+     * 팩토리마다 암묵적으로 별도 생성하면 스레드풀이 3벌로 늘어나므로 단일
+     * 인스턴스를 공유하고, 소유자인 본 설정이 @PreDestroy 에서 종료한다.
+     */
+    private final ClientResources clientResources = DefaultClientResources.create();
 
     /**
      * 공용 host / port 를 프로퍼티에서 받아 보관한다.
@@ -73,6 +82,7 @@ public class RedisConfig {
         RedisStandaloneConfiguration standalone = new RedisStandaloneConfiguration(host, port);
         standalone.setDatabase(database);
         LettuceClientConfiguration client = LettuceClientConfiguration.builder()
+                .clientResources(clientResources)
                 .commandTimeout(Duration.ofSeconds(3))
                 .clientOptions(ClientOptions.builder()
                         .socketOptions(SocketOptions.builder()
@@ -160,5 +170,17 @@ public class RedisConfig {
             RedisConnectionFactory factory
     ) {
         return new StringRedisTemplate(factory);
+    }
+
+    /**
+     * 컨텍스트 종료 시 공유 ClientResources 를 정리한다.
+     *
+     * ConnectionFactory 는 외부에서 주입한 ClientResources 를 스스로 종료하지
+     * 않으므로(소유권 비보유), 생성한 본 설정이 책임진다. Spring 은 빈을 역순으로
+     * 소멸시키므로 3개 팩토리(destroy)가 먼저 정리된 뒤 본 메서드가 실행된다.
+     */
+    @PreDestroy
+    public void shutdownClientResources() {
+        clientResources.shutdown();
     }
 }

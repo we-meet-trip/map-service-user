@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -28,7 +29,8 @@ import org.hibernate.type.SqlTypes;
  * - dateStart: 시작일. NOT NULL.
  * - dateEnd: 종료일. NOT NULL.
  * - payload: draft JSON 스냅샷. JSONB 컬럼 + @JdbcTypeCode(SqlTypes.JSON). NOT NULL.
- * - createdAt: DB 측 기본값. insertable/updatable=false 로 읽기 전용.
+ * - createdAt: 생성 시각. @CreationTimestamp 로 영속 시 채워져 save 직후에도
+ *   조회 가능(updatable=false). DB DEFAULT now() 와도 정합.
  */
 @Entity
 @Table(name = "schedules", schema = "user_service")
@@ -58,7 +60,8 @@ public class ScheduleEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode payload;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
     /**
@@ -74,7 +77,7 @@ public class ScheduleEntity {
      * createdAt 역시 DB 기본값이라 인자에 없다.
      *
      * userId: 소유자 식별자(미지정 시 null).
-     * jobId: 원본 추천 작업 UUID(파싱 실패 시 null).
+     * jobId: 원본 추천 작업 UUID(@Pattern 검증을 거친 값).
      * title: 일정 제목.
      * dateStart: 시작일.
      * dateEnd: 종료일.
@@ -104,7 +107,7 @@ public class ScheduleEntity {
     }
 
     /**
-     * jobId UUID 반환. 파싱 실패로 저장된 경우 null.
+     * jobId UUID 반환(@Pattern 검증된 값).
      */
     public UUID getJobId() {
         return jobId;
@@ -132,7 +135,7 @@ public class ScheduleEntity {
     }
 
     /**
-     * 생성 시각 반환. DB 가 채운 값을 읽기 전용으로 노출.
+     * 생성 시각 반환. @CreationTimestamp 로 채워진 값(save 직후에도 non-null).
      */
     public OffsetDateTime getCreatedAt() {
         return createdAt;

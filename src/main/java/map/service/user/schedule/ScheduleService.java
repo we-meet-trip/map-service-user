@@ -43,7 +43,8 @@ public class ScheduleService {
      * 1) DraftStore.find(jobId) 로 draft JSON 조회. 없으면 ScheduleNotFoundException.
      * 2) ObjectMapper.readTree 로 JsonNode 파싱. 실패 시 IllegalStateException.
      * 3) dateStart/dateEnd 가 null 이면 dateStart 는 오늘, dateEnd 는 dateStart 로 보정.
-     * 4) jobId 를 UUID 로 파싱. 실패 시 null 로 두어 jobId 매핑을 건너뛴다.
+     *    보정 후 dateStart 가 dateEnd 보다 뒤이면 InvalidScheduleDateException(400).
+     * 4) jobId 를 UUID 로 파싱(컨트롤러 @Valid 의 @Pattern 으로 형식 보장).
      * 5) ScheduleEntity 생성 후 repository.save.
      * 6) DraftStore.delete 로 draft 폐기.
      * 7) 저장된 scheduleId 반환.
@@ -71,13 +72,14 @@ public class ScheduleService {
         if (end == null) {
             end = start;
         }
-
-        UUID jobUuid;
-        try {
-            jobUuid = UUID.fromString(request.jobId());
-        } catch (IllegalArgumentException e) {
-            jobUuid = null;
+        if (start.isAfter(end)) {
+            throw new InvalidScheduleDateException(
+                    "date_start must be on or before date_end");
         }
+
+        // jobId 는 @Pattern(UUID) 로 검증되어 진입하므로 그대로 파싱한다.
+        // (형식 오류는 컨트롤러 @Valid 단계에서 400 으로 거부된다.)
+        UUID jobUuid = UUID.fromString(request.jobId());
 
         ScheduleEntity entity = new ScheduleEntity(
                 null,
