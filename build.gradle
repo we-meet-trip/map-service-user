@@ -1,28 +1,58 @@
+// =============================================================================
+// build.gradle — user-BFF (service-user) Gradle 빌드 스크립트
+//
+// 책임:
+// - Java 툴체인 / 부트 플러그인 / 의존성 / 테스트 / 아티팩트 설정.
+//
+// 산출물:
+// - bootJar 만 활성화. plain jar 는 비활성 (jar.enabled=false).
+//   Dockerfile 의 builder 스테이지가 `gradle clean bootJar -x test` 로 빌드한다.
+// =============================================================================
+
+// ---- plugins : 적용 플러그인 ----
+// - java                            : 자바 컴파일/테스트 표준 플러그인
+// - org.springframework.boot        : 부트 애플리케이션 빌드/실행/패키징
+// - io.spring.dependency-management : 부트 BOM 기반 의존성 버전 관리
 plugins {
     id 'java'
     id 'org.springframework.boot' version '3.4.2'
     id 'io.spring.dependency-management' version '1.1.7'
 }
 
+// ---- 좌표 ----
+// group / version 은 Maven 좌표 형식의 식별자.
 group = 'map'
 version = '0.0.1-SNAPSHOT'
 
+// ---- java 툴체인 ----
+// 컴파일 / 실행 시 사용할 JDK 언어 레벨을 고정한다.
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
+// ---- 의존성 저장소 ----
 repositories {
     mavenCentral()
 }
 
+// ---- dependencies ----
+// implementation       : 런타임 + 컴파일에 모두 필요한 일반 의존성
+// runtimeOnly          : 런타임에만 필요 (예: JDBC 드라이버)
+// compileOnly          : 컴파일에만 필요 (예: Lombok 어노테이션)
+// annotationProcessor  : 컴파일 시 어노테이션 프로세서
+// testImplementation   : 테스트 클래스패스 전용
+// testCompileOnly      : 테스트 컴파일 전용
+// testAnnotationProcessor : 테스트용 어노테이션 프로세서
+// testRuntimeOnly      : 테스트 런타임 전용 (JUnit 플랫폼 런처 등)
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
@@ -34,10 +64,13 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// ---- test : JUnit Platform 사용 ----
 tasks.named('test') {
     useJUnitPlatform()
 }
 
+// ---- jar : plain jar 비활성화 ----
+// 부트 플러그인이 생성하는 bootJar 만 배포에 사용한다.
 jar {
     enabled = false
 }
