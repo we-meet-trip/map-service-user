@@ -3,10 +3,13 @@ package map.service.user.common;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import map.service.user.recommend.AgentRequestException;
+import map.service.user.trip.TripGenerationException;
+import map.service.user.trip.TripTimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
@@ -86,5 +89,84 @@ public class GlobalExceptionHandler {
         body.put("error", "agent unreachable");
         body.put("detail", "upstream request timed out");
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(body);
+    }
+
+    /**
+     * trip 추천 잡이 실패(status=failed)했거나 결과가 비정상일 때 호출된다.
+     *
+     * client(TripApiException)는 {error, message} 만 읽으므로 두 키를 채워 502 로 반환한다.
+     *
+     * @param ex  TripService 가 던진 추천 실패 예외
+     * @return    502 응답 ResponseEntity
+     */
+    @ExceptionHandler(TripGenerationException.class)
+    public ResponseEntity<Map<String, Object>> handleTripGeneration(
+            TripGenerationException ex
+    ) {
+        log.warn("trip generation failed: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "trip_generation_failed");
+        body.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * trip 동기 facade 가 폴링 한도 내에 추천 결과를 받지 못했을 때 호출된다.
+     *
+     * 내부 식별자(job_id)는 로그에만 남기고, client 에는 고정 안내 문구만 반환한다.
+     *
+     * @param ex  TripService 가 던진 타임아웃 예외
+     * @return    504 응답 ResponseEntity
+     */
+    @ExceptionHandler(TripTimeoutException.class)
+    public ResponseEntity<Map<String, Object>> handleTripTimeout(
+            TripTimeoutException ex
+    ) {
+        log.warn("trip generation timeout: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "trip_generation_timeout");
+        body.put("message", "추천 생성이 시간 내에 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(body);
+    }
+
+    /**
+     * @Valid 본문 검증 실패 시 호출된다(필드 누락/형식 위반).
+     *
+     * 첫 번째 필드 오류를 message 로 노출하여 client 가 사용자에게 보여줄 수 있게 한다.
+     *
+     * @param ex  검증 예외
+     * @return    400 응답 ResponseEntity
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidation(
+            MethodArgumentNotValidException ex
+    ) {
+        org.springframework.validation.FieldError fieldError =
+                ex.getBindingResult().getFieldError();
+        String detail = fieldError != null
+                ? fieldError.getField() + " " + fieldError.getDefaultMessage()
+                : "요청 형식이 올바르지 않습니다.";
+        log.warn("trip request invalid: {}", detail);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "invalid_request");
+        body.put("message", detail);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /**
+     * 매핑 불가 입력(예: 지원하지 않는 transport) 시 호출된다.
+     *
+     * @param ex  IllegalArgumentException(TripMapping 등)
+     * @return    400 응답 ResponseEntity
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(
+            IllegalArgumentException ex
+    ) {
+        log.warn("trip request rejected: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "invalid_request");
+        body.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 }

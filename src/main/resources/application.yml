@@ -84,6 +84,23 @@ agent:
   base-url: ${AGENT_BASE_URL:http://agent:8000}
   timeout-seconds: ${AGENT_TIMEOUT_SECONDS:60}
 
+# ---- hub : hub 게이트웨이 호출 설정 (경계 B3) ----
+# HubClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
+# trip 응답의 weather_forecast 를 채우기 위해 HubWeatherClient 가 /v1/weather 를 호출한다.
+# - base-url        : hub 서비스 base URL (도커: http://hub:8000, 로컬 BFF: http://localhost:8001)
+# - timeout-seconds : RestClient 의 readTimeout (초)
+hub:
+  base-url: ${HUB_BASE_URL:http://hub:8000}
+  timeout-seconds: ${HUB_TIMEOUT_SECONDS:5}
+
+# ---- trip : 동기 trip 생성 facade 설정 ----
+# TripService 가 본 섹션을 참조한다.
+# - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초). agent JOB_TIMEOUT 과 정합.
+# - poll-interval-ms     : draft 폴링 간격(ms).
+trip:
+  poll-timeout-seconds: ${TRIP_POLL_TIMEOUT_SECONDS:120}
+  poll-interval-ms: ${TRIP_POLL_INTERVAL_MS:700}
+
 # ---- streams : Redis Streams 컨슈머 설정 ----
 # StreamsConsumerConfig / RecommendJobsConsumer 가 본 섹션을 참조한다.
 # - recommend-stream     : 소비할 Stream 키
