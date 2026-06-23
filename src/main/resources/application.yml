@@ -1,0 +1,166 @@
+# =============================================================================
+# application.yml — user-BFF 서비스 환경설정
+#
+# 본 파일은 user-BFF (service-user) 의 모든 런타임 설정을 모은다.
+# 각 섹션이 어떤 빈/컴포넌트에서 참조되는지 함께 표기한다.
+#
+# 섹션 개요:
+# - spring.application : 서비스 식별자
+# - spring.datasource  : PostgreSQL 연결 (user_service 스키마 사용)
+# - spring.jpa         : Hibernate ddl-auto=validate (스키마 변경 금지)
+# - spring.flyway      : V001 / V002 마이그레이션 자동 실행 (user_service 스키마)
+# - spring.data.redis  : 기본 연결 (DB0). repositories.enabled=false 로
+#                        Spring Data Redis Repository 자동 활성화 비활성
+# - spring.jackson     : LocalDate / LocalTime 등 시간 직렬화 정책, 미정의 필드 허용
+# - agent              : agent 서비스 호출 설정 (AgentClientConfig 참조)
+# - streams            : Redis Streams 컨슈머 그룹 설정 (StreamsConsumerConfig 참조)
+# - redis.db-*         : 멀티 DB 번호 매핑 (RedisConfig 가 참조)
+# - server             : 서비스 포트
+# - management         : Actuator 노출 엔드포인트
+# - jwt                : JWT 발급/검증용 secret 및 TTL
+#
+# 참고:
+# - ServiceUserApplication 에서 RedisRepositoriesAutoConfiguration 을 제외하므로
+#   data.redis.repositories.enabled=false 와 함께 Redis Repository 자동 활성화를
+#   두 단계로 차단한다.
+# =============================================================================
+
+# ---- spring.application : 서비스 이름 (액추에이터/로그 등에서 표시) ----
+spring:
+  application:
+    name: service-user
+  # ---- spring.datasource : PostgreSQL JDBC 연결 ----
+  # currentSchema=user_service 로 본 BFF 전용 스키마를 지정한다.
+  # 호스트/포트/DB/계정/비밀번호는 모두 환경변수에서 주입한다.
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:map}?currentSchema=user_service
+    username: ${POSTGRES_USER:map}
+    password: ${POSTGRES_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  # ---- spring.jpa : Hibernate / JPA 설정 ----
+  # ddl-auto=validate : 엔티티 매핑이 DB 스키마와 일치하는지 검증만 한다.
+  #                     스키마 변경은 Flyway 가 단독으로 담당한다.
+  # hibernate.default_schema : 엔티티의 기본 스키마를 user_service 로 고정.
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.default_schema: user_service
+  # ---- spring.flyway : 마이그레이션 ----
+  # schemas / default-schema : user_service 스키마에 대해서만 마이그레이션 적용.
+  # locations : classpath:db/migration 에 위치한 V001 / V002 SQL 을 자동 실행.
+  flyway:
+    enabled: true
+    schemas: user_service
+    default-schema: user_service
+    locations: classpath:db/migration
+  # ---- spring.data.redis : 기본 Redis 연결 ----
+  # host / port 는 RedisConfig 가 spring.data.redis.host / port 로 주입받아 사용.
+  # repositories.enabled=false : Spring Data Redis 의 Repository 자동 활성화 차단.
+  #   (ServiceUserApplication 의 RedisRepositoriesAutoConfiguration 제외와 함께
+  #    JPA Repository 와의 충돌을 두 단계로 회피한다.)
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      repositories:
+        enabled: false
+  # ---- spring.jackson : JSON 직렬화 정책 ----
+  # write-dates-as-timestamps=false : 시간 타입을 epoch 가 아닌 ISO 문자열로 직렬화.
+  # fail-on-unknown-properties=false : 응답 본문에 모르는 필드가 있어도 실패하지 않음.
+  # time-zone=Asia/Seoul : 직렬화 시 기본 타임존.
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: Asia/Seoul
+
+# ---- agent : agent 서비스 호출 설정 ----
+# AgentClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
+# - base-url        : agent 서비스 base URL
+# - timeout-seconds : RestClient 의 readTimeout (초)
+agent:
+  base-url: ${AGENT_BASE_URL:http://agent:8000}
+  timeout-seconds: ${AGENT_TIMEOUT_SECONDS:60}
+
+# ---- hub : hub 게이트웨이 호출 설정 (경계 B3) ----
+# HubClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
+# trip 응답의 weather_forecast 를 채우기 위해 HubWeatherClient 가 /v1/weather 를 호출한다.
+# - base-url        : hub 서비스 base URL (도커: http://hub:8000, 로컬 BFF: http://localhost:8001)
+# - timeout-seconds : RestClient 의 readTimeout (초)
+hub:
+  base-url: ${HUB_BASE_URL:http://hub:8000}
+  timeout-seconds: ${HUB_TIMEOUT_SECONDS:5}
+
+# ---- trip : 동기 trip 생성 facade 설정 ----
+# TripService 가 본 섹션을 참조한다.
+# - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초). agent JOB_TIMEOUT 과 정합.
+# - poll-interval-ms     : draft 폴링 간격(ms).
+trip:
+  poll-timeout-seconds: ${TRIP_POLL_TIMEOUT_SECONDS:120}
+  poll-interval-ms: ${TRIP_POLL_INTERVAL_MS:700}
+
+# ---- streams : Redis Streams 컨슈머 설정 ----
+# StreamsConsumerConfig / RecommendJobsConsumer 가 본 섹션을 참조한다.
+# - recommend-stream     : 소비할 Stream 키
+# - recommend-group      : 컨슈머 그룹명
+# - recommend-consumer   : 컨슈머명 (예: user-1, user-2 형태)
+# - recommend-dlq-stream : 재시도 초과 메시지를 적재하는 DLQ Stream 키
+# - recommend-max-retry  : 최대 재시도 횟수 (Redis delivery count 기준)
+# - recommend-dlq-maxlen : DLQ Stream 의 보존 길이 (XADD MAXLEN ~ N)
+# - recommend-min-idle-ms        : reclaim 대상 최소 idle(ms)
+# - recommend-reclaim-interval-ms: PEL reclaim 스케줄 주기(ms)
+# - recommend-reclaim-batch      : reclaim 라운드당 XPENDING 조회 건수
+streams:
+  recommend-stream: ${STREAM_NAME:agent:jobs:done}
+  recommend-group: ${STREAM_GROUP:bff-result}
+  recommend-consumer: ${STREAM_CONSUMER:user-1}
+  recommend-dlq-stream: ${STREAM_DLQ:agent:jobs:done:dlq}
+  recommend-max-retry: ${STREAM_MAX_RETRY:3}
+  recommend-dlq-maxlen: ${STREAM_MAXLEN:2000}
+  recommend-min-idle-ms: ${STREAM_MIN_IDLE_MS:60000}
+  recommend-reclaim-interval-ms: ${STREAM_RECLAIM_INTERVAL_MS:30000}
+  recommend-reclaim-batch: ${STREAM_RECLAIM_BATCH:64}
+
+# ---- redis : 용도별 Redis 논리 DB 번호 매핑 ----
+# RedisConfig 가 본 섹션을 참조하여 용도별 ConnectionFactory 의 DB 번호를 결정한다.
+# - db-default       : 기본 DB
+# - db-streams       : Streams 전용 (streamsConnectionFactory)
+# - db-counters      : 카운터 전용 (countersConnectionFactory)
+# - db-drafts        : 초안 전용   (draftsConnectionFactory)
+# - draft-ttl-seconds: 초안 키 기본 TTL (초)
+redis:
+  db-default: ${REDIS_DB_DEFAULT:0}
+  db-streams: ${REDIS_DB_STREAMS:2}
+  db-counters: ${REDIS_DB_COUNTERS:3}
+  db-drafts: ${REDIS_DB_DRAFTS:4}
+  draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
+
+# ---- server : 서블릿 컨테이너 포트 ----
+# Dockerfile 의 EXPOSE 및 HEALTHCHECK 가 동일 포트를 가정한다.
+server:
+  port: 8080
+
+# ---- management : Spring Boot Actuator ----
+# - endpoints.web.exposure.include : 외부 노출 엔드포인트 (health, info)
+# - endpoint.health.probes.enabled : liveness / readiness 프로브 활성화
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# ---- jwt : JWT 발급/검증 설정 ----
+# auth 패키지의 토큰 발급/검증 로직이 본 섹션을 참조한다.
+# - secret      : 서명용 비밀키 (환경변수 필수)
+# - access-ttl  : Access 토큰 유효기간 (초)
+# - refresh-ttl : Refresh 토큰 유효기간 (초)
+jwt:
+  secret: ${JWT_SECRET}
+  access-ttl: ${JWT_ACCESS_TTL:3600}
+  refresh-ttl: ${JWT_REFRESH_TTL:2592000}
