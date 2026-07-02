@@ -14,6 +14,10 @@ Thumbs.db
 .env.*
 !.env.example
 
+# === 로컬 개발 설정 (절대 커밋 금지) ===
+**/application-local.yaml
+**/application-local.yml
+
 # === Python (방어적) ===
 __pycache__/
 *.py[cod]
@@ -59,3 +63,10 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# AI 도구 작업 디렉터리 무시
+.claude/
+codex-work/
+
+# 커밋 메시지 초안 (로컬 전용, 커밋 대상 아님)
+commit_contents.md

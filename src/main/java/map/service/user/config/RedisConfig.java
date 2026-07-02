@@ -173,11 +173,74 @@ public class RedisConfig {
     }
 
     /**
+     * JWT 블랙리스트 용 ConnectionFactory.
+     *
+     * 사용처: blacklistRedisTemplate 빈에 주입되어 access token jti 의
+     *        블랙리스트 등록 / 조회에 사용된다.
+     *
+     * @param db  사용할 Redis DB 번호 (redis.db-blacklist, 기본 1)
+     */
+    @Bean(name = "blacklistConnectionFactory", destroyMethod = "destroy")
+    public RedisConnectionFactory blacklistConnectionFactory(
+            @Value("${redis.db-blacklist:1}") int db
+    ) {
+        return build(db);
+    }
+
+    /**
+     * 인증 레이트리밋 용 ConnectionFactory.
+     *
+     * 사용처: rateLimitRedisTemplate 빈에 주입되어 인증 시도 카운터 조작에 사용된다.
+     *
+     * @param db  사용할 Redis DB 번호 (redis.db-ratelimit, 기본 3)
+     */
+    @Bean(name = "rateLimitConnectionFactory", destroyMethod = "destroy")
+    public RedisConnectionFactory rateLimitConnectionFactory(
+            @Value("${redis.db-ratelimit:3}") int db
+    ) {
+        return build(db);
+    }
+
+    /**
+     * JWT 블랙리스트 전용 StringRedisTemplate.
+     *
+     * - blacklistConnectionFactory 를 명시적 Qualifier 로 주입받는다.
+     * - JwtService 가 본 템플릿으로 access token jti 를 등록 / 조회한다.
+     *
+     * @param factory  blacklistConnectionFactory
+     * @return         블랙리스트 키 조작용 StringRedisTemplate
+     */
+    @Bean(name = "blacklistRedisTemplate")
+    public StringRedisTemplate blacklistRedisTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("blacklistConnectionFactory")
+            RedisConnectionFactory factory
+    ) {
+        return new StringRedisTemplate(factory);
+    }
+
+    /**
+     * 인증 레이트리밋 전용 StringRedisTemplate.
+     *
+     * - rateLimitConnectionFactory 를 명시적 Qualifier 로 주입받는다.
+     * - RateLimitService 가 본 템플릿으로 인증 시도 카운터를 조작한다.
+     *
+     * @param factory  rateLimitConnectionFactory
+     * @return         레이트리밋 키 조작용 StringRedisTemplate
+     */
+    @Bean(name = "rateLimitRedisTemplate")
+    public StringRedisTemplate rateLimitRedisTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("rateLimitConnectionFactory")
+            RedisConnectionFactory factory
+    ) {
+        return new StringRedisTemplate(factory);
+    }
+
+    /**
      * 컨텍스트 종료 시 공유 ClientResources 를 정리한다.
      *
      * ConnectionFactory 는 외부에서 주입한 ClientResources 를 스스로 종료하지
      * 않으므로(소유권 비보유), 생성한 본 설정이 책임진다. Spring 은 빈을 역순으로
-     * 소멸시키므로 3개 팩토리(destroy)가 먼저 정리된 뒤 본 메서드가 실행된다.
+     * 소멸시키므로 각 팩토리(destroy)가 먼저 정리된 뒤 본 메서드가 실행된다.
      */
     @PreDestroy
     public void shutdownClientResources() {

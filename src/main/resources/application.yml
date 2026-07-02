@@ -8,7 +8,7 @@
 # - spring.application : 서비스 식별자
 # - spring.datasource  : PostgreSQL 연결 (user_service 스키마 사용)
 # - spring.jpa         : Hibernate ddl-auto=validate (스키마 변경 금지)
-# - spring.flyway      : V001 / V002 마이그레이션 자동 실행 (user_service 스키마)
+# - spring.flyway      : db/migration 마이그레이션 자동 실행 (user_service 스키마)
 # - spring.data.redis  : 기본 연결 (DB0). repositories.enabled=false 로
 #                        Spring Data Redis Repository 자동 활성화 비활성
 # - spring.jackson     : LocalDate / LocalTime 등 시간 직렬화 정책, 미정의 필드 허용
@@ -17,7 +17,9 @@
 # - redis.db-*         : 멀티 DB 번호 매핑 (RedisConfig 가 참조)
 # - server             : 서비스 포트
 # - management         : Actuator 노출 엔드포인트
-# - jwt                : JWT 발급/검증용 secret 및 TTL
+# - jwt                : RS256 서명 키쌍 및 토큰 TTL
+# - kakao              : Kakao OAuth 클라이언트 설정 (KakaoProperties 참조)
+# - cors               : 교차 출처 허용 정책 (CorsProperties 참조)
 #
 # 참고:
 # - ServiceUserApplication 에서 RedisRepositoriesAutoConfiguration 을 제외하므로
@@ -126,14 +128,18 @@ streams:
 # ---- redis : 용도별 Redis 논리 DB 번호 매핑 ----
 # RedisConfig 가 본 섹션을 참조하여 용도별 ConnectionFactory 의 DB 번호를 결정한다.
 # - db-default       : 기본 DB
+# - db-blacklist     : JWT 블랙리스트 전용 (blacklistRedisTemplate)
 # - db-streams       : Streams 전용 (streamsConnectionFactory)
 # - db-counters      : 카운터 전용 (countersConnectionFactory)
+# - db-ratelimit     : 인증 레이트리밋 전용 (rateLimitRedisTemplate)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
 # - draft-ttl-seconds: 초안 키 기본 TTL (초)
 redis:
   db-default: ${REDIS_DB_DEFAULT:0}
+  db-blacklist: ${REDIS_DB_BLACKLIST:1}
   db-streams: ${REDIS_DB_STREAMS:2}
   db-counters: ${REDIS_DB_COUNTERS:3}
+  db-ratelimit: ${REDIS_DB_RATELIMIT:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
 
@@ -156,11 +162,31 @@ management:
         enabled: true
 
 # ---- jwt : JWT 발급/검증 설정 ----
-# auth 패키지의 토큰 발급/검증 로직이 본 섹션을 참조한다.
-# - secret      : 서명용 비밀키 (환경변수 필수)
-# - access-ttl  : Access 토큰 유효기간 (초)
-# - refresh-ttl : Refresh 토큰 유효기간 (초)
+# JwtProperties / JwtConfig 가 본 섹션을 참조하여 서명 키쌍과 토큰 만료를 구성한다.
+# - private-key                 : 서명용 RSA 개인키 (Base64 PKCS8). 미설정 시 임시 키 생성
+# - public-key                  : 검증용 RSA 공개키 (Base64 X509)
+# - access-token-expiry-seconds : Access 토큰 유효기간 (초)
+# - refresh-token-expiry-seconds: Refresh 토큰 유효기간 (초)
 jwt:
-  secret: ${JWT_SECRET}
-  access-ttl: ${JWT_ACCESS_TTL:3600}
-  refresh-ttl: ${JWT_REFRESH_TTL:2592000}
+  private-key: ${JWT_PRIVATE_KEY:}
+  public-key: ${JWT_PUBLIC_KEY:}
+  access-token-expiry-seconds: ${JWT_ACCESS_TTL:3600}
+  refresh-token-expiry-seconds: ${JWT_REFRESH_TTL:2592000}
+
+# ---- kakao : Kakao OAuth 클라이언트 설정 ----
+# KakaoProperties / KakaoOAuthService 가 본 섹션을 참조한다.
+# - client-id / client-secret : Kakao 앱 자격증명 (환경변수 주입)
+# - redirect-uri              : 인가 코드 콜백 URI
+# - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
+kakao:
+  client-id: ${KAKAO_OAUTH_CLIENT_ID:}
+  client-secret: ${KAKAO_OAUTH_CLIENT_SECRET:}
+  redirect-uri: ${KAKAO_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
+  token-uri: ${KAKAO_TOKEN_URI:https://kauth.kakao.com/oauth/token}
+  user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
+
+# ---- cors : 교차 출처 허용 정책 ----
+# CorsProperties / SecurityConfig 가 본 섹션을 참조한다.
+# - allowed-origins : 허용 출처 목록. 와일드카드(*)는 자격증명 비포함 모드로 동작
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:*}

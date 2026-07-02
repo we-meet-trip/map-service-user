@@ -209,7 +209,10 @@ public class TripService {
                     TripMapping.stopTime(startHour, endHour, i, n),
                     p.lat(),
                     p.lng(),
-                    toNext));
+                    toNext,
+                    p.source(),
+                    p.category(),
+                    p.grounded()));
         }
         return stops;
     }

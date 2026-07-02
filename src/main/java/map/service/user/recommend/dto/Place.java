@@ -14,6 +14,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * lat: 위도.
  * lng: 경도.
  * recommendedVisitTime: 권장 체류 시간 문자열. JSON key "recommended_visit_time".
+ *
+ * 아래는 실측 출처가 채우는 보강 필드(없을 수 있어 모두 nullable). 추천
+ * 결과를 stops 로 접을 때 출처/분류/신뢰 표시를 client 로 전달하는 데 쓴다.
+ * contentId: 출처 접두사를 붙인 식별자. JSON key "content_id".
+ * source: 출처 구분("kakao" | "durunubi").
+ * category: 분류 텍스트.
+ * grounded: 실측 후보에 근거한 장소면 true, LLM 단독 생성이면 false.
  */
 public record Place(
         @JsonProperty("place_id") int placeId,
@@ -21,6 +28,10 @@ public record Place(
         String address,
         double lat,
         double lng,
-        @JsonProperty("recommended_visit_time") String recommendedVisitTime
+        @JsonProperty("recommended_visit_time") String recommendedVisitTime,
+        @JsonProperty("content_id") String contentId,
+        String source,
+        String category,
+        Boolean grounded
 ) {
 }
