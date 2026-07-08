@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -49,6 +50,11 @@ public class RedisConfig {
     /** Redis 포트. spring.data.redis.port 프로퍼티에서 주입. */
     private final int port;
     /**
+     * Redis AUTH 비밀번호. spring.data.redis.password 에서 주입.
+     * 비어 있으면(기본) 모든 팩토리에 미적용 — 현행 무인증 동작을 보존한다.
+     */
+    private final String password;
+    /**
      * 3개 ConnectionFactory 가 공유하는 Lettuce 리소스(Netty 이벤트 루프·스레드풀).
      * 팩토리마다 암묵적으로 별도 생성하면 스레드풀이 3벌로 늘어나므로 단일
      * 인스턴스를 공유하고, 소유자인 본 설정이 @PreDestroy 에서 종료한다.
@@ -56,17 +62,20 @@ public class RedisConfig {
     private final ClientResources clientResources = DefaultClientResources.create();
 
     /**
-     * 공용 host / port 를 프로퍼티에서 받아 보관한다.
+     * 공용 host / port / password 를 프로퍼티에서 받아 보관한다.
      *
-     * @param host  Redis 호스트명 (기본 redis)
-     * @param port  Redis 포트     (기본 6379)
+     * @param host      Redis 호스트명 (기본 redis)
+     * @param port      Redis 포트     (기본 6379)
+     * @param password  Redis AUTH 비밀번호 (기본 빈 값 = 무인증)
      */
     public RedisConfig(
             @Value("${spring.data.redis.host:redis}") String host,
-            @Value("${spring.data.redis.port:6379}") int port
+            @Value("${spring.data.redis.port:6379}") int port,
+            @Value("${spring.data.redis.password:}") String password
     ) {
         this.host = host;
         this.port = port;
+        this.password = password;
     }
 
     /**
@@ -81,6 +90,10 @@ public class RedisConfig {
     private LettuceConnectionFactory build(int database) {
         RedisStandaloneConfiguration standalone = new RedisStandaloneConfiguration(host, port);
         standalone.setDatabase(database);
+        // 비밀번호가 설정된 배포에서만 AUTH 를 적용한다. 비어 있으면 미적용(무인증).
+        if (password != null && !password.isBlank()) {
+            standalone.setPassword(RedisPassword.of(password));
+        }
         LettuceClientConfiguration client = LettuceClientConfiguration.builder()
                 .clientResources(clientResources)
                 .commandTimeout(Duration.ofSeconds(3))

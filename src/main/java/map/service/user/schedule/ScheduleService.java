@@ -53,9 +53,12 @@ public class ScheduleService {
      * @Transactional 로 묶여 있어 저장 단계 실패 시 draft 삭제는 일어나지 않는다.
      *
      * request: ScheduleSaveRequest. jobId/title/dateStart/dateEnd.
+     * userId: 소유자 식별자. 컨트롤러의 @AuthenticationPrincipal 로 주입된 값으로,
+     *         토큰 부재/익명 시 null 이며 이때 user_id 컬럼은 null 로 저장된다
+     *         (auth.enforced=false + 토큰 부재 시 현행 동작 보존).
      */
     @Transactional
-    public Long persist(ScheduleSaveRequest request) {
+    public Long persist(ScheduleSaveRequest request, Long userId) {
         String draftJson = draftStore.find(request.jobId())
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
@@ -84,7 +87,7 @@ public class ScheduleService {
         UUID jobUuid = UUID.fromString(request.jobId());
 
         ScheduleEntity entity = new ScheduleEntity(
-                null,
+                userId,
                 jobUuid,
                 request.title(),
                 start,

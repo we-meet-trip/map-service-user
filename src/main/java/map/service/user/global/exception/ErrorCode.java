@@ -28,6 +28,9 @@ public enum ErrorCode {
     // Rate Limit
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "RATE_001", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
 
+    // Recommend
+    RESEARCH_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "RECOMMEND_001", "재추천 한도(일 3회)를 초과했습니다. KST 자정 이후 다시 시도해주세요."),
+
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다.");
 

@@ -52,6 +52,7 @@ public class RecommendJobsConsumer
     private static final Logger log = LoggerFactory.getLogger(RecommendJobsConsumer.class);
 
     private final DraftStore draftStore;
+    private final RecommendJobStore jobStore;
     private final StringRedisTemplate streamsTemplate;
     private final String stream;
     private final String group;
@@ -66,12 +67,14 @@ public class RecommendJobsConsumer
      * 의존성 주입 생성자.
      *
      * draftStore: draft 저장소.
+     * jobStore: recommend_jobs PG write-through 저장소(완료 시 markFinished 기록).
      * streamsFactory: @Qualifier("streamsConnectionFactory") RedisConnectionFactory.
      * stream/group/consumer/dlqStream/maxRetry/dlqMaxlen: 위 필드 설명 참조.
      * minIdleMs: reclaim 대상 최소 idle(ms, 기본 60000). reclaimBatch: 라운드당 조회 수(기본 64).
      */
     public RecommendJobsConsumer(
             DraftStore draftStore,
+            RecommendJobStore jobStore,
             @Qualifier("streamsConnectionFactory") RedisConnectionFactory streamsFactory,
             @Value("${streams.recommend-stream:agent:jobs:done}") String stream,
             @Value("${streams.recommend-group:bff-result}") String group,
@@ -83,6 +86,7 @@ public class RecommendJobsConsumer
             @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch
     ) {
         this.draftStore = draftStore;
+        this.jobStore = jobStore;
         this.streamsTemplate = new StringRedisTemplate(streamsFactory);
         this.stream = stream;
         this.group = group;
@@ -98,9 +102,11 @@ public class RecommendJobsConsumer
      * 스트림 메시지 1건 처리 콜백 (컨테이너 및 reclaim 재처리에서 공용).
      *
      * MapRecord 의 value 에서 "job_id", "payload" 를 추출한다. 둘 중 하나라도
-     * 없으면 경고 로그 후 ack(폐기). 정상 케이스는 DraftStore.save → ack.
-     * RuntimeException 발생 시 ack 하지 않고 PEL 에 남긴다 — 재시도/DLQ 는
-     * {@link #reclaimPending()} 이 Redis delivery count 기반으로 처리한다.
+     * 없으면 경고 로그 후 ack(폐기). 정상 케이스는 DraftStore.save →
+     * RecommendJobStore.markFinished(PG write-through) → ack. PG 기록은
+     * best-effort 이며 실패해도 예외를 던지지 않아 ack 를 막지 않는다.
+     * RuntimeException(예: draft save 실패) 시 ack 하지 않고 PEL 에 남긴다 —
+     * 재시도/DLQ 는 {@link #reclaimPending()} 이 Redis delivery count 기반으로 처리한다.
      *
      * message: Redis Stream 의 MapRecord(키=stream, 값 맵).
      */
@@ -119,6 +125,7 @@ public class RecommendJobsConsumer
 
         try {
             draftStore.save(jobId, payloadJson);
+            jobStore.markFinished(jobId, value.get("status"), payloadJson);
             ack(recordId);
             log.info("draft saved job_id={} stream_id={}", jobId, recordId);
         } catch (RuntimeException e) {
