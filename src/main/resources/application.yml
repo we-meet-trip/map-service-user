@@ -129,13 +129,27 @@ streams:
 # - db-streams       : Streams 전용 (streamsConnectionFactory)
 # - db-counters      : 카운터 전용 (countersConnectionFactory)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
-# - draft-ttl-seconds: 초안 키 기본 TTL (초)
+# - db-cache         : 재사용 캐시 전용 (cacheConnectionFactory)
+# - draft-ttl-seconds       : 초안 키 기본 TTL (초)
+# - cache-ttl-seconds       : 재사용 캐시 본체/히트카운터 TTL (초, 기본 7일)
+# - cache-link-ttl-seconds  : job_id→hash 연결고리 TTL (초, draft TTL과 동일)
 redis:
   db-default: ${REDIS_DB_DEFAULT:0}
   db-streams: ${REDIS_DB_STREAMS:2}
   db-counters: ${REDIS_DB_COUNTERS:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
+  db-cache: ${REDIS_DB_CACHE:5}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
+  cache-ttl-seconds: ${REDIS_CACHE_TTL_SECONDS:604800}
+  cache-link-ttl-seconds: ${REDIS_CACHE_LINK_TTL_SECONDS:3600}
+
+# ---- recommend : 재사용 캐시 매칭/갱신 정책 ----
+# RecommendCacheKey / RecommendService 가 본 섹션을 참조한다.
+# - cache-budget-round-step : budget 근사 매칭용 라운딩 단위(원)
+# - cache-refresh-every-hits: 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
+recommend:
+  cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}
+  cache-refresh-every-hits: ${RECOMMEND_CACHE_REFRESH_EVERY_HITS:3}
 
 # ---- server : 서블릿 컨테이너 포트 ----
 # Dockerfile 의 EXPOSE 및 HEALTHCHECK 가 동일 포트를 가정한다.

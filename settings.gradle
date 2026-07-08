@@ -4,8 +4,14 @@
 // 책임:
 // - 본 프로젝트의 rootProject.name 을 'service-user' 로 지정한다.
 //   (이 이름은 Gradle 산출물 디렉토리 및 모듈 표시명에 사용된다.)
+// - foojay-resolver-convention 플러그인으로 build.gradle 의 JDK 17 toolchain 을
+//   로컬에 해당 버전이 없어도 자동 다운로드하도록 한다.
 //
 // 비고:
 // - 본 프로젝트는 단일 모듈 구조이므로 include 항목은 없다.
 // =============================================================================
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'service-user'
