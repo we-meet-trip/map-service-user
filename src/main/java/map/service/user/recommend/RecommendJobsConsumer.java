@@ -52,6 +52,7 @@ public class RecommendJobsConsumer
     private static final Logger log = LoggerFactory.getLogger(RecommendJobsConsumer.class);
 
     private final DraftStore draftStore;
+    private final ReuseCacheStore reuseCacheStore;
     private final StringRedisTemplate streamsTemplate;
     private final String stream;
     private final String group;
@@ -72,6 +73,7 @@ public class RecommendJobsConsumer
      */
     public RecommendJobsConsumer(
             DraftStore draftStore,
+            ReuseCacheStore reuseCacheStore,
             @Qualifier("streamsConnectionFactory") RedisConnectionFactory streamsFactory,
             @Value("${streams.recommend-stream:agent:jobs:done}") String stream,
             @Value("${streams.recommend-group:bff-result}") String group,
@@ -83,6 +85,7 @@ public class RecommendJobsConsumer
             @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch
     ) {
         this.draftStore = draftStore;
+        this.reuseCacheStore = reuseCacheStore;
         this.streamsTemplate = new StringRedisTemplate(streamsFactory);
         this.stream = stream;
         this.group = group;
@@ -119,6 +122,7 @@ public class RecommendJobsConsumer
 
         try {
             draftStore.save(jobId, payloadJson);
+            updateReuseCacheIfLinked(jobId, payloadJson);
             ack(recordId);
             log.info("draft saved job_id={} stream_id={}", jobId, recordId);
         } catch (RuntimeException e) {
@@ -126,6 +130,21 @@ public class RecommendJobsConsumer
             // XCLAIM 으로 재처리(재배달 횟수 +1)하고, maxRetry 초과 시 DLQ 로 보낸다.
             log.error("draft save failed job_id={} stream_id={} reason={} "
                     + "(left pending for reclaim)", jobId, recordId, e.getMessage());
+        }
+    }
+
+    /**
+     * jobId 가 재사용 캐시와 연결돼 있으면(=미스 또는 백그라운드 강제 갱신으로 생성된
+     * job) 캐시 본체를 이번 payload 로 덮어쓴다. 연결이 없으면(=진짜 히트로 생성된
+     * job, agent 를 안 거쳤음) 아무 것도 하지 않는다. 조회/저장 중 오류가 나도 조용히
+     * 무시한다 — 캐시 갱신 실패가 draft 저장·ack 를 막아서는 안 된다(무중단 원칙).
+     */
+    private void updateReuseCacheIfLinked(String jobId, String payloadJson) {
+        try {
+            reuseCacheStore.consumeLink(jobId)
+                    .ifPresent(hash -> reuseCacheStore.save(hash, payloadJson));
+        } catch (RuntimeException e) {
+            log.warn("reuse cache update failed job_id={} reason={}", jobId, e.getMessage());
         }
     }
 
