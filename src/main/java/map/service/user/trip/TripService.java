@@ -127,13 +127,17 @@ public class TripService {
                 s.endDate(),
                 TripMapping.hourToLocalTime(s.activeStartHour()),
                 TripMapping.hourToLocalTime(s.activeEndHour()));
+        // 동기 facade 는 항상 초기 추천이다 — stage="init", exclude 없음.
         return new RecommendRequest(
                 date,
                 TripMapping.toAgentBudget(req.budget()),
                 req.themes(),
                 TripMapping.toAgentMobility(req.transport()),
                 province,
-                city);
+                city,
+                null,
+                "init",
+                null);
     }
 
     /** draft 가 나타날 때까지 폴링. 한도 초과 시 TripTimeoutException. */

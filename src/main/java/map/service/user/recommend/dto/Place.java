@@ -21,6 +21,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * source: 출처 구분("kakao" | "durunubi").
  * category: 분류 텍스트.
  * grounded: 실측 후보에 근거한 장소면 true, LLM 단독 생성이면 false.
+ * reason: agent llm_reason 노드가 생성한 장소별 추천 이유(≤200자).
+ *         degrade(생성 생략) 시 null 일 수 있다.
  */
 public record Place(
         @JsonProperty("place_id") int placeId,
@@ -32,6 +34,7 @@ public record Place(
         @JsonProperty("content_id") String contentId,
         String source,
         String category,
-        Boolean grounded
+        Boolean grounded,
+        String reason
 ) {
 }

@@ -14,6 +14,8 @@ import java.util.List;
  * places: 추천된 장소 목록.
  * visitOrder: 장소 방문 순서. place_id 의 정렬. JSON key "visit_order".
  * legs: 장소 간 이동 구간 목록.
+ * clothing: agent llm_reason 노드가 생성한 날씨 기반 옷차림 안내(≤300자).
+ *           degrade 시 null 일 수 있다.
  * error: 오류 메시지(있을 때).
  * retryAfterSeconds: 재시도 권장 대기 시간. JSON key "retry_after_seconds".
  */
@@ -23,6 +25,7 @@ public record RecommendResponse(
         List<Place> places,
         @JsonProperty("visit_order") List<Integer> visitOrder,
         List<Leg> legs,
+        String clothing,
         String error,
         @JsonProperty("retry_after_seconds") Integer retryAfterSeconds
 ) {
