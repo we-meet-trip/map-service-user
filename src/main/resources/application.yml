@@ -129,6 +129,9 @@ recommend:
 # - recommend-min-idle-ms        : reclaim 대상 최소 idle(ms)
 # - recommend-reclaim-interval-ms: PEL reclaim 스케줄 주기(ms)
 # - recommend-reclaim-batch      : reclaim 라운드당 XPENDING 조회 건수
+# - command-timeout-sec          : streams 전용 Lettuce commandTimeout(초). 폴링 BLOCK(2초)에
+#                                  여유를 두어 일시적 지연 시 폴 태스크 사망을 줄인다.
+# - watchdog-interval-ms         : 구독 비활성 감지 시 재구독하는 워치독 주기(ms)
 streams:
   recommend-stream: ${STREAM_NAME:agent:jobs:done}
   recommend-group: ${STREAM_GROUP:bff-result}
@@ -139,6 +142,8 @@ streams:
   recommend-min-idle-ms: ${STREAM_MIN_IDLE_MS:60000}
   recommend-reclaim-interval-ms: ${STREAM_RECLAIM_INTERVAL_MS:30000}
   recommend-reclaim-batch: ${STREAM_RECLAIM_BATCH:64}
+  command-timeout-sec: ${STREAMS_COMMAND_TIMEOUT_SEC:6}
+  watchdog-interval-ms: ${STREAMS_WATCHDOG_INTERVAL_MS:10000}
 
 # ---- redis : 용도별 Redis 논리 DB 번호 매핑 ----
 # RedisConfig 가 본 섹션을 참조하여 용도별 ConnectionFactory 의 DB 번호를 결정한다.
