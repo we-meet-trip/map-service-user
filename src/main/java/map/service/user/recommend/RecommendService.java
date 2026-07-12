@@ -82,19 +82,37 @@ public class RecommendService {
      * request: 클라이언트에서 검증 완료된 RecommendRequest.
      */
     public JobAccepted createRecommendation(RecommendRequest request) {
+        return createRecommendationDetailed(request).accepted();
+    }
+
+    /**
+     * createRecommendation 과 동일한 로직을 수행하되, 캐시 히트 여부를 함께 반환한다.
+     * RecommendController 가 X-Recommend-Cache 디버그 헤더를 채우기 위해 사용한다
+     * (검증/관측 목적 — 응답 본문 계약에는 영향 없음).
+     */
+    RecommendationResult createRecommendationDetailed(RecommendRequest request) {
         String hash = cacheKeyBuilder.hash(request);
         Optional<String> cached = findCached(hash);
 
         if (cached.isEmpty()) {
             JobAccepted accepted = agentClient.requestRecommend(request);
             linkJobSafely(accepted.jobId(), hash);
-            return accepted;
+            return new RecommendationResult(accepted, false);
         }
 
         String jobId = UUID.randomUUID().toString();
         draftStore.save(jobId, cached.get());
         maybeTriggerBackgroundRefresh(request, hash);
-        return new JobAccepted(jobId, "in_progress", 3);
+        return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
+    }
+
+    /**
+     * createRecommendationDetailed 의 결과 캐리어.
+     *
+     * accepted: 기존과 동일한 JobAccepted 응답 본문.
+     * cacheHit: 재사용 캐시 히트 여부(디버그 헤더용, 응답 본문에는 포함되지 않음).
+     */
+    record RecommendationResult(JobAccepted accepted, boolean cacheHit) {
     }
 
     /**
