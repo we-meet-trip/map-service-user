@@ -145,10 +145,12 @@ redis:
 
 # ---- recommend : 재사용 캐시 매칭/갱신 정책 ----
 # RecommendCacheKey / RecommendService 가 본 섹션을 참조한다.
-# - cache-budget-round-step : budget 근사 매칭용 라운딩 단위(원)
+# - cache-budget-round-step : budget 근사 매칭용 내림(floor) 단위(원)
+# - cache-time-round-step-minutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분)
 # - cache-refresh-every-hits: 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
 recommend:
   cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}
+  cache-time-round-step-minutes: ${RECOMMEND_CACHE_TIME_ROUND_STEP_MINUTES:60}
   cache-refresh-every-hits: ${RECOMMEND_CACHE_REFRESH_EVERY_HITS:3}
 
 # ---- server : 서블릿 컨테이너 포트 ----

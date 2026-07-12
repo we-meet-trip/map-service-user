@@ -12,12 +12,18 @@ import org.junit.jupiter.api.Test;
 
 class RecommendCacheKeyTest {
 
-    private final RecommendCacheKey cacheKey = new RecommendCacheKey(50_000);
+    private final RecommendCacheKey cacheKey = new RecommendCacheKey(50_000, 60);
 
     private RecommendRequest request(List<String> theme, Integer budget, Mobility mobility) {
+        return request(theme, budget, mobility, LocalTime.of(10, 0), LocalTime.of(20, 0));
+    }
+
+    private RecommendRequest request(
+            List<String> theme, Integer budget, Mobility mobility,
+            LocalTime timeStart, LocalTime timeEnd) {
         DateRange date = new DateRange(
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 3),
-                LocalTime.of(10, 0), LocalTime.of(20, 0));
+                timeStart, timeEnd);
         return new RecommendRequest(date, budget, theme, mobility, "서울특별시", "동작구");
     }
 
@@ -57,8 +63,28 @@ class RecommendCacheKeyTest {
 
     @Test
     void budgetAcrossRoundingBoundaryProducesDifferentHash() {
-        RecommendRequest a = request(List.of("역사"), 124_999, Mobility.WALK);
-        RecommendRequest b = request(List.of("역사"), 125_000, Mobility.WALK);
+        RecommendRequest a = request(List.of("역사"), 149_999, Mobility.WALK);
+        RecommendRequest b = request(List.of("역사"), 150_000, Mobility.WALK);
+
+        assertThat(cacheKey.hash(a)).isNotEqualTo(cacheKey.hash(b));
+    }
+
+    @Test
+    void timeWithinRoundingStepProducesSameHash() {
+        RecommendRequest a = request(
+                List.of("역사"), 100_000, Mobility.WALK, LocalTime.of(10, 29), LocalTime.of(20, 0));
+        RecommendRequest b = request(
+                List.of("역사"), 100_000, Mobility.WALK, LocalTime.of(10, 0), LocalTime.of(20, 0));
+
+        assertThat(cacheKey.hash(a)).isEqualTo(cacheKey.hash(b));
+    }
+
+    @Test
+    void timeAcrossRoundingBoundaryProducesDifferentHash() {
+        RecommendRequest a = request(
+                List.of("역사"), 100_000, Mobility.WALK, LocalTime.of(10, 29), LocalTime.of(20, 0));
+        RecommendRequest b = request(
+                List.of("역사"), 100_000, Mobility.WALK, LocalTime.of(10, 30), LocalTime.of(20, 0));
 
         assertThat(cacheKey.hash(a)).isNotEqualTo(cacheKey.hash(b));
     }

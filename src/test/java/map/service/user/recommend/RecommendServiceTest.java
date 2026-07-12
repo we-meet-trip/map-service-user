@@ -36,7 +36,7 @@ class RecommendServiceTest {
     private ReuseCacheStore reuseCacheStore;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RecommendCacheKey cacheKeyBuilder = new RecommendCacheKey(50_000);
+    private final RecommendCacheKey cacheKeyBuilder = new RecommendCacheKey(50_000, 60);
     private final Executor immediateExecutor = Runnable::run;
 
     private RecommendService service;
