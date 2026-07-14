@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -59,6 +60,7 @@ public class SecurityConfig {
     }
 
     @Bean
+    @Order(1)
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -73,7 +75,9 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/kakao/callback").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/token/refresh").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
-                            .requestMatchers("/actuator/health", "/actuator/info").permitAll();
+                            // actuator: health/info + prometheus 메트릭(map-net 내부 스크레이프).
+                            .requestMatchers("/actuator/health", "/actuator/info",
+                                    "/actuator/prometheus").permitAll();
                     if (authEnforced) {
                         // 인가 시행: 도메인 엔드포인트와 나머지 전부 인증 필수.
                         // JWT 필터가 채운 SecurityContext 가 없으면 401(HttpStatusEntryPoint).

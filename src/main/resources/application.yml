@@ -104,6 +104,18 @@ hub:
   timeout-seconds: ${HUB_TIMEOUT_SECONDS:5}
   internal-token: ${INTERNAL_SERVICE_TOKEN:}
 
+# ---- internal.admin : /internal/admin/** 위임 가드 (경계 B9) ----
+# InternalAdminGuardFilter / InternalAdminSecurityConfig 가 본 섹션을 참조한다.
+# map-service-admin(운영 콘솔)이 회원/추천작업/DLQ 를 위임 조회·조작할 때 통과하는
+# CIDR 화이트리스트 + 공유 토큰 가드. hub 의 internal_guard 규약을 미러링한다.
+# - trusted-cidrs : 허용 사설 CIDR 목록(map-net 컨테이너 네트워크 한정)
+# - token         : X-Internal-Token 기대값. INTERNAL_SERVICE_TOKEN 재사용.
+#                   비우면 fail-closed(헤더가 있어도 일치 불가 → 접근 차단).
+internal:
+  admin:
+    trusted-cidrs: ${USER_INTERNAL_TRUSTED_CIDRS:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
+    token: ${INTERNAL_SERVICE_TOKEN:}
+
 # ---- trip : 동기 trip 생성 facade 설정 ----
 # TripService 가 본 섹션을 참조한다.
 # - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초). agent JOB_TIMEOUT 과 정합.
@@ -169,17 +181,25 @@ server:
   port: 8080
 
 # ---- management : Spring Boot Actuator ----
-# - endpoints.web.exposure.include : 외부 노출 엔드포인트 (health, info)
+# - endpoints.web.exposure.include : 외부 노출 엔드포인트 (health, info, prometheus)
 # - endpoint.health.probes.enabled : liveness / readiness 프로브 활성화
+# - prometheus : micrometer-registry-prometheus 가 /actuator/prometheus 를 제공.
+#   map-net 내부(loopback) Prometheus 만 스크레이프한다(SecurityConfig 공개 목록).
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  # http.server.requests 히스토그램 버킷 노출 → Grafana p95 등 분위수 쿼리 가능
+  # (미설정 시 count/sum 만 노출되어 histogram_quantile 이 No data).
+  metrics:
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
 
 # ---- jwt : JWT 발급/검증 설정 ----
 # JwtProperties / JwtConfig 가 본 섹션을 참조하여 서명 키쌍과 토큰 만료를 구성한다.
