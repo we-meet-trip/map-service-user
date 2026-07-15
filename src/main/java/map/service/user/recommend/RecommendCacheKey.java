@@ -5,8 +5,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import map.service.user.recommend.dto.RecommendRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -19,16 +22,22 @@ import org.springframework.stereotype.Component;
  *
  * budgetRoundStep: budget 근사 매칭용 내림(floor) 단위(원). 예산 초과 추천 방지를 위해
  *                  올림 없이 항상 내림한다. recommend.cache-budget-round-step 프로퍼티,
- *                  기본 50000.
+ *                  기본 50000. 0 이하로 설정되면 나눗셈 오류를 막기 위해 기본값으로
+ *                  대체하고 경고 로그를 남긴다.
  * timeRoundStepMinutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분).
  *                  recommend.cache-time-round-step-minutes 프로퍼티, 기본 60(1시간).
+ *                  0 이하로 설정되면 budgetRoundStep 과 동일하게 기본값으로 대체한다.
  */
 @Component
 public class RecommendCacheKey {
 
+    private static final Logger log = LoggerFactory.getLogger(RecommendCacheKey.class);
+
     private static final String FIELD_SEPARATOR = "|";
     private static final String THEME_SEPARATOR = ",";
     private static final String NONE_SENTINEL = "none";
+    private static final long DEFAULT_BUDGET_ROUND_STEP = 50000L;
+    private static final long DEFAULT_TIME_ROUND_STEP_MINUTES = 60L;
 
     private final long budgetRoundStep;
     private final long timeRoundStepMinutes;
@@ -37,8 +46,20 @@ public class RecommendCacheKey {
             @Value("${recommend.cache-budget-round-step:50000}") long budgetRoundStep,
             @Value("${recommend.cache-time-round-step-minutes:60}") long timeRoundStepMinutes
     ) {
-        this.budgetRoundStep = budgetRoundStep;
-        this.timeRoundStepMinutes = timeRoundStepMinutes;
+        if (budgetRoundStep > 0) {
+            this.budgetRoundStep = budgetRoundStep;
+        } else {
+            log.warn("recommend.cache-budget-round-step must be positive but was {}, using default {}",
+                    budgetRoundStep, DEFAULT_BUDGET_ROUND_STEP);
+            this.budgetRoundStep = DEFAULT_BUDGET_ROUND_STEP;
+        }
+        if (timeRoundStepMinutes > 0) {
+            this.timeRoundStepMinutes = timeRoundStepMinutes;
+        } else {
+            log.warn("recommend.cache-time-round-step-minutes must be positive but was {}, using default {}",
+                    timeRoundStepMinutes, DEFAULT_TIME_ROUND_STEP_MINUTES);
+            this.timeRoundStepMinutes = DEFAULT_TIME_ROUND_STEP_MINUTES;
+        }
     }
 
     /**
@@ -88,11 +109,7 @@ public class RecommendCacheKey {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(hashBytes.length * 2);
-            for (byte b : hashBytes) {
-                hex.append(String.format("%02x", b));
-            }
-            return hex.toString();
+            return HexFormat.of().formatHex(hashBytes);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }

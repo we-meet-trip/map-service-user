@@ -98,6 +98,23 @@ class RecommendCacheKeyTest {
     }
 
     @Test
+    void nonPositiveBudgetRoundStepFallsBackToDefault() {
+        RecommendCacheKey invalidConfigKey = new RecommendCacheKey(0, 60);
+        RecommendRequest request = request(List.of("역사"), 124_999, Mobility.WALK);
+
+        assertThat(invalidConfigKey.hash(request)).isEqualTo(cacheKey.hash(request));
+    }
+
+    @Test
+    void nonPositiveTimeRoundStepFallsBackToDefault() {
+        RecommendCacheKey invalidConfigKey = new RecommendCacheKey(50_000, -5);
+        RecommendRequest request = request(
+                List.of("역사"), 100_000, Mobility.WALK, LocalTime.of(10, 29), LocalTime.of(20, 0));
+
+        assertThat(invalidConfigKey.hash(request)).isEqualTo(cacheKey.hash(request));
+    }
+
+    @Test
     void differentDateProducesDifferentHash() {
         RecommendRequest a = request(List.of("역사"), 100_000, Mobility.WALK);
         DateRange otherDate = new DateRange(
