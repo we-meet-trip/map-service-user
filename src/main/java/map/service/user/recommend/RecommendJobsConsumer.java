@@ -135,14 +135,19 @@ public class RecommendJobsConsumer
 
     /**
      * jobId 가 재사용 캐시와 연결돼 있으면(=미스 또는 백그라운드 강제 갱신으로 생성된
-     * job) 캐시 본체를 이번 payload 로 덮어쓴다. 연결이 없으면(=진짜 히트로 생성된
-     * job, agent 를 안 거쳤음) 아무 것도 하지 않는다. 조회/저장 중 오류가 나도 조용히
-     * 무시한다 — 캐시 갱신 실패가 draft 저장·ack 를 막아서는 안 된다(무중단 원칙).
+     * job) 캐시 본체를 이번 payload 로 덮어쓰고, 히트 카운터 TTL 도 함께 연장한다
+     * (계속 사용되는 캐시의 카운터가 본체보다 먼저 만료되지 않도록). 연결이 없으면
+     * (=진짜 히트로 생성된 job, agent 를 안 거쳤음) 아무 것도 하지 않는다. 조회/저장 중
+     * 오류가 나도 조용히 무시한다 — 캐시 갱신 실패가 draft 저장·ack 를 막아서는 안 된다
+     * (무중단 원칙).
      */
     private void updateReuseCacheIfLinked(String jobId, String payloadJson) {
         try {
             reuseCacheStore.consumeLink(jobId)
-                    .ifPresent(hash -> reuseCacheStore.save(hash, payloadJson));
+                    .ifPresent(hash -> {
+                        reuseCacheStore.save(hash, payloadJson);
+                        reuseCacheStore.renewHitsTtl(hash);
+                    });
         } catch (RuntimeException e) {
             log.warn("reuse cache update failed job_id={} reason={}", jobId, e.getMessage());
         }

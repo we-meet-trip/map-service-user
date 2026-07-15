@@ -47,6 +47,7 @@ class RecommendJobsConsumerTest {
 
         verify(draftStore).save("job-1", "{\"places\":[]}");
         verify(reuseCacheStore).save("hash-abc", "{\"places\":[]}");
+        verify(reuseCacheStore).renewHitsTtl("hash-abc");
     }
 
     @Test
@@ -57,6 +58,7 @@ class RecommendJobsConsumerTest {
 
         verify(draftStore).save("job-2", "{\"places\":[]}");
         verify(reuseCacheStore, never()).save(any(), any());
+        verify(reuseCacheStore, never()).renewHitsTtl(any());
     }
 
     @Test
