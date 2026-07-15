@@ -144,14 +144,16 @@ redis:
   cache-link-ttl-seconds: ${REDIS_CACHE_LINK_TTL_SECONDS:3600}
 
 # ---- recommend : 재사용 캐시 매칭/갱신 정책 ----
-# RecommendCacheKey / RecommendService 가 본 섹션을 참조한다.
+# RecommendCacheKey / RecommendService / RecommendCacheConfig 가 본 섹션을 참조한다.
 # - cache-budget-round-step : budget 근사 매칭용 내림(floor) 단위(원)
 # - cache-time-round-step-minutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분)
 # - cache-refresh-every-hits: 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
+# - cache-refresh-queue-capacity: 백그라운드 갱신 대기열 최대 크기(초과분은 로그 남기고 버림)
 recommend:
   cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}
   cache-time-round-step-minutes: ${RECOMMEND_CACHE_TIME_ROUND_STEP_MINUTES:60}
   cache-refresh-every-hits: ${RECOMMEND_CACHE_REFRESH_EVERY_HITS:3}
+  cache-refresh-queue-capacity: ${RECOMMEND_CACHE_REFRESH_QUEUE_CAPACITY:100}
 
 # ---- server : 서블릿 컨테이너 포트 ----
 # Dockerfile 의 EXPOSE 및 HEALTHCHECK 가 동일 포트를 가정한다.
