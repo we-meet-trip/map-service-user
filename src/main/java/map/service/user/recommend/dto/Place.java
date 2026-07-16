@@ -1,6 +1,8 @@
 package map.service.user.recommend.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 
 /**
  * Place — 추천 응답/수정의 장소 항목
@@ -11,8 +13,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * placeId: 외부 장소 식별자(int). JSON key "place_id".
  * name: 장소명.
  * address: 주소 문자열.
- * lat: 위도.
- * lng: 경도.
+ * lat: 위도. 33.0~43.0(한국 국내 범위). EditRequest 로 들어오는 수정
+ *      요청에서만 @Valid cascade 로 검증된다 — 범위 값은 agent Place
+ *      (33~43 / 124~132)·hub DirectionsPoint 와 통일한다. 아웃바운드
+ *      RecommendResponse 는 Bean Validation 을 거치지 않으므로 영향 없다.
+ * lng: 경도. 124.0~132.0(한국 국내 범위).
  * recommendedVisitTime: 권장 체류 시간 문자열. JSON key "recommended_visit_time".
  *
  * 아래는 실측 출처가 채우는 보강 필드(없을 수 있어 모두 nullable). 추천
@@ -28,8 +33,8 @@ public record Place(
         @JsonProperty("place_id") int placeId,
         String name,
         String address,
-        double lat,
-        double lng,
+        @DecimalMin("33.0") @DecimalMax("43.0") double lat,
+        @DecimalMin("124.0") @DecimalMax("132.0") double lng,
         @JsonProperty("recommended_visit_time") String recommendedVisitTime,
         @JsonProperty("content_id") String contentId,
         String source,
