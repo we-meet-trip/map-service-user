@@ -261,6 +261,41 @@ public class RedisConfig {
     }
 
     /**
+     * 채팅 용 ConnectionFactory.
+     *
+     * 사용처: chatRedisTemplate(발행 및 프레즌스 키)과 채팅 발행/구독 리스너 컨테이너에
+     *        주입되어 인스턴스 간 메시지 팬아웃과 접속 상태 키 조작에 사용된다.
+     *
+     * 발행/구독 채널은 논리 DB 번호와 무관하게 동작하지만, 프레즌스 키(SET/EXPIRE)는
+     * DB 스코프이므로 채팅 전용 DB(redis.db-chat, 기본 5)를 할당한다.
+     *
+     * @param db  사용할 Redis DB 번호 (redis.db-chat, 기본 5)
+     */
+    @Bean(name = "chatConnectionFactory", destroyMethod = "destroy")
+    public RedisConnectionFactory chatConnectionFactory(
+            @Value("${redis.db-chat:5}") int db
+    ) {
+        return build(db, Duration.ofSeconds(3));
+    }
+
+    /**
+     * 채팅 전용 StringRedisTemplate.
+     *
+     * - chatConnectionFactory 를 명시적 Qualifier 로 주입받는다.
+     * - 브로드캐스트 발행(convertAndSend)과 프레즌스 키 조작에 사용된다.
+     *
+     * @param factory  chatConnectionFactory
+     * @return         채팅 키/채널 조작용 StringRedisTemplate
+     */
+    @Bean(name = "chatRedisTemplate")
+    public StringRedisTemplate chatRedisTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("chatConnectionFactory")
+            RedisConnectionFactory factory
+    ) {
+        return new StringRedisTemplate(factory);
+    }
+
+    /**
      * 컨텍스트 종료 시 공유 ClientResources 를 정리한다.
      *
      * ConnectionFactory 는 외부에서 주입한 ClientResources 를 스스로 종료하지

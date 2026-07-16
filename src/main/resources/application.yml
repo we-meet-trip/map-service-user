@@ -165,6 +165,7 @@ streams:
 # - db-counters      : 카운터 전용 (countersConnectionFactory)
 # - db-ratelimit     : 인증 레이트리밋 전용 (rateLimitRedisTemplate)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
+# - db-chat          : 채팅 전용   (chatConnectionFactory) — 프레즌스 키. 발행/구독 채널은 DB 무관
 # - draft-ttl-seconds: 초안 키 기본 TTL (초)
 redis:
   db-default: ${REDIS_DB_DEFAULT:0}
@@ -173,7 +174,33 @@ redis:
   db-counters: ${REDIS_DB_COUNTERS:3}
   db-ratelimit: ${REDIS_DB_RATELIMIT:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
+  db-chat: ${REDIS_DB_CHAT:5}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
+
+# ---- chat : 채팅 도메인 설정 ----
+# ChatProperties 가 본 섹션을 참조한다.
+# - max-participants        : 방당 ACTIVE 참가자 상한 (join 시 초과 차단)
+# - expiry-grace-days       : 여행 종료일 이후 전송 허용 일수 (방 생성 시 만료 시각 계산에 사용)
+# - history-page-size       : 메시지 히스토리 한 페이지 최대 건수
+# - invite-base-url         : 초대 링크 기준 주소 (배포 시 실제 딥링크 주소로 오버라이드 필수)
+# - max-message-length      : 텍스트 메시지 최대 글자 수 (초과 시 전송 거부)
+# - send-rate-limit         : send-rate-window-seconds 창당 사용자별 최대 전송 수
+# - send-rate-window-seconds: 전송 레이트리밋 시간 창(초)
+# - broadcast-channel       : 인스턴스 간 팬아웃용 Redis 발행/구독 채널명
+# - ws-endpoint             : WebSocket 핸드셰이크 경로
+chat:
+  max-participants: ${CHAT_MAX_PARTICIPANTS:10}
+  expiry-grace-days: ${CHAT_EXPIRY_GRACE_DAYS:7}
+  history-page-size: ${CHAT_HISTORY_PAGE_SIZE:50}
+  invite-base-url: ${CHAT_INVITE_BASE_URL:https://example.invalid/chat/invite/}
+  max-message-length: ${CHAT_MAX_MESSAGE_LENGTH:2000}
+  send-rate-limit: ${CHAT_SEND_RATE_LIMIT:20}
+  send-rate-window-seconds: ${CHAT_SEND_RATE_WINDOW_SECONDS:10}
+  invite-rate-limit: ${CHAT_INVITE_RATE_LIMIT:10}
+  invite-rate-window-seconds: ${CHAT_INVITE_RATE_WINDOW_SECONDS:60}
+  broadcast-channel: ${CHAT_BROADCAST_CHANNEL:chat:broadcast}
+  ws-endpoint: ${CHAT_WS_ENDPOINT:/ws/chat}
+  expiry-sweep-interval-ms: ${CHAT_EXPIRY_SWEEP_INTERVAL_MS:60000}
 
 # ---- server : 서블릿 컨테이너 포트 ----
 # Dockerfile 의 EXPOSE 및 HEALTHCHECK 가 동일 포트를 가정한다.
