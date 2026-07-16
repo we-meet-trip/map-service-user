@@ -31,6 +31,10 @@ import java.util.List;
  * 항상 공개로 둔다. 그 외 도메인 엔드포인트의 인가 여부는 auth.enforced 플래그로
  * 전환한다.
  *
+ * 필터체인 우선순위: 내부위임(@Order(0)) → 채팅(@Order(1)) → 본 도메인 체인(@Order(2)).
+ * 앞선 체인들이 securityMatcher 로 각자 경로(/internal/**, /api/v1/chat/** 및 핸드셰이크)
+ * 만 담당하므로, 본 체인은 그 외 모든 경로를 맡는 폴백(catch-all) 역할을 한다.
+ *
  * jwtAuthenticationFilter : 토큰이 있을 때만 SecurityContext 를 채우는 필터(요청 차단 안 함).
  * rateLimitFilter         : 인증 라우트 레이트리밋 필터.
  * corsProperties          : CORS 허용 출처 정책.
@@ -60,7 +64,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(1)
+    @Order(2)
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
