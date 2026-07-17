@@ -32,7 +32,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * - streamsConnectionFactory  : redis.db-streams (기본 2)  — Streams 컨슈머 그룹
  * - countersConnectionFactory : redis.db-counters (기본 3) — 카운터 / 정량 상태
  * - draftsConnectionFactory   : redis.db-drafts (기본 4)   — 임시 초안 데이터
- * - cacheConnectionFactory    : redis.db-cache (기본 5)    — 재사용 캐시(ReuseCacheStore)
+ * - cacheConnectionFactory    : redis.db-cache (기본 6)    — 재사용 캐시(ReuseCacheStore)
  * - draftsRedisTemplate       : draftsConnectionFactory 위에 얹는 StringRedisTemplate
  * - countersRedisTemplate     : countersConnectionFactory 위에 얹는 StringRedisTemplate
  * - cacheRedisTemplate        : cacheConnectionFactory 위에 얹는 StringRedisTemplate
@@ -146,11 +146,12 @@ public class RedisConfig {
      * 사용처: ReuseCacheStore 가 Qualifier("cacheRedisTemplate") 로 주입받는
      *        StringRedisTemplate 의 기반이 된다.
      *
-     * @param db  사용할 Redis DB 번호 (redis.db-cache, 기본 5)
+     * @param db  사용할 Redis DB 번호 (redis.db-cache, 기본 6 — DB5 는 map-service-infra 가
+     *            채팅용으로 예약해둔 번호라 충돌을 피해 DB6 을 쓴다)
      */
     @Bean(name = "cacheConnectionFactory", destroyMethod = "destroy")
     public RedisConnectionFactory cacheConnectionFactory(
-            @Value("${redis.db-cache:5}") int db
+            @Value("${redis.db-cache:6}") int db
     ) {
         return build(db);
     }

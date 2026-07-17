@@ -130,6 +130,8 @@ streams:
 # - db-counters      : 카운터 전용 (countersConnectionFactory)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
 # - db-cache         : 재사용 캐시 전용 (cacheConnectionFactory)
+#                      DB5 는 map-service-infra 가 채팅(경계 B8)용으로 예약해둔 번호라
+#                      충돌 방지를 위해 DB6 사용(map-service-infra 표 갱신 필요 — 아직 반영 전).
 # - draft-ttl-seconds       : 초안 키 기본 TTL (초)
 # - cache-ttl-seconds       : 재사용 캐시 본체/히트카운터 TTL (초, 기본 7일)
 # - cache-link-ttl-seconds  : job_id→hash 연결고리 TTL (초, draft TTL과 동일)
@@ -138,7 +140,7 @@ redis:
   db-streams: ${REDIS_DB_STREAMS:2}
   db-counters: ${REDIS_DB_COUNTERS:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
-  db-cache: ${REDIS_DB_CACHE:5}
+  db-cache: ${REDIS_DB_CACHE:6}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
   cache-ttl-seconds: ${REDIS_CACHE_TTL_SECONDS:604800}
   cache-link-ttl-seconds: ${REDIS_CACHE_LINK_TTL_SECONDS:3600}
