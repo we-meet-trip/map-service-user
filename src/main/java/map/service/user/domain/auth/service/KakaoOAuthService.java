@@ -25,6 +25,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 
@@ -40,6 +42,52 @@ public class KakaoOAuthService {
     private final UserDeviceRepository   userDeviceRepository;
     private final AuthService            authService;
     private final RestClient             kakaoRestClient;
+
+    /** 동의항목: 닉네임만 요청(기본 제공, 비즈앱/심사 불요). 이메일은 provider_id 전용 정책상 미요청. */
+    private static final String SCOPE = "profile_nickname";
+
+    /**
+     * Kakao 인가 요청 URL 을 조립한다.
+     * redirect_uri 는 토큰 교환(exchangeCodeForToken)과 동일한 kakaoProperties.getRedirectUri()
+     * 를 사용해 byte 단위 일치를 보장한다(불일치=KOE006). client_id 는 공개 식별자(REST 키)다.
+     *
+     * @param state 앱이 생성한 CSRF 방지 랜덤값(앱이 콜백에서 재검증)
+     */
+    public String buildAuthorizeUrl(String state) {
+        return kakaoProperties.getAuthorizeUri()
+                + "?client_id="     + enc(kakaoProperties.getClientId())
+                + "&redirect_uri="  + enc(kakaoProperties.getRedirectUri())
+                + "&response_type=code"
+                + "&scope="         + enc(SCOPE)
+                + "&state="         + enc(state);
+    }
+
+    /**
+     * Kakao https 콜백(GET)을 앱 커스텀 스킴으로 재작성할 Location 문자열을 만든다.
+     * 리다이렉트 대상 스킴은 설정값(kakao.app-callback-scheme)으로 고정되어 요청 입력을 받지
+     * 않으므로 open-redirect 위험이 없다. 성공 시 code/state, 실패 시 error/error_description 을
+     * URL-encode 하여 쿼리로 전달한다.
+     */
+    public String buildAppCallbackLocation(String code, String state, String error, String errorDescription) {
+        StringBuilder sb = new StringBuilder(kakaoProperties.getAppCallbackScheme());
+        sb.append(kakaoProperties.getAppCallbackScheme().contains("?") ? '&' : '?');
+        if (error != null && !error.isBlank()) {
+            sb.append("error=").append(enc(error));
+            if (errorDescription != null && !errorDescription.isBlank()) {
+                sb.append("&error_description=").append(enc(errorDescription));
+            }
+        } else {
+            sb.append("code=").append(enc(code));
+            if (state != null) {
+                sb.append("&state=").append(enc(state));
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String enc(String v) {
+        return URLEncoder.encode(v == null ? "" : v, StandardCharsets.UTF_8);
+    }
 
     @Transactional
     public AuthResponse processLogin(KakaoLoginRequest request) {
@@ -98,7 +146,14 @@ public class KakaoOAuthService {
             MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
             params.add("grant_type",    "authorization_code");
             params.add("client_id",     kakaoProperties.getClientId());
-            params.add("client_secret", kakaoProperties.getClientSecret());
+            // client_secret 은 2025-12 개편 이후 REST 키에 기본 활성이나, 콘솔에서 비활성한 앱도
+            // 있으므로 값이 있을 때만 포함한다(빈 값 전송 시 Kakao 가 오류로 처리할 수 있음).
+            String clientSecret = kakaoProperties.getClientSecret();
+            if (clientSecret != null && !clientSecret.isBlank()) {
+                params.add("client_secret", clientSecret);
+            }
+            // redirect_uri 는 authorize 단계와 byte 단위 동일해야 한다(불일치=KOE006/invalid_grant).
+            // buildAuthorizeUrl 도 동일한 kakaoProperties.getRedirectUri() 를 사용한다.
             params.add("redirect_uri",  kakaoProperties.getRedirectUri());
             params.add("code",          code);
 

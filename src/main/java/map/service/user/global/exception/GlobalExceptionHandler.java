@@ -13,6 +13,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
@@ -93,6 +94,19 @@ public class GlobalExceptionHandler {
                         .status(400)
                         .code("VALIDATION_ERROR")
                         .message("필수 헤더가 누락되었습니다: " + e.getHeaderName())
+                        .build()
+        );
+    }
+
+    /** 필수 요청 파라미터(@RequestParam) 누락 시 400 으로 반환한다(헤더 누락 처리와 대칭). */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException e) {
+        return ResponseEntity.badRequest().body(
+                ErrorResponse.builder()
+                        .timestamp(LocalDateTime.now())
+                        .status(400)
+                        .code("VALIDATION_ERROR")
+                        .message("필수 파라미터가 누락되었습니다: " + e.getParameterName())
                         .build()
         );
     }
