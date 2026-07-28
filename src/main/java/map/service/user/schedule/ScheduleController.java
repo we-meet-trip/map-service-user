@@ -3,6 +3,7 @@ package map.service.user.schedule;
 import jakarta.validation.Valid;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,12 +38,17 @@ public class ScheduleController {
      * draft 가 없으면 서비스 계층에서 ScheduleNotFoundException(404) 으로 처리된다.
      *
      * request: @Valid @RequestBody ScheduleSaveRequest.
+     * userId: @AuthenticationPrincipal 로 주입되는 소유자 식별자. JWT 필터가 채운
+     *         SecurityContext 의 principal(Long). 토큰이 없거나 익명(anonymousUser
+     *         String)인 경우 리졸버가 null 로 해석하여 소유자 미지정으로 저장한다
+     *         (auth.enforced=false + 토큰 부재 시 현행 동작과 동일).
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> save(
-            @Valid @RequestBody ScheduleSaveRequest request
+            @Valid @RequestBody ScheduleSaveRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        Long scheduleId = service.persist(request);
+        Long scheduleId = service.persist(request, userId);
         return ResponseEntity.ok(Map.of("schedule_id", scheduleId));
     }
 }

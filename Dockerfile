@@ -13,13 +13,13 @@
 # =============================================================================
 
 # syntax=docker/dockerfile:1.7
-# map-service-user — Spring Boot 3.4.2 + JDK 17 BFF (E1)
+# map-service-user — user-BFF 컨테이너 이미지
 
 # ---- builder : 소스 → bootJar ----
 # - gradle 이미지 위에서 워크스페이스를 복사하고 bootJar 만 빌드한다.
 # - 테스트는 -x test 로 스킵 (테스트는 CI 단계에서 별도로 수행).
 # - --no-daemon : 데몬 잔여 프로세스 회피.
-FROM gradle:8.10-jdk17 AS builder
+FROM gradle:8.12-jdk17 AS builder
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
 RUN gradle clean bootJar -x test --no-daemon

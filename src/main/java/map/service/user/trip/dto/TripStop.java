@@ -16,6 +16,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * latitude/longitude: places 의 lat/lng.
  * transportToNext: 다음 stop 으로의 이동. 마지막 stop 은 null 이며,
  *                  null 인 경우 직렬화에서 키를 생략한다(client 는 null 허용).
+ * source: 장소 출처("kakao" | "durunubi"). 없으면 키 생략.
+ * category: 분류 텍스트. 없으면 키 생략.
+ * grounded: 실측 후보에 근거한 장소면 true, LLM 단독 생성이면 false.
+ *           없으면 키 생략(저신뢰 신호로 client 가 활용).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TripStop(
@@ -25,6 +29,9 @@ public record TripStop(
         String time,
         double latitude,
         double longitude,
-        @JsonProperty("transport_to_next") TransportToNext transportToNext
+        @JsonProperty("transport_to_next") TransportToNext transportToNext,
+        String source,
+        String category,
+        Boolean grounded
 ) {
 }

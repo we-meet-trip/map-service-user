@@ -8,7 +8,7 @@
 # - spring.application : 서비스 식별자
 # - spring.datasource  : PostgreSQL 연결 (user_service 스키마 사용)
 # - spring.jpa         : Hibernate ddl-auto=validate (스키마 변경 금지)
-# - spring.flyway      : V001 / V002 마이그레이션 자동 실행 (user_service 스키마)
+# - spring.flyway      : db/migration 마이그레이션 자동 실행 (user_service 스키마)
 # - spring.data.redis  : 기본 연결 (DB0). repositories.enabled=false 로
 #                        Spring Data Redis Repository 자동 활성화 비활성
 # - spring.jackson     : LocalDate / LocalTime 등 시간 직렬화 정책, 미정의 필드 허용
@@ -17,7 +17,9 @@
 # - redis.db-*         : 멀티 DB 번호 매핑 (RedisConfig 가 참조)
 # - server             : 서비스 포트
 # - management         : Actuator 노출 엔드포인트
-# - jwt                : JWT 발급/검증용 secret 및 TTL
+# - jwt                : RS256 서명 키쌍 및 토큰 TTL
+# - kakao              : Kakao OAuth 클라이언트 설정 (KakaoProperties 참조)
+# - cors               : 교차 출처 허용 정책 (CorsProperties 참조)
 #
 # 참고:
 # - ServiceUserApplication 에서 RedisRepositoriesAutoConfiguration 을 제외하므로
@@ -63,6 +65,9 @@ spring:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
+      # password : Redis AUTH 비밀번호. 비우면 무인증(현행 동작). RedisConfig 가
+      #            비어있지 않을 때만 모든 용도별 ConnectionFactory 에 적용한다.
+      password: ${REDIS_PASSWORD:}
       repositories:
         enabled: false
   # ---- spring.jackson : JSON 직렬화 정책 ----
@@ -80,18 +85,36 @@ spring:
 # AgentClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
 # - base-url        : agent 서비스 base URL
 # - timeout-seconds : RestClient 의 readTimeout (초)
+# - internal-token  : B2 내부 서비스 인증 토큰(SoT §5.5). 비우면 헤더 미부착.
+#                     agent 의 INTERNAL_SERVICE_TOKEN 과 동일 값이어야 한다.
 agent:
   base-url: ${AGENT_BASE_URL:http://agent:8000}
   timeout-seconds: ${AGENT_TIMEOUT_SECONDS:60}
+  internal-token: ${INTERNAL_SERVICE_TOKEN:}
 
 # ---- hub : hub 게이트웨이 호출 설정 (경계 B3) ----
 # HubClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
 # trip 응답의 weather_forecast 를 채우기 위해 HubWeatherClient 가 /v1/weather 를 호출한다.
 # - base-url        : hub 서비스 base URL (도커: http://hub:8000, 로컬 BFF: http://localhost:8001)
 # - timeout-seconds : RestClient 의 readTimeout (초)
+# - internal-token  : 내부 서비스 인증 토큰. 비우면 헤더 미부착(현행). hub 의
+#                     INTERNAL_SERVICE_TOKEN 과 동일 값이어야 한다.
 hub:
   base-url: ${HUB_BASE_URL:http://hub:8000}
   timeout-seconds: ${HUB_TIMEOUT_SECONDS:5}
+  internal-token: ${INTERNAL_SERVICE_TOKEN:}
+
+# ---- internal.admin : /internal/admin/** 위임 가드 (경계 B9) ----
+# InternalAdminGuardFilter / InternalAdminSecurityConfig 가 본 섹션을 참조한다.
+# map-service-admin(운영 콘솔)이 회원/추천작업/DLQ 를 위임 조회·조작할 때 통과하는
+# CIDR 화이트리스트 + 공유 토큰 가드. hub 의 internal_guard 규약을 미러링한다.
+# - trusted-cidrs : 허용 사설 CIDR 목록(map-net 컨테이너 네트워크 한정)
+# - token         : X-Internal-Token 기대값. INTERNAL_SERVICE_TOKEN 재사용.
+#                   비우면 fail-closed(헤더가 있어도 일치 불가 → 접근 차단).
+internal:
+  admin:
+    trusted-cidrs: ${USER_INTERNAL_TRUSTED_CIDRS:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
+    token: ${INTERNAL_SERVICE_TOKEN:}
 
 # ---- trip : 동기 trip 생성 facade 설정 ----
 # TripService 가 본 섹션을 참조한다.
@@ -100,6 +123,12 @@ hub:
 trip:
   poll-timeout-seconds: ${TRIP_POLL_TIMEOUT_SECONDS:120}
   poll-interval-ms: ${TRIP_POLL_INTERVAL_MS:700}
+
+# ---- recommend : 추천 도메인 설정 ----
+# ResearchLimitService 가 본 섹션을 참조한다.
+# - research-daily-limit : Mode1 재추천 일일 한도(일정/잡 단위). KST 자정 리셋.
+recommend:
+  research-daily-limit: ${RESEARCH_DAILY_LIMIT:3}
 
 # ---- streams : Redis Streams 컨슈머 설정 ----
 # StreamsConsumerConfig / RecommendJobsConsumer 가 본 섹션을 참조한다.
@@ -112,6 +141,9 @@ trip:
 # - recommend-min-idle-ms        : reclaim 대상 최소 idle(ms)
 # - recommend-reclaim-interval-ms: PEL reclaim 스케줄 주기(ms)
 # - recommend-reclaim-batch      : reclaim 라운드당 XPENDING 조회 건수
+# - command-timeout-sec          : streams 전용 Lettuce commandTimeout(초). 폴링 BLOCK(2초)에
+#                                  여유를 두어 일시적 지연 시 폴 태스크 사망을 줄인다.
+# - watchdog-interval-ms         : 구독 비활성 감지 시 재구독하는 워치독 주기(ms)
 streams:
   recommend-stream: ${STREAM_NAME:agent:jobs:done}
   recommend-group: ${STREAM_GROUP:bff-result}
@@ -122,18 +154,24 @@ streams:
   recommend-min-idle-ms: ${STREAM_MIN_IDLE_MS:60000}
   recommend-reclaim-interval-ms: ${STREAM_RECLAIM_INTERVAL_MS:30000}
   recommend-reclaim-batch: ${STREAM_RECLAIM_BATCH:64}
+  command-timeout-sec: ${STREAMS_COMMAND_TIMEOUT_SEC:6}
+  watchdog-interval-ms: ${STREAMS_WATCHDOG_INTERVAL_MS:10000}
 
 # ---- redis : 용도별 Redis 논리 DB 번호 매핑 ----
 # RedisConfig 가 본 섹션을 참조하여 용도별 ConnectionFactory 의 DB 번호를 결정한다.
 # - db-default       : 기본 DB
+# - db-blacklist     : JWT 블랙리스트 전용 (blacklistRedisTemplate)
 # - db-streams       : Streams 전용 (streamsConnectionFactory)
 # - db-counters      : 카운터 전용 (countersConnectionFactory)
+# - db-ratelimit     : 인증 레이트리밋 전용 (rateLimitRedisTemplate)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
 # - draft-ttl-seconds: 초안 키 기본 TTL (초)
 redis:
   db-default: ${REDIS_DB_DEFAULT:0}
+  db-blacklist: ${REDIS_DB_BLACKLIST:1}
   db-streams: ${REDIS_DB_STREAMS:2}
   db-counters: ${REDIS_DB_COUNTERS:3}
+  db-ratelimit: ${REDIS_DB_RATELIMIT:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
 
@@ -143,24 +181,64 @@ server:
   port: 8080
 
 # ---- management : Spring Boot Actuator ----
-# - endpoints.web.exposure.include : 외부 노출 엔드포인트 (health, info)
+# - endpoints.web.exposure.include : 외부 노출 엔드포인트 (health, info, prometheus)
 # - endpoint.health.probes.enabled : liveness / readiness 프로브 활성화
+# - prometheus : micrometer-registry-prometheus 가 /actuator/prometheus 를 제공.
+#   map-net 내부(loopback) Prometheus 만 스크레이프한다(SecurityConfig 공개 목록).
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  # http.server.requests 히스토그램 버킷 노출 → Grafana p95 등 분위수 쿼리 가능
+  # (미설정 시 count/sum 만 노출되어 histogram_quantile 이 No data).
+  metrics:
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
 
 # ---- jwt : JWT 발급/검증 설정 ----
-# auth 패키지의 토큰 발급/검증 로직이 본 섹션을 참조한다.
-# - secret      : 서명용 비밀키 (환경변수 필수)
-# - access-ttl  : Access 토큰 유효기간 (초)
-# - refresh-ttl : Refresh 토큰 유효기간 (초)
+# JwtProperties / JwtConfig 가 본 섹션을 참조하여 서명 키쌍과 토큰 만료를 구성한다.
+# - private-key                 : 서명용 RSA 개인키 (Base64 PKCS8). 미설정 시 임시 키 생성
+# - public-key                  : 검증용 RSA 공개키 (Base64 X509)
+# - access-token-expiry-seconds : Access 토큰 유효기간 (초)
+# - refresh-token-expiry-seconds: Refresh 토큰 유효기간 (초)
 jwt:
-  secret: ${JWT_SECRET}
-  access-ttl: ${JWT_ACCESS_TTL:3600}
-  refresh-ttl: ${JWT_REFRESH_TTL:2592000}
+  private-key: ${JWT_PRIVATE_KEY:}
+  public-key: ${JWT_PUBLIC_KEY:}
+  access-token-expiry-seconds: ${JWT_ACCESS_TTL:3600}
+  refresh-token-expiry-seconds: ${JWT_REFRESH_TTL:2592000}
+
+# ---- kakao : Kakao OAuth 클라이언트 설정 ----
+# KakaoProperties / KakaoOAuthService 가 본 섹션을 참조한다.
+# - client-id / client-secret : Kakao 앱 자격증명 (환경변수 주입)
+# - redirect-uri              : 인가 코드 콜백 URI. Kakao 콘솔 등록값과 byte 단위 일치해야 함.
+#   커스텀 스킴은 Kakao 콘솔에 등록 불가(https만) → 반드시 https 백엔드 콜백을 등록/주입한다.
+# - authorize-uri             : Kakao 인가 요청 엔드포인트 (authorize URL 조립용)
+# - app-callback-scheme       : 인가 코드 캡처 후 앱으로 복귀시킬 커스텀 스킴 (GET 바운스 콜백 대상)
+# - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
+kakao:
+  client-id: ${KAKAO_OAUTH_CLIENT_ID:}
+  client-secret: ${KAKAO_OAUTH_CLIENT_SECRET:}
+  redirect-uri: ${KAKAO_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
+  authorize-uri: ${KAKAO_AUTHORIZE_URI:https://kauth.kakao.com/oauth/authorize}
+  app-callback-scheme: ${KAKAO_APP_CALLBACK_SCHEME:mapauth://kakao}
+  token-uri: ${KAKAO_TOKEN_URI:https://kauth.kakao.com/oauth/token}
+  user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
+
+# ---- cors : 교차 출처 허용 정책 ----
+# CorsProperties / SecurityConfig 가 본 섹션을 참조한다.
+# - allowed-origins : 허용 출처 목록. 와일드카드(*)는 자격증명 비포함 모드로 동작
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+
+# ---- auth : 인가 시행 플래그 ----
+# SecurityConfig / AuthStartupValidator 가 본 섹션을 참조한다.
+# - enforced=false(기본): 전 엔드포인트 공개(현행 동작 보존). 클라이언트 호환 유지.
+# - enforced=true       : 도메인 엔드포인트 인증 필수. 부팅 시 JWT 키/CORS 전제 검증.
+auth:
+  enforced: ${AUTH_ENFORCED:false}

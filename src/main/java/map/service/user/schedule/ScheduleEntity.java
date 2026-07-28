@@ -107,6 +107,13 @@ public class ScheduleEntity {
     }
 
     /**
+     * 소유자 식별자 반환. 미지정(익명/토큰 부재) 시 null.
+     */
+    public Long getUserId() {
+        return userId;
+    }
+
+    /**
      * jobId UUID 반환(@Pattern 검증된 값).
      */
     public UUID getJobId() {

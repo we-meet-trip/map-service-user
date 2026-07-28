@@ -2,6 +2,7 @@ package map.service.user;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 /**
  * ServiceUserApplicationTests — 애플리케이션 컨텍스트 로딩 스모크 테스트
@@ -18,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * - 별도 assert 없이 contextLoads() 가 예외 없이 종료되면 통과로 본다.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 class ServiceUserApplicationTests {
 
     /**

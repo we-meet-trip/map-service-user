@@ -16,6 +16,9 @@ import map.service.user.recommend.dto.Leg;
 import map.service.user.recommend.dto.Place;
 import map.service.user.recommend.dto.RecommendRequest;
 import map.service.user.recommend.dto.RecommendResponse;
+import map.service.user.trip.dto.HubDirectionsDtos.LegReq;
+import map.service.user.trip.dto.HubDirectionsDtos.Point;
+import map.service.user.trip.dto.HubDirectionsDtos.Route;
 import map.service.user.trip.dto.HubWeatherResponse;
 import map.service.user.trip.dto.Schedule;
 import map.service.user.trip.dto.TransportToNext;
@@ -52,6 +55,7 @@ public class TripService {
     private final AgentClient agentClient;
     private final DraftStore draftStore;
     private final HubWeatherClient hubWeatherClient;
+    private final HubDirectionsClient hubDirectionsClient;
     private final ObjectMapper objectMapper;
     private final long pollTimeoutSeconds;
     private final long pollIntervalMs;
@@ -60,6 +64,7 @@ public class TripService {
             AgentClient agentClient,
             DraftStore draftStore,
             HubWeatherClient hubWeatherClient,
+            HubDirectionsClient hubDirectionsClient,
             ObjectMapper objectMapper,
             @Value("${trip.poll-timeout-seconds:120}") long pollTimeoutSeconds,
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
@@ -67,6 +72,7 @@ public class TripService {
         this.agentClient = agentClient;
         this.draftStore = draftStore;
         this.hubWeatherClient = hubWeatherClient;
+        this.hubDirectionsClient = hubDirectionsClient;
         this.objectMapper = objectMapper;
         this.pollTimeoutSeconds = pollTimeoutSeconds;
         this.pollIntervalMs = pollIntervalMs;
@@ -100,10 +106,16 @@ public class TripService {
             throw new TripGenerationException(reason);
         }
 
-        // 4) stops 변환
+        // 4) stops 변환 (경로 성공 구간은 이동 시간/거리를 OSRM 실측으로 대체)
         Schedule schedule = request.schedule();
         List<TripStop> stops = toStops(request, result, schedule);
-        int totalDuration = TripMapping.totalDurationMinutes(result.legs());
+        // total 은 최종 이동 카드의 시간 합(실측 대체 반영). 마지막 stop 은 카드 없음.
+        int totalDuration = 0;
+        for (TripStop s : stops) {
+            if (s.transportToNext() != null) {
+                totalDuration += s.transportToNext().durationMinutes();
+            }
+        }
 
         // 5) 날씨(best-effort)
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
@@ -127,13 +139,17 @@ public class TripService {
                 s.endDate(),
                 TripMapping.hourToLocalTime(s.activeStartHour()),
                 TripMapping.hourToLocalTime(s.activeEndHour()));
+        // 동기 facade 는 항상 초기 추천이다 — stage="init", exclude 없음.
         return new RecommendRequest(
                 date,
                 TripMapping.toAgentBudget(req.budget()),
                 req.themes(),
                 TripMapping.toAgentMobility(req.transport()),
                 province,
-                city);
+                city,
+                null,
+                "init",
+                null);
     }
 
     /** draft 가 나타날 때까지 폴링. 한도 초과 시 TripTimeoutException. */
@@ -167,8 +183,8 @@ public class TripService {
         }
     }
 
-    /** places + visit_order + legs → client stops[]. */
-    private static List<TripStop> toStops(
+    /** places + visit_order + legs → client stops[]. 경로 성공 구간은 실측 대체. */
+    private List<TripStop> toStops(
             TripGenerateRequest req, RecommendResponse result, Schedule schedule
     ) {
         List<Place> places = result.places();
@@ -187,20 +203,35 @@ public class TripService {
         String transport = req.transport();
         String label = TripMapping.transportLabel(transport);
 
-        List<TripStop> stops = new ArrayList<>(n);
+        // 방문 순서대로 Place 를 미리 확정(누락 검증 포함) → 구간 좌표 구성에 재사용.
+        List<Place> ordered = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             Place p = byId.get(order.get(i));
             if (p == null) {
                 throw new TripGenerationException(
                         "place_id " + order.get(i) + " missing in places");
             }
+            ordered.add(p);
+        }
+
+        // 도로 추종 경로 배치 조회(best-effort). null 이면 전 구간 직선 폴백.
+        List<Route> routes = fetchRoutes(transport, ordered);
+
+        List<TripStop> stops = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Place p = ordered.get(i);
             TransportToNext toNext = null;
             if (i < n - 1 && legs != null && i < legs.size()) {
                 Leg leg = legs.get(i);
-                toNext = new TransportToNext(
+                // 기저 이동 카드(LLM 추정치)에서 시작, 경로 성공 구간은 실측 대체.
+                TransportToNext base = new TransportToNext(
                         transport, label,
                         leg.estimatedDurationMin(),
-                        leg.estimatedDistanceKm());
+                        leg.estimatedDistanceKm(),
+                        null);
+                Route route = (routes != null && i < routes.size())
+                        ? routes.get(i) : null;
+                toNext = withMeasured(base, route);
             }
             stops.add(new TripStop(
                     i + 1,
@@ -209,8 +240,71 @@ public class TripService {
                     TripMapping.stopTime(startHour, endHour, i, n),
                     p.lat(),
                     p.lng(),
-                    toNext));
+                    toNext,
+                    p.source(),
+                    p.category(),
+                    p.grounded()));
         }
         return stops;
+    }
+
+    /**
+     * 이동 구간의 도로 추종 경로를 hub 에 일괄 요청한다.
+     *
+     * 라우팅 대상이 아닌 이동수단(bus/transit) 또는 구간이 1개 미만이면
+     * 호출하지 않고 null(전 구간 직선 폴백)을 돌려준다. 그 외는 인접 방문지
+     * 좌표쌍으로 legs 를 구성해 배치 1회 호출한다(hub 가 내부에서 병렬 팬아웃).
+     *
+     * ordered: 방문 순서대로 확정된 Place 목록.
+     * @return routes(legs 와 같은 길이·인덱스, 원소는 실패 시 null), 또는 미호출 시 null.
+     */
+    private List<Route> fetchRoutes(String transport, List<Place> ordered) {
+        if (ordered.size() < 2 || !isRoutable(transport)) {
+            return null;
+        }
+        List<LegReq> legs = new ArrayList<>(ordered.size() - 1);
+        for (int i = 0; i < ordered.size() - 1; i++) {
+            Place a = ordered.get(i);
+            Place b = ordered.get(i + 1);
+            legs.add(new LegReq(
+                    new Point(a.lat(), a.lng()),
+                    new Point(b.lat(), b.lng()),
+                    legName(a.name()),
+                    legName(b.name())));
+        }
+        return hubDirectionsClient.fetchRoutes(transport, legs);
+    }
+
+    /** 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외). */
+    private static boolean isRoutable(String transport) {
+        return "walk".equals(transport)
+                || "bicycle".equals(transport)
+                || "scooter".equals(transport);
+    }
+
+    /** hub 계약(start_name/goal_name: 1~60자)에 맞게 장소명을 정리한다. */
+    private static String legName(String name) {
+        if (name == null || name.isBlank()) {
+            return "지점";
+        }
+        String trimmed = name.strip();
+        return trimmed.length() > 60 ? trimmed.substring(0, 60) : trimmed;
+    }
+
+    /**
+     * 경로 성공 구간의 이동 카드를 실측값으로 대체한다.
+     *
+     * route 가 null(구간 실패/미조회)이면 기저 카드(LLM 추정)를 그대로 둔다.
+     * 성공 시 시간=올림(초→분, 최소 1분), 거리=반올림(m→km, 소수 2자리),
+     * path=도로 폴리라인을 부착한다.
+     */
+    static TransportToNext withMeasured(TransportToNext base, Route route) {
+        if (route == null) {
+            return base;
+        }
+        int durationMinutes = Math.max(1, (int) Math.ceil(route.durationS() / 60.0));
+        double distanceKm = Math.round(route.distanceM() / 10.0) / 100.0;
+        return new TransportToNext(
+                base.type(), base.label(), durationMinutes, distanceKm, route.path());
     }
 }

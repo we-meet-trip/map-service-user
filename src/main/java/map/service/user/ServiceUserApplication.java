@@ -3,6 +3,7 @@ package map.service.user;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * ServiceUserApplication — user-BFF 서비스의 부트 진입점
@@ -18,6 +19,10 @@ import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoCo
  *   (application.yml 에서도 spring.data.redis.repositories.enabled=false 로
  *    Repository 자동 활성화를 끄고 있다.)
  *
+ * 설정 프로퍼티 스캔:
+ * - global.config 패키지의 @ConfigurationProperties 빈(JwtProperties,
+ *   KakaoProperties, CorsProperties)을 일괄 등록한다.
+ *
  * 실행 흐름:
  * - main() 은 SpringApplication.run() 으로 컨텍스트를 기동한다.
  * - 기동 후 RedisConfig / AgentClientConfig / StreamsConsumerConfig 가
@@ -25,6 +30,7 @@ import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoCo
  *   빈으로 등록한다.
  */
 @SpringBootApplication(exclude = {RedisRepositoriesAutoConfiguration.class})
+@ConfigurationPropertiesScan("map.service.user.global.config")
 public class ServiceUserApplication {
 
     /**
@@ -35,5 +41,5 @@ public class ServiceUserApplication {
     public static void main(String[] args) {
         SpringApplication.run(ServiceUserApplication.class, args);
     }
-
 }
+

@@ -87,12 +87,13 @@ public class RecommendController {
      * draft 가 없거나 머지 대상 형식이 아니면 404.
      *
      * jobId: @PathVariable. 수정 대상 추천 작업.
-     * edit: @RequestBody EditRequest. places/visit_order/legs 부분 갱신 데이터.
+     * edit: @Valid @RequestBody EditRequest. places 가 있으면 각 Place 좌표
+     *       범위(33~43 / 124~132)를 검증하며, 위반 시 400.
      */
     @PostMapping("/{jobId}/edit")
     public ResponseEntity<String> edit(
             @PathVariable String jobId,
-            @RequestBody EditRequest edit
+            @Valid @RequestBody EditRequest edit
     ) {
         Optional<String> updated = service.applyEdit(jobId, edit);
         return updated

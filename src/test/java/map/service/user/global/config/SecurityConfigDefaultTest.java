@@ -1,0 +1,85 @@
+package map.service.user.global.config;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.Optional;
+import map.service.user.global.jwt.JwtService;
+import map.service.user.global.ratelimit.RateLimitFilter;
+import map.service.user.global.ratelimit.RateLimitService;
+import map.service.user.global.security.JwtAuthenticationFilter;
+import map.service.user.recommend.RecommendController;
+import map.service.user.recommend.RecommendService;
+import map.service.user.schedule.ScheduleController;
+import map.service.user.schedule.ScheduleSaveRequest;
+import map.service.user.schedule.ScheduleService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+/**
+ * SecurityConfigDefaultTest — auth.enforced=false(기본) 동작 검증
+ *
+ * 플래그 미설정 시 보호 대상 엔드포인트가 토큰 없이도 도달 가능(permitAll)한지,
+ * 그리고 익명 요청에서 @AuthenticationPrincipal Long 이 ClassCastException 없이
+ * null 로 해석되어 현행 동작(user_id=null)이 보존되는지 확인한다. 실제 SecurityConfig
+ * 필터 체인과 실 JWT/RateLimit 필터, 익명 인증 필터를 그대로 사용한다.
+ */
+@WebMvcTest({RecommendController.class, ScheduleController.class})
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class,
+        RateLimitFilter.class, CorsProperties.class})
+@DisplayName("SecurityConfig 기본(플래그 off) 테스트")
+class SecurityConfigDefaultTest {
+
+    @Autowired private MockMvc mockMvc;
+
+    @MockitoBean private JwtService jwtService;
+    @MockitoBean private RateLimitService rateLimitService;
+    @MockitoBean private RecommendService recommendService;
+    @MockitoBean private ScheduleService scheduleService;
+
+    @BeforeEach
+    void setUp() {
+        when(recommendService.findDraft(anyString())).thenReturn(Optional.empty());
+    }
+
+    @Test
+    @DisplayName("토큰 없이 보호 대상 엔드포인트 도달 가능 (401 아님)")
+    void protectedEndpointReachableWithoutToken() throws Exception {
+        // draft 미존재 → 컨트롤러가 202 Accepted 반환. 401 이 아니므로 공개(permitAll)가 유지됨.
+        mockMvc.perform(get("/api/v1/recommend/job-1"))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    @DisplayName("익명 POST — @AuthenticationPrincipal Long 이 null 로 해석(현행 동작 보존)")
+    void anonymousPrincipalResolvesToNull() throws Exception {
+        when(scheduleService.persist(any(ScheduleSaveRequest.class), any())).thenReturn(100L);
+
+        // 인증 없이 POST. 익명 principal("anonymousUser" String)은 Long 파라미터로
+        // 캐스팅되지 않아 리졸버가 null 을 주입한다(ClassCastException 아님) → 200.
+        mockMvc.perform(post("/api/v1/schedules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"job_id\":\"11111111-1111-1111-1111-111111111111\","
+                                + "\"title\":\"t\",\"date_start\":\"2026-07-06\","
+                                + "\"date_end\":\"2026-07-07\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Long> userIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(scheduleService).persist(any(ScheduleSaveRequest.class), userIdCaptor.capture());
+        assertThat(userIdCaptor.getValue()).isNull();
+    }
+}

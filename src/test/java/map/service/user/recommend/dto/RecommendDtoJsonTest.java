@@ -1,0 +1,83 @@
+package map.service.user.recommend.dto;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.junit.jupiter.api.Test;
+
+/**
+ * RecommendDtoJsonTest — agent 확장 페이로드(reason/clothing)의 매핑 검증
+ *
+ * agent JobDonePayload 확장 필드가 dto 로 역직렬화되는지, 미포함(과거
+ * 페이로드)이어도 하위호환으로 null 매핑되는지 확인한다.
+ */
+class RecommendDtoJsonTest {
+
+    // 운영에서는 Spring 자동구성 ObjectMapper(JavaTimeModule 포함)를 쓴다 —
+    // 단위 테스트도 동일하게 LocalDate/LocalTime 직렬화를 등록한다.
+    private final ObjectMapper mapper =
+            new ObjectMapper().registerModule(new JavaTimeModule());
+
+    @Test
+    void deserializesReasonAndClothing() throws Exception {
+        String json = """
+                {"job_id":"j1","status":"done",
+                 "places":[{"place_id":0,"name":"장소","address":"주소",
+                   "lat":37.5,"lng":127.0,"recommended_visit_time":"오전",
+                   "content_id":"kakao:1","source":"kakao",
+                   "category":"카페","grounded":true,"reason":"조용한 분위기"}],
+                 "visit_order":[0],
+                 "legs":[],
+                 "clothing":"가벼운 겉옷과 우산",
+                 "error":null}""";
+
+        RecommendResponse response =
+                mapper.readValue(json, RecommendResponse.class);
+
+        assertThat(response.clothing()).isEqualTo("가벼운 겉옷과 우산");
+        assertThat(response.places()).hasSize(1);
+        assertThat(response.places().get(0).reason())
+                .isEqualTo("조용한 분위기");
+        assertThat(response.places().get(0).grounded()).isTrue();
+    }
+
+    @Test
+    void toleratesPayloadWithoutNewFields() throws Exception {
+        // 구 버전 agent 페이로드(reason/clothing 부재) 하위호환
+        String json = """
+                {"job_id":"j2","status":"done",
+                 "places":[{"place_id":0,"name":"장소","address":"주소",
+                   "lat":37.5,"lng":127.0,"recommended_visit_time":"오전"}],
+                 "visit_order":[0],
+                 "legs":[]}""";
+
+        RecommendResponse response =
+                mapper.readValue(json, RecommendResponse.class);
+
+        assertThat(response.clothing()).isNull();
+        assertThat(response.places().get(0).reason()).isNull();
+    }
+
+    @Test
+    void serializesRequestWithStageAndExclude() throws Exception {
+        String json = mapper.writeValueAsString(new RecommendRequest(
+                new DateRange(
+                        java.time.LocalDate.of(2026, 7, 6),
+                        java.time.LocalDate.of(2026, 7, 6),
+                        java.time.LocalTime.of(9, 0),
+                        java.time.LocalTime.of(18, 0)),
+                null,
+                null,
+                null,
+                "서울특별시",
+                "강남구",
+                "sched-1",
+                "mode1",
+                java.util.List.of("kakao:1")));
+
+        assertThat(json).contains("\"schedule_id\":\"sched-1\"");
+        assertThat(json).contains("\"stage\":\"mode1\"");
+        assertThat(json).contains("\"exclude\":[\"kakao:1\"]");
+    }
+}
