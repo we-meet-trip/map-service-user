@@ -121,6 +121,13 @@ public class ScheduleEntity {
     }
 
     /**
+     * 일정 제목 반환. 미지정 시 null.
+     */
+    public String getTitle() {
+        return title;
+    }
+
+    /**
      * 시작일 반환.
      */
     public LocalDate getDateStart() {

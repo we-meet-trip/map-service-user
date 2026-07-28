@@ -59,6 +59,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
+    // WebSocket + STOMP (실시간 채팅). spring-websocket + spring-messaging 포함.
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
     // Prometheus 계측: /actuator/prometheus 노출(모니터링 스택이 스크레이프)
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
