@@ -70,3 +70,6 @@ codex-work/
 
 # 커밋 메시지 초안 (로컬 전용, 커밋 대상 아님)
 commit_contents.md
+
+# === 내부 작업 문서 (팀 공유 대상 아님) ===
+docs/superpowers/

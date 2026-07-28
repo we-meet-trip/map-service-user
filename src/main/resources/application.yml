@@ -125,10 +125,19 @@ trip:
   poll-interval-ms: ${TRIP_POLL_INTERVAL_MS:700}
 
 # ---- recommend : 추천 도메인 설정 ----
-# ResearchLimitService 가 본 섹션을 참조한다.
-# - research-daily-limit : Mode1 재추천 일일 한도(일정/잡 단위). KST 자정 리셋.
+# ResearchLimitService / RecommendCacheKey / RecommendService / RecommendCacheConfig 가
+# 본 섹션을 참조한다. (최상위 키가 하나여야 하므로 재추천 한도와 재사용 캐시 정책을 함께 둔다)
+# - research-daily-limit         : Mode1 재추천 일일 한도(일정/잡 단위). KST 자정 리셋.
+# - cache-budget-round-step      : budget 근사 매칭용 내림(floor) 단위(원)
+# - cache-time-round-step-minutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분)
+# - cache-refresh-every-hits     : 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
+# - cache-refresh-queue-capacity : 백그라운드 갱신 대기열 최대 크기(초과분은 로그 남기고 버림)
 recommend:
   research-daily-limit: ${RESEARCH_DAILY_LIMIT:3}
+  cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}
+  cache-time-round-step-minutes: ${RECOMMEND_CACHE_TIME_ROUND_STEP_MINUTES:60}
+  cache-refresh-every-hits: ${RECOMMEND_CACHE_REFRESH_EVERY_HITS:3}
+  cache-refresh-queue-capacity: ${RECOMMEND_CACHE_REFRESH_QUEUE_CAPACITY:100}
 
 # ---- streams : Redis Streams 컨슈머 설정 ----
 # StreamsConsumerConfig / RecommendJobsConsumer 가 본 섹션을 참조한다.
@@ -166,7 +175,11 @@ streams:
 # - db-ratelimit     : 인증 레이트리밋 전용 (rateLimitRedisTemplate)
 # - db-drafts        : 초안 전용   (draftsConnectionFactory)
 # - db-chat          : 채팅 전용   (chatConnectionFactory) — 프레즌스 키. 발행/구독 채널은 DB 무관
-# - draft-ttl-seconds: 초안 키 기본 TTL (초)
+# - db-cache         : 재사용 캐시 전용 (cacheConnectionFactory). DB5 는 채팅(경계 B8)이
+#                      선점했으므로 충돌 방지를 위해 DB6 을 사용한다.
+# - draft-ttl-seconds       : 초안 키 기본 TTL (초)
+# - cache-ttl-seconds       : 재사용 캐시 본체/히트카운터 TTL (초, 기본 7일)
+# - cache-link-ttl-seconds  : job_id→hash 연결고리 TTL (초, draft TTL과 동일)
 redis:
   db-default: ${REDIS_DB_DEFAULT:0}
   db-blacklist: ${REDIS_DB_BLACKLIST:1}
@@ -175,7 +188,12 @@ redis:
   db-ratelimit: ${REDIS_DB_RATELIMIT:3}
   db-drafts: ${REDIS_DB_DRAFTS:4}
   db-chat: ${REDIS_DB_CHAT:5}
+  db-cache: ${REDIS_DB_CACHE:6}
   draft-ttl-seconds: ${REDIS_DRAFT_TTL_SECONDS:3600}
+  cache-ttl-seconds: ${REDIS_CACHE_TTL_SECONDS:604800}
+  cache-link-ttl-seconds: ${REDIS_CACHE_LINK_TTL_SECONDS:3600}
+
+# (재사용 캐시 매칭/갱신 정책은 위 recommend 블록으로 통합했다 — 최상위 키 중복 금지)
 
 # ---- chat : 채팅 도메인 설정 ----
 # ChatProperties 가 본 섹션을 참조한다.
