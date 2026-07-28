@@ -25,7 +25,9 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -155,6 +157,51 @@ class AuthControllerTest {
                         ))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_002"));
+    }
+
+    // ── GET /api/v1/auth/kakao (authorize URL 발급) ─────────────────────────
+
+    @Test
+    @DisplayName("카카오 authorize URL — state 포함 시 200 OK 및 authorizeUrl 반환")
+    void kakaoAuthorizeUrl_withState_returns200() throws Exception {
+        when(kakaoOAuthService.buildAuthorizeUrl(any()))
+                .thenReturn("https://kauth.kakao.com/oauth/authorize?client_id=k&state=abc");
+
+        mockMvc.perform(get("/api/v1/auth/kakao").param("state", "abc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authorizeUrl")
+                        .value("https://kauth.kakao.com/oauth/authorize?client_id=k&state=abc"));
+    }
+
+    @Test
+    @DisplayName("카카오 authorize URL — state 누락 시 400 Bad Request")
+    void kakaoAuthorizeUrl_missingState_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/kakao"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── GET /api/v1/auth/kakao/callback (앱 스킴 바운스) ─────────────────────
+
+    @Test
+    @DisplayName("카카오 GET 바운스 — code/state 를 앱 스킴 Location 으로 302 리다이렉트")
+    void kakaoCallbackBounce_success_returns302() throws Exception {
+        when(kakaoOAuthService.buildAppCallbackLocation(any(), any(), any(), any()))
+                .thenReturn("mapauth://kakao?code=c1&state=s1");
+
+        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "c1").param("state", "s1"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "mapauth://kakao?code=c1&state=s1"));
+    }
+
+    @Test
+    @DisplayName("카카오 GET 바운스 — error 파라미터도 앱 스킴 Location 으로 302 전달")
+    void kakaoCallbackBounce_error_returns302() throws Exception {
+        when(kakaoOAuthService.buildAppCallbackLocation(any(), any(), any(), any()))
+                .thenReturn("mapauth://kakao?error=access_denied");
+
+        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("error", "access_denied"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "mapauth://kakao?error=access_denied"));
     }
 
     // ── POST /api/v1/auth/kakao/callback ────────────────────────────────────

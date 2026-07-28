@@ -243,12 +243,17 @@ jwt:
 # ---- kakao : Kakao OAuth 클라이언트 설정 ----
 # KakaoProperties / KakaoOAuthService 가 본 섹션을 참조한다.
 # - client-id / client-secret : Kakao 앱 자격증명 (환경변수 주입)
-# - redirect-uri              : 인가 코드 콜백 URI
+# - redirect-uri              : 인가 코드 콜백 URI. Kakao 콘솔 등록값과 byte 단위 일치해야 함.
+#   커스텀 스킴은 Kakao 콘솔에 등록 불가(https만) → 반드시 https 백엔드 콜백을 등록/주입한다.
+# - authorize-uri             : Kakao 인가 요청 엔드포인트 (authorize URL 조립용)
+# - app-callback-scheme       : 인가 코드 캡처 후 앱으로 복귀시킬 커스텀 스킴 (GET 바운스 콜백 대상)
 # - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
 kakao:
   client-id: ${KAKAO_OAUTH_CLIENT_ID:}
   client-secret: ${KAKAO_OAUTH_CLIENT_SECRET:}
   redirect-uri: ${KAKAO_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
+  authorize-uri: ${KAKAO_AUTHORIZE_URI:https://kauth.kakao.com/oauth/authorize}
+  app-callback-scheme: ${KAKAO_APP_CALLBACK_SCHEME:mapauth://kakao}
   token-uri: ${KAKAO_TOKEN_URI:https://kauth.kakao.com/oauth/token}
   user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
 

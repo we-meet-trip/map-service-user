@@ -76,6 +76,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                             .requestMatchers(HttpMethod.GET,  "/api/v1/auth/kakao").permitAll()
+                            .requestMatchers(HttpMethod.GET,  "/api/v1/auth/kakao/callback").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/kakao/callback").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/token/refresh").permitAll()
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
