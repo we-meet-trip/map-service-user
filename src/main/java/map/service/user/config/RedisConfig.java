@@ -34,8 +34,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * - streamsConnectionFactory  : redis.db-streams (기본 2)  — Streams 컨슈머 그룹
  * - countersConnectionFactory : redis.db-counters (기본 3) — 카운터 / 정량 상태
  * - draftsConnectionFactory   : redis.db-drafts (기본 4)   — 임시 초안 데이터
+ * - cacheConnectionFactory    : redis.db-cache (기본 6)    — 재사용 캐시(ReuseCacheStore)
  * - draftsRedisTemplate       : draftsConnectionFactory 위에 얹는 StringRedisTemplate
  * - countersRedisTemplate     : countersConnectionFactory 위에 얹는 StringRedisTemplate
+ * - cacheRedisTemplate        : cacheConnectionFactory 위에 얹는 StringRedisTemplate
  *
  * 참고:
  * - ServiceUserApplication 이 RedisRepositoriesAutoConfiguration 을 제외하므로
@@ -160,6 +162,24 @@ public class RedisConfig {
     public RedisConnectionFactory draftsConnectionFactory(
             @Value("${redis.db-drafts:4}") int db
     ) {
+        return build(db, Duration.ofSeconds(3));
+    }
+
+    /**
+     * 재사용 캐시(reuse cache) 용 ConnectionFactory.
+     *
+     * 사용처: ReuseCacheStore 가 Qualifier("cacheRedisTemplate") 로 주입받는
+     *        StringRedisTemplate 의 기반이 된다.
+     *
+     * @param db  사용할 Redis DB 번호 (redis.db-cache, 기본 6 — DB5 는 채팅(경계 B8)이
+     *            선점했으므로 충돌을 피해 DB6 을 쓴다)
+     */
+    @Bean(name = "cacheConnectionFactory", destroyMethod = "destroy")
+    public RedisConnectionFactory cacheConnectionFactory(
+            @Value("${redis.db-cache:6}") int db
+    ) {
+        // 다른 용도별 팩토리와 동일하게 command timeout 3s 를 고정한다.
+        // (1-arg build(int) 오버로드는 streams command timeout 파라미터화 때 제거되었다)
         return build(db, Duration.ofSeconds(3));
     }
 
@@ -290,6 +310,23 @@ public class RedisConfig {
     @Bean(name = "chatRedisTemplate")
     public StringRedisTemplate chatRedisTemplate(
             @org.springframework.beans.factory.annotation.Qualifier("chatConnectionFactory")
+            RedisConnectionFactory factory
+    ) {
+        return new StringRedisTemplate(factory);
+    }
+
+    /**
+     * 재사용 캐시 전용 StringRedisTemplate.
+     *
+     * - cacheConnectionFactory 를 명시적 Qualifier 로 주입받는다.
+     * - 키 / 값 모두 String 직렬화기를 사용한다.
+     *
+     * @param factory  cacheConnectionFactory
+     * @return         재사용 캐시 키 조작용 StringRedisTemplate
+     */
+    @Bean(name = "cacheRedisTemplate")
+    public StringRedisTemplate cacheRedisTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("cacheConnectionFactory")
             RedisConnectionFactory factory
     ) {
         return new StringRedisTemplate(factory);

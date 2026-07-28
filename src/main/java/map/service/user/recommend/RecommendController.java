@@ -44,8 +44,10 @@ public class RecommendController {
      * 신규 추천 작업 생성.
      *
      * 클라이언트가 전달한 RecommendRequest 를 검증(@Valid)한 뒤
-     * RecommendService.createRecommendation 으로 위임한다.
+     * RecommendService.createRecommendationDetailed 로 위임한다.
      * 응답은 202 Accepted + JobAccepted(job_id/status/retry_after_seconds).
+     * 재사용 캐시 히트/미스는 X-Recommend-Cache 헤더(HIT/MISS)로만 노출한다
+     * (검증/관측 목적 — 응답 본문 계약은 캐시 히트와 무관하게 동일하다).
      *
      * request: @Valid @RequestBody RecommendRequest. 본문 형식 위반 시 400.
      */
@@ -53,8 +55,10 @@ public class RecommendController {
     public ResponseEntity<JobAccepted> create(
             @Valid @RequestBody RecommendRequest request
     ) {
-        JobAccepted accepted = service.createRecommendation(request);
-        return ResponseEntity.accepted().body(accepted);
+        RecommendService.RecommendationResult result = service.createRecommendationDetailed(request);
+        return ResponseEntity.accepted()
+                .header("X-Recommend-Cache", result.cacheHit() ? "HIT" : "MISS")
+                .body(result.accepted());
     }
 
     /**
