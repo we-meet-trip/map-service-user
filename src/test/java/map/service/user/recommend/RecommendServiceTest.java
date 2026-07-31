@@ -56,6 +56,17 @@ class RecommendServiceTest {
     /** 재사용 캐시 시나리오 전용 요청(이미 정규화된 형태). */
     private RecommendRequest cacheRequest;
 
+    /** 저장된 payload JSON 에서 job_id 를 읽는다. 없으면 null. */
+    private String readJobId(String payloadJson) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode node =
+                    objectMapper.readTree(payloadJson);
+            return node.has("job_id") ? node.get("job_id").asText() : null;
+        } catch (Exception e) {
+            throw new AssertionError("payload 가 유효한 JSON 이 아니다: " + payloadJson, e);
+        }
+    }
+
     @BeforeEach
     void setUp() {
         agentClient = mock(AgentClient.class);
@@ -277,7 +288,10 @@ class RecommendServiceTest {
 
         assertThat(result.status()).isEqualTo("in_progress");
         assertThat(result.jobId()).isNotBlank();
-        verify(draftStore).save(eq(result.jobId()), eq("{\"places\":[]}"));
+        // 캐시 사본은 이번 job_id 로 재기입되어 저장되어야 한다(원본 job_id 보존 금지).
+        ArgumentCaptor<String> saved = ArgumentCaptor.forClass(String.class);
+        verify(draftStore).save(eq(result.jobId()), saved.capture());
+        assertThat(readJobId(saved.getValue())).isEqualTo(result.jobId());
         verify(agentClient, never()).requestRecommend(any());
     }
 
@@ -292,7 +306,9 @@ class RecommendServiceTest {
         JobAccepted result = service.createRecommendation(cacheRequest);
 
         verify(jobStore).insertInProgress(result.jobId(), "sched-9");
-        verify(jobStore).markFinished(result.jobId(), "done", "{\"places\":[]}");
+        ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
+        verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
+        assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
     }
 
     @Test
@@ -306,7 +322,9 @@ class RecommendServiceTest {
         JobAccepted result = service.createRecommendation(cacheRequest);
 
         assertThat(result.jobId()).isNotEqualTo("bg-job-1");
-        verify(draftStore).save(eq(result.jobId()), eq("{\"places\":[]}"));
+        ArgumentCaptor<String> saved = ArgumentCaptor.forClass(String.class);
+        verify(draftStore).save(eq(result.jobId()), saved.capture());
+        assertThat(readJobId(saved.getValue())).isEqualTo(result.jobId());
         verify(agentClient, times(1)).requestRecommend(cacheRequest);
         verify(reuseCacheStore).linkJob("bg-job-1", hash);
     }
