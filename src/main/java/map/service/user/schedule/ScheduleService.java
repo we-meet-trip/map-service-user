@@ -5,8 +5,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.UUID;
 import map.service.user.recommend.DraftStore;
+import map.service.user.recommend.dto.RecommendResponse;
+import map.service.user.schedule.dto.ScheduleDetailResponse;
+import map.service.user.schedule.dto.ScheduleListResponse;
+import map.service.user.schedule.dto.ScheduleSummary;
+import map.service.user.trip.TripGenerationException;
+import map.service.user.trip.TripStopsAssembler;
+import map.service.user.trip.dto.TripStop;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,22 +29,29 @@ import org.springframework.transaction.annotation.Transactional;
  * draftStore: DraftStore. draft JSON 조회/삭제.
  * repository: ScheduleRepository. ScheduleEntity 영속화.
  * objectMapper: Jackson ObjectMapper. draft JSON → JsonNode 파싱.
+ * stopsAssembler: TripStopsAssembler. 저장된 draft 를 상세 조회 응답의
+ *                 방문지 목록으로 접는다 — 생성 직후 화면과 같은 조립기.
  */
 @Service
 public class ScheduleService {
 
+    private static final Logger log = LoggerFactory.getLogger(ScheduleService.class);
+
     private final DraftStore draftStore;
     private final ScheduleRepository repository;
     private final ObjectMapper objectMapper;
+    private final TripStopsAssembler stopsAssembler;
 
     public ScheduleService(
             DraftStore draftStore,
             ScheduleRepository repository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TripStopsAssembler stopsAssembler
     ) {
         this.draftStore = draftStore;
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.stopsAssembler = stopsAssembler;
     }
 
     /**
@@ -92,10 +109,122 @@ public class ScheduleService {
                 request.title(),
                 start,
                 end,
-                payload
+                payload,
+                request.transport(),
+                request.activeStartHour(),
+                request.activeEndHour()
         );
         repository.save(entity);
         draftStore.delete(request.jobId());
         return entity.getScheduleId();
+    }
+
+    /**
+     * 소유자의 일정 목록을 시작일 오름차순으로 반환한다.
+     *
+     * 토큰이 없으면(userId == null) 빈 목록을 돌려준다. 소유자 없이 저장된
+     * 행들은 서로를 구분할 근거가 없어서, 그것을 "익명의 목록"으로 묶어 주면
+     * 토큰 없는 누구에게나 남이 저장한 일정이 그대로 보이고 삭제까지 열린다.
+     * 저장은 지금처럼 토큰 없이도 되지만, 다시 꺼내 보려면 로그인이 필요하다.
+     *
+     * payload 는 펼치지 않는다 — 목록에 필요한 건 제목과 기간뿐이고, 건마다
+     * 방문지를 조립하면 도로 경로 조회까지 건수만큼 일어난다.
+     */
+    @Transactional(readOnly = true)
+    public ScheduleListResponse list(Long userId) {
+        if (userId == null) {
+            return new ScheduleListResponse(List.of());
+        }
+        List<ScheduleEntity> rows =
+                repository.findByUserIdOrderByDateStartAsc(userId);
+        List<ScheduleSummary> summaries = rows.stream()
+                .map(e -> new ScheduleSummary(
+                        e.getScheduleId(),
+                        e.getTitle(),
+                        e.getDateStart(),
+                        e.getDateEnd(),
+                        e.getCreatedAt()))
+                .toList();
+        return new ScheduleListResponse(summaries);
+    }
+
+    /**
+     * 일정 1건을 client 결과 화면과 같은 형태로 조립해 반환한다.
+     *
+     * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404) 이다.
+     * "권한 없음"을 따로 알리지 않는 이유는, 403 과 404 를 구분하면 남의
+     * 일정이 존재한다는 사실 자체가 새어 나가기 때문이다.
+     *
+     * 저장 당시 메타(이동수단·활동 시간대)가 없으면 기본 시간대로 조립한다.
+     * 그때는 방문 시각이 생성 직후와 달라질 수 있으나, 없는 정보를 지어내는
+     * 대신 일정을 열 수 있게 하는 쪽을 택한다.
+     *
+     * payload 가 실패한 추천이거나 방문지가 없으면 조립기가 예외를 던지므로,
+     * 그 경우는 빈 stops 로 응답한다 — 저장은 됐지만 그릴 것이 없는 상태를
+     * 오류가 아니라 빈 화면으로 보여준다.
+     *
+     * 트랜잭션으로 감싸지 않는다. 조립 과정에 도로 경로를 받아오는 외부 왕복이
+     * 들어 있어서, 트랜잭션 안에서 하면 그 응답을 기다리는 내내 DB 커넥션을
+     * 물고 있게 된다. 읽기는 한 번뿐이고 지연 로딩 관계도 없어 트랜잭션이
+     * 필요하지 않다.
+     */
+    public ScheduleDetailResponse detail(Long scheduleId, Long userId) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        int startHour = entity.getActiveStartHour() != null
+                ? entity.getActiveStartHour()
+                : TripStopsAssembler.DEFAULT_START_HOUR;
+        int endHour = entity.getActiveEndHour() != null
+                ? entity.getActiveEndHour()
+                : TripStopsAssembler.DEFAULT_END_HOUR;
+
+        List<TripStop> stops;
+        try {
+            RecommendResponse draft = objectMapper.treeToValue(
+                    entity.getPayload(), RecommendResponse.class);
+            stops = stopsAssembler.assemble(
+                    draft, entity.getTransport(), startHour, endHour);
+        } catch (JsonProcessingException | TripGenerationException e) {
+            log.warn("schedule detail has no renderable stops schedule_id={} reason={}",
+                    scheduleId, e.getMessage());
+            stops = List.of();
+        }
+
+        return new ScheduleDetailResponse(
+                entity.getScheduleId(),
+                entity.getJobId() != null ? entity.getJobId().toString() : null,
+                entity.getTitle(),
+                entity.getDateStart(),
+                entity.getDateEnd(),
+                entity.getTransport(),
+                TripStopsAssembler.totalDurationMinutes(stops),
+                stops,
+                entity.getCreatedAt());
+    }
+
+    /**
+     * 일정 1건을 삭제한다. 소유자가 아니거나 없으면 404.
+     *
+     * 저장된 draft 스냅샷도 함께 사라진다 — 일정 밖에서 그 payload 를
+     * 참조하는 곳은 없다.
+     */
+    @Transactional
+    public void delete(Long scheduleId, Long userId) {
+        repository.delete(findOwned(scheduleId, userId));
+    }
+
+    /**
+     * 소유자 조건을 붙여 일정을 찾는다. 없으면 404 예외.
+     *
+     * 토큰이 없으면 조회 자체를 하지 않는다 — 소유자 없는 행은 누가 저장한
+     * 것인지 구분할 수 없어서 열어 주는 순간 전원 공용이 된다.
+     */
+    private ScheduleEntity findOwned(Long scheduleId, Long userId) {
+        if (userId == null) {
+            // 소유자 없는 행을 토큰 없이 열어 주면 식별자만 바꿔 가며 남의
+            // 일정을 읽고 지울 수 있다. 존재 여부도 알리지 않는다.
+            throw new SavedScheduleNotFoundException(scheduleId);
+        }
+        return repository.findByScheduleIdAndUserId(scheduleId, userId)
+                .orElseThrow(() -> new SavedScheduleNotFoundException(scheduleId));
     }
 }

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import map.service.user.recommend.DraftStore;
+import map.service.user.trip.TripStopsAssembler;
 
 /**
  * ScheduleServiceTest — draft 영속화 및 소유자(userId) 기록 검증
@@ -34,7 +35,8 @@ class ScheduleServiceTest {
     void setUp() {
         draftStore = mock(DraftStore.class);
         repository = mock(ScheduleRepository.class);
-        service = new ScheduleService(draftStore, repository, new ObjectMapper());
+        service = new ScheduleService(draftStore, repository, new ObjectMapper(),
+                mock(TripStopsAssembler.class));
         when(draftStore.find(JOB_ID))
                 .thenReturn(Optional.of("{\"job_id\":\"" + JOB_ID + "\",\"places\":[]}"));
     }
@@ -42,7 +44,8 @@ class ScheduleServiceTest {
     private static ScheduleSaveRequest request() {
         return new ScheduleSaveRequest(
                 JOB_ID, "제주 여행",
-                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7));
+                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
+                "walk", 9, 18);
     }
 
     @Test

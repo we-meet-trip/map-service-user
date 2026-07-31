@@ -3,6 +3,8 @@ package map.service.user.recommend.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Size;
+import java.util.List;
 
 /**
  * Place — 추천 응답/수정의 장소 항목
@@ -28,8 +30,17 @@ import jakarta.validation.constraints.DecimalMin;
  * source: 출처 구분("kakao" | "durunubi").
  * category: 분류 텍스트.
  * grounded: 실측 후보에 근거한 장소면 true, LLM 단독 생성이면 false.
+ * placeUrl: 출처 서비스의 장소 상세 페이지 링크. JSON key "place_url".
  * reason: agent llm_reason 노드가 생성한 장소별 추천 이유(≤200자).
  *         degrade(생성 생략) 시 null 일 수 있다.
+ * bullets: agent summarize_reviews 노드가 블로그 후기를 종합한 요약 2줄.
+ *          근거가 될 후기를 못 구한 장소나 degrade 시 null 이다.
+ *
+ * placeUrl/reason/bullets 의 크기 제약은 수정 요청(EditRequest)으로 들어오는
+ * 값에만 적용된다. 이 레코드는 draft 를 그대로 실어 나르는 통로이자 수정
+ * 본문의 원소이기도 해서, 제약이 없으면 클라이언트가 임의 길이·임의 개수를
+ * draft 에 영구히 심을 수 있다. 아웃바운드(추천 결과)는 Bean Validation 을
+ * 거치지 않으므로 영향이 없다.
  */
 public record Place(
         @JsonProperty("place_id") int placeId,
@@ -43,6 +54,8 @@ public record Place(
         String source,
         String category,
         Boolean grounded,
-        String reason
+        @JsonProperty("place_url") @Size(max = 500) String placeUrl,
+        @Size(max = 200) String reason,
+        @Size(max = 2) List<@Size(max = 80) String> bullets
 ) {
 }

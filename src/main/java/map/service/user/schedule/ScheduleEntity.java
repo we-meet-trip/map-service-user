@@ -31,6 +31,13 @@ import org.hibernate.type.SqlTypes;
  * - payload: draft JSON 스냅샷. JSONB 컬럼 + @JdbcTypeCode(SqlTypes.JSON). NOT NULL.
  * - createdAt: 생성 시각. @CreationTimestamp 로 영속 시 채워져 save 직후에도
  *   조회 가능(updatable=false). DB DEFAULT now() 와도 정합.
+ *
+ * 아래 3개는 payload(추천 결과 원본)에 없는 화면 복원용 메타다. 방문 시각은
+ * 활동 시간대를 균등 분할해 만들고 이동 카드/경로 프로파일은 이동수단으로
+ * 정해지므로, 이 값이 없으면 상세 조회가 생성 직후 화면과 달라진다.
+ * 메타 도입 이전에 저장된 행은 전부 null 이다.
+ * - transport: 이동수단(walk|bicycle|scooter|bus).
+ * - activeStartHour / activeEndHour: 하루 활동 시간대(0~24).
  */
 @Entity
 @Table(name = "schedules", schema = "user_service")
@@ -60,6 +67,15 @@ public class ScheduleEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode payload;
 
+    @Column(name = "transport")
+    private String transport;
+
+    @Column(name = "active_start_hour")
+    private Integer activeStartHour;
+
+    @Column(name = "active_end_hour")
+    private Integer activeEndHour;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -82,6 +98,8 @@ public class ScheduleEntity {
      * dateStart: 시작일.
      * dateEnd: 종료일.
      * payload: draft JSON 스냅샷.
+     * transport: 이동수단(미지정 시 null).
+     * activeStartHour / activeEndHour: 활동 시간대(미지정 시 null).
      */
     public ScheduleEntity(
             Long userId,
@@ -89,7 +107,10 @@ public class ScheduleEntity {
             String title,
             LocalDate dateStart,
             LocalDate dateEnd,
-            JsonNode payload
+            JsonNode payload,
+            String transport,
+            Integer activeStartHour,
+            Integer activeEndHour
     ) {
         this.userId = userId;
         this.jobId = jobId;
@@ -97,6 +118,9 @@ public class ScheduleEntity {
         this.dateStart = dateStart;
         this.dateEnd = dateEnd;
         this.payload = payload;
+        this.transport = transport;
+        this.activeStartHour = activeStartHour;
+        this.activeEndHour = activeEndHour;
     }
 
     /**
@@ -146,6 +170,27 @@ public class ScheduleEntity {
      */
     public JsonNode getPayload() {
         return payload;
+    }
+
+    /**
+     * 이동수단 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public String getTransport() {
+        return transport;
+    }
+
+    /**
+     * 활동 시작 시각 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public Integer getActiveStartHour() {
+        return activeStartHour;
+    }
+
+    /**
+     * 활동 종료 시각 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public Integer getActiveEndHour() {
+        return activeEndHour;
     }
 
     /**

@@ -2,8 +2,13 @@ package map.service.user.schedule;
 
 import jakarta.validation.Valid;
 import java.util.Map;
+import map.service.user.schedule.dto.ScheduleDetailResponse;
+import map.service.user.schedule.dto.ScheduleListResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,7 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
  * service: ScheduleService. 생성자 주입.
  *
  * 엔드포인트:
- * - POST /api/v1/schedules → save
+ * - POST   /api/v1/schedules       → save   (draft 를 일정으로 저장)
+ * - GET    /api/v1/schedules       → list   (내 일정 목록)
+ * - GET    /api/v1/schedules/{id}  → detail (방문지까지 조립된 상세)
+ * - DELETE /api/v1/schedules/{id}  → delete
+ *
+ * 조회·삭제는 소유자 범위로 제한된다. 남의 일정이나 없는 일정은 똑같이
+ * 404 다 — 403 과 구분하면 그 일정이 존재한다는 사실이 새어 나간다.
  */
 @RestController
 @RequestMapping("/api/v1/schedules")
@@ -50,5 +61,43 @@ public class ScheduleController {
     ) {
         Long scheduleId = service.persist(request, userId);
         return ResponseEntity.ok(Map.of("schedule_id", scheduleId));
+    }
+
+    /**
+     * 내 일정 목록 조회.
+     *
+     * 저장 때와 같은 소유자 판정을 쓴다 — 토큰이 있으면 그 사용자의 일정,
+     * 없으면 소유자 미지정으로 저장된 일정만 돌려준다.
+     */
+    @GetMapping
+    public ResponseEntity<ScheduleListResponse> list(
+            @AuthenticationPrincipal Long userId
+    ) {
+        return ResponseEntity.ok(service.list(userId));
+    }
+
+    /**
+     * 일정 상세 조회. 방문지·이동 카드·도로 경로까지 조립해 돌려준다.
+     *
+     * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404).
+     */
+    @GetMapping("/{scheduleId}")
+    public ResponseEntity<ScheduleDetailResponse> detail(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        return ResponseEntity.ok(service.detail(scheduleId, userId));
+    }
+
+    /**
+     * 일정 삭제. 성공 시 본문 없이 204.
+     */
+    @DeleteMapping("/{scheduleId}")
+    public ResponseEntity<Void> delete(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        service.delete(scheduleId, userId);
+        return ResponseEntity.noContent().build();
     }
 }

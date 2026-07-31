@@ -3,6 +3,7 @@ package map.service.user.trip;
 import jakarta.validation.Valid;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripRouteRequest;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,7 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
  * 실패는 GlobalExceptionHandler 가 client 가 파싱하는 {error, message} 로 변환한다.
  *
  * 엔드포인트:
- * - POST /api/v1/trip/generate → 200 TripGenerateResponse
+ * - POST /api/v1/trip/generate → 200 TripGenerateResponse (조건으로 일정 생성)
+ * - POST /api/v1/trip/route    → 200 TripGenerateResponse (고른 장소로 동선 생성)
+ *
+ * 두 응답 타입이 같은 이유는 결과 화면이 하나이기 때문이다 — 어느 쪽으로
+ * 만들었든 client 는 같은 코드로 방문지와 동선을 그린다.
  */
 @RestController
 @RequestMapping("/api/v1/trip")
@@ -41,5 +46,21 @@ public class TripController {
             @Valid @RequestBody TripGenerateRequest request
     ) {
         return service.generate(request);
+    }
+
+    /**
+     * 사용자가 고른 장소들로 동선 동기 생성.
+     *
+     * 장소를 이미 정해 온 요청이라 후보 탐색·선정을 건너뛴다. 응답은
+     * generate 와 같은 형태이므로 결과 화면을 그대로 재사용한다.
+     * 실패 코드도 generate 와 같다(400/502/504).
+     *
+     * request: @Valid @RequestBody TripRouteRequest. places 2~10개.
+     */
+    @PostMapping("/route")
+    public TripGenerateResponse route(
+            @Valid @RequestBody TripRouteRequest request
+    ) {
+        return service.route(request);
     }
 }

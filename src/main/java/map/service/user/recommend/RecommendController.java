@@ -62,6 +62,31 @@ public class RecommendController {
     }
 
     /**
+     * 사용자가 고른 장소들의 동선 작업 생성.
+     *
+     * 장소를 이미 정해 온 요청이라 탐색·선정을 건너뛰고 동선만 짠다. 결과
+     * 조회는 일반 추천과 같은 GET /{jobId} 를 쓴다 — 응답 형태가 같기 때문에
+     * 클라이언트가 조회 코드를 나눌 필요가 없다.
+     *
+     * 재사용 캐시는 타지 않으므로 X-Recommend-Cache 헤더도 없다. 캐시 키는
+     * 검색 조건으로 만들어지는데 이 요청의 본질은 "고른 장소 조합"이라
+     * 조건이 같아도 결과가 달라진다.
+     *
+     * request: @Valid @RequestBody RecommendRequest. places 2~10개 필수 —
+     *          없거나 1개면 400.
+     */
+    @PostMapping("/route")
+    public ResponseEntity<JobAccepted> route(
+            @Valid @RequestBody RecommendRequest request
+    ) {
+        if (request.places() == null || request.places().size() < 2) {
+            throw new IllegalArgumentException(
+                    "places must contain 2 to 10 selected places");
+        }
+        return ResponseEntity.accepted().body(service.createRouteJob(request));
+    }
+
+    /**
      * 추천 결과 조회 (long-poll).
      *
      * jobId 의 draft 가 준비된 경우 200 OK + JSON 본문을 그대로 반환한다.
