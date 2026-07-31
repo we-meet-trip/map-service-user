@@ -183,8 +183,15 @@ public class TripService {
         }
     }
 
-    /** places + visit_order + legs → client stops[]. 경로 성공 구간은 실측 대체. */
-    private List<TripStop> toStops(
+    /**
+     * places + visit_order + legs → client stops[]. 경로 성공 구간은 실측 대체.
+     *
+     * agent(recommend_route)가 visit_order 를 day 오름차순으로 묶어서
+     * 보장하므로(서버 측 재검증됨), 여기서는 순서를 그대로 신뢰하고
+     * day 가 바뀌는 지점만 감지해 시각 계산과 transport_to_next 를
+     * day 단위로 분리한다.
+     */
+    List<TripStop> toStops(
             TripGenerateRequest req, RecommendResponse result, Schedule schedule
     ) {
         List<Place> places = result.places();
@@ -214,14 +221,30 @@ public class TripService {
             ordered.add(p);
         }
 
+        // day 별 총 stop 개수 — stopTime 의 total 인자로 쓰인다.
+        Map<Integer, Integer> dayTotals = new HashMap<>();
+        for (Place p : ordered) {
+            dayTotals.merge(dayOf(p), 1, Integer::sum);
+        }
+
         // 도로 추종 경로 배치 조회(best-effort). null 이면 전 구간 직선 폴백.
+        // routes 는 인접 쌍 전체와 인덱스가 1:1 이며, day 경계 구간은 아래에서
+        // 사용하지 않고 건너뛴다(정렬은 그대로 유지된다).
         List<Route> routes = fetchRoutes(transport, ordered);
 
+        Map<Integer, Integer> dayRunningIndex = new HashMap<>();
         List<TripStop> stops = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             Place p = ordered.get(i);
+            int day = dayOf(p);
+            int indexInDay = dayRunningIndex.merge(day, 1, Integer::sum) - 1;
+            int totalInDay = dayTotals.get(day);
+
             TransportToNext toNext = null;
-            if (i < n - 1 && legs != null && i < legs.size()) {
+            // day 가 바뀌는 지점은 이동 구간으로 보지 않는다 — 다음 날 첫 장소로
+            // 이어지는 이동은 일정에 표시하지 않는다.
+            if (i < n - 1 && legs != null && i < legs.size()
+                    && dayOf(ordered.get(i + 1)) == day) {
                 Leg leg = legs.get(i);
                 // 기저 이동 카드(LLM 추정치)에서 시작, 경로 성공 구간은 실측 대체.
                 TransportToNext base = new TransportToNext(
@@ -235,9 +258,10 @@ public class TripService {
             }
             stops.add(new TripStop(
                     i + 1,
+                    day,
                     p.name(),
                     p.address(),
-                    TripMapping.stopTime(startHour, endHour, i, n),
+                    TripMapping.stopTime(startHour, endHour, indexInDay, totalInDay),
                     p.lat(),
                     p.lng(),
                     toNext,
@@ -246,6 +270,17 @@ public class TripService {
                     p.grounded()));
         }
         return stops;
+    }
+
+    /**
+     * 방문 일차를 읽는다 — 값이 없거나 1 미만이면 1일차로 본다.
+     *
+     * day 가 붙기 전에 만들어져 아직 남아 있는 드래프트·재사용 캐시를 읽으면
+     * 역직렬화 기본값 0 이 들어오는데, 그대로 두면 client 가 "0일차" 탭을
+     * 그리게 된다. 여기서 한 번만 보정해 그런 payload 도 1일차로 접는다.
+     */
+    private static int dayOf(Place p) {
+        return Math.max(1, p.day());
     }
 
     /**

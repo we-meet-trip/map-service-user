@@ -11,6 +11,8 @@ import jakarta.validation.constraints.DecimalMin;
  * 외부 장소 식별자, 표시 정보, 좌표, 권장 체류 시간을 담는다.
  *
  * placeId: 외부 장소 식별자(int). JSON key "place_id".
+ * day: 여행 일차(1부터). agent 가 배정한 값을 그대로 전달받으며,
+ *      TripService.toStops 가 TripStop.day 로 그대로 넘긴다.
  * name: 장소명.
  * address: 주소 문자열.
  * lat: 위도. 33.0~43.0(한국 국내 범위). EditRequest 로 들어오는 수정
@@ -31,6 +33,7 @@ import jakarta.validation.constraints.DecimalMin;
  */
 public record Place(
         @JsonProperty("place_id") int placeId,
+        int day,
         String name,
         String address,
         @DecimalMin("33.0") @DecimalMax("43.0") double lat,
