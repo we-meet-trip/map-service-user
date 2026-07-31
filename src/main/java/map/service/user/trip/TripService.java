@@ -147,6 +147,7 @@ public class TripService {
                 city,
                 null,
                 "init",
+                null,
                 null);
     }
 

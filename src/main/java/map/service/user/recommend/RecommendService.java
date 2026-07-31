@@ -15,6 +15,7 @@ import map.service.user.global.exception.ErrorCode;
 import map.service.user.recommend.dto.EditRequest;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
+import map.service.user.recommend.dto.SelectedPlace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -369,6 +370,20 @@ public class RecommendService {
      */
     private static RecommendRequest withStage(
             RecommendRequest request, String stage, List<String> exclude) {
+        return withStage(request, stage, exclude, null);
+    }
+
+    /**
+     * stage/exclude/places 를 교체한 RecommendRequest 사본 생성.
+     *
+     * places 를 함께 지정하는 이유는 탐색 기반 추천과 사용자 선택 동선이
+     * 같은 요청 타입을 쓰기 때문이다. 탐색 경로에서는 places 를 null 로
+     * 지워 보내고, 동선 경로에서만 채운다 — 둘이 함께 오면 agent 가 어느
+     * 쪽을 따를지 모호해진다.
+     */
+    private static RecommendRequest withStage(
+            RecommendRequest request, String stage, List<String> exclude,
+            List<SelectedPlace> places) {
         return new RecommendRequest(
                 request.date(),
                 request.budget(),
@@ -378,6 +393,28 @@ public class RecommendService {
                 request.city(),
                 request.scheduleId(),
                 stage,
-                exclude);
+                exclude,
+                places);
+    }
+
+    /**
+     * 사용자가 고른 장소들의 동선 작업을 접수한다.
+     *
+     * 재사용 캐시를 타지 않는다. 캐시 키는 지역·기간·테마 같은 검색 조건으로
+     * 만들어지는데, 이 요청의 본질은 "이 장소들"이라 같은 조건이라도 장소
+     * 조합이 다르면 완전히 다른 결과가 나온다. 남의 조합을 돌려주는 사고를
+     * 막기 위해 조회도 등록도 하지 않는다.
+     *
+     * stage 는 서버가 "route" 로 강제하고 exclude 는 비운다(재탐색 전용).
+     * 접수 직후 PG 에 in_progress 로 기록해 진행 중 작업이 콘솔에서 보이게 한다.
+     *
+     * request: 검증 완료된 RecommendRequest. places 는 2~10개.
+     */
+    public JobAccepted createRouteJob(RecommendRequest request) {
+        RecommendRequest normalized =
+                withStage(request, "route", List.of(), request.places());
+        JobAccepted accepted = agentClient.requestRecommend(normalized);
+        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+        return accepted;
     }
 }

@@ -28,7 +28,7 @@ class RecommendCacheKeyTest {
         // 캐시 해시는 이 3개를 읽지 않으므로 정규화된 형태(init/[])로 고정한다.
         return new RecommendRequest(
                 date, budget, theme, mobility, "서울특별시", "동작구",
-                null, "init", List.of());
+                null, "init", List.of(), null);
     }
 
     @Test
@@ -53,7 +53,7 @@ class RecommendCacheKeyTest {
         RecommendRequest busan = new RecommendRequest(
                 seoul.date(), seoul.budget(), seoul.theme(), seoul.mobility(),
                 "부산광역시", seoul.city(),
-                seoul.scheduleId(), seoul.stage(), seoul.exclude());
+                seoul.scheduleId(), seoul.stage(), seoul.exclude(), null);
 
         assertThat(cacheKey.hash(seoul)).isNotEqualTo(cacheKey.hash(busan));
     }
@@ -127,7 +127,7 @@ class RecommendCacheKeyTest {
                 LocalTime.of(10, 0), LocalTime.of(20, 0));
         RecommendRequest b = new RecommendRequest(
                 otherDate, a.budget(), a.theme(), a.mobility(), a.province(), a.city(),
-                a.scheduleId(), a.stage(), a.exclude());
+                a.scheduleId(), a.stage(), a.exclude(), null);
 
         assertThat(cacheKey.hash(a)).isNotEqualTo(cacheKey.hash(b));
     }

@@ -95,7 +95,8 @@ class RecommendServiceTest {
                 "동작구",
                 "sched-9",
                 "init",
-                List.of());
+                List.of(),
+                null);
     }
 
     private static RecommendRequest request(String stage, List<String> exclude) {
@@ -112,7 +113,8 @@ class RecommendServiceTest {
                 "강남구",
                 "sched-1",
                 stage,
-                exclude);
+                exclude,
+                null);
     }
 
     // ---- B2 계약: 서버측 stage/exclude 강제 ----
@@ -353,5 +355,58 @@ class RecommendServiceTest {
 
         assertThat(result.status()).isEqualTo("in_progress");
         assertThat(result.jobId()).isNotBlank();
+    }
+
+    // ---- 사용자 선택 동선(stage=route) ----
+
+    /** 사용자가 고른 장소 n 개. */
+    private static java.util.List<map.service.user.recommend.dto.SelectedPlace>
+            selected(int n) {
+        java.util.List<map.service.user.recommend.dto.SelectedPlace> out =
+                new java.util.ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            out.add(new map.service.user.recommend.dto.SelectedPlace(
+                    "고른곳" + i, "주소", 37.5 + i * 0.01, 127.0 + i * 0.01, null));
+        }
+        return out;
+    }
+
+    /** 장소 목록을 실은 요청(클라이언트가 stage 를 뭘 보내든 서버가 강제한다). */
+    private static RecommendRequest routeRequest(String clientStage) {
+        RecommendRequest base = request(clientStage, List.of("kakao:9"));
+        return new RecommendRequest(
+                base.date(), base.budget(), base.theme(), base.mobility(),
+                base.province(), base.city(), base.scheduleId(),
+                base.stage(), base.exclude(), selected(3));
+    }
+
+    @Test
+    void routeJobForcesStageAndKeepsPlaces() {
+        service.createRouteJob(routeRequest("init"));
+
+        ArgumentCaptor<RecommendRequest> captor =
+                ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(agentClient).requestRecommend(captor.capture());
+        RecommendRequest sent = captor.getValue();
+        assertThat(sent.stage()).isEqualTo("route");
+        assertThat(sent.exclude()).isEmpty();
+        assertThat(sent.places()).hasSize(3);
+        assertThat(sent.places().get(0).name()).isEqualTo("고른곳0");
+    }
+
+    @Test
+    void routeJobSkipsReuseCacheEntirely() {
+        service.createRouteJob(routeRequest("mode1"));
+
+        // 장소 조합이 결과를 좌우하므로 캐시를 조회하지도 등록하지도 않는다.
+        verify(reuseCacheStore, never()).find(anyString());
+        verify(reuseCacheStore, never()).linkJob(anyString(), anyString());
+    }
+
+    @Test
+    void routeJobRecordsInProgress() {
+        service.createRouteJob(routeRequest("init"));
+
+        verify(jobStore).insertInProgress("job-2", "sched-1");
     }
 }
