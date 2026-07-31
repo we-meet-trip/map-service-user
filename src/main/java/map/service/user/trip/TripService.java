@@ -15,6 +15,7 @@ import map.service.user.trip.dto.HubWeatherResponse;
 import map.service.user.trip.dto.Schedule;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripRouteRequest;
 import map.service.user.trip.dto.TripStop;
 import map.service.user.trip.dto.WeatherForecastItem;
 import org.slf4j.Logger;
@@ -128,6 +129,67 @@ public class TripService {
         return new TripGenerateResponse(jobId, totalDuration, stops, forecast);
     }
 
+    /**
+     * 사용자가 고른 장소들의 동선을 동기로 만들어 돌려준다.
+     *
+     * generate 와 같은 흐름이되 장소 탐색·선정을 건너뛴다. 결과 형태도 같아서
+     * client 는 생성 직후 화면과 같은 코드로 렌더링한다 — 방문 시각, 이동 카드,
+     * 도로 폴리라인까지 여기서 조립해 넘긴다.
+     *
+     * 예산·테마를 받지 않는다. 후보를 고르는 데 쓰는 조건인데 장소가 이미
+     * 정해진 요청이라 쓸 곳이 없다.
+     *
+     * request: 검증 완료된 TripRouteRequest.
+     */
+    public TripGenerateResponse route(TripRouteRequest request) {
+        String province = TripMapping.normalizeProvince(request.location().province());
+        String city = request.location().city();
+        Schedule schedule = request.schedule();
+
+        DateRange date = new DateRange(
+                schedule.startDate(),
+                schedule.endDate(),
+                TripMapping.hourToLocalTime(schedule.activeStartHour()),
+                TripMapping.hourToLocalTime(schedule.activeEndHour()));
+        // stage 는 서비스가 강제하므로 여기서는 비워 보낸다.
+        RecommendRequest recommendRequest = new RecommendRequest(
+                date,
+                null,
+                null,
+                TripMapping.toAgentMobility(request.transport()),
+                province,
+                city,
+                null,
+                null,
+                null,
+                request.places());
+
+        JobAccepted accepted = recommendService.createRouteJob(recommendRequest);
+        String jobId = accepted.jobId();
+        log.info("trip route started job_id={} places={}",
+                jobId, request.places().size());
+
+        RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
+        if ("failed".equalsIgnoreCase(result.status())) {
+            String reason = result.error() != null ? result.error() : "recommendation failed";
+            throw new TripGenerationException(reason);
+        }
+
+        List<TripStop> stops = stopsAssembler.assemble(
+                result,
+                request.transport(),
+                schedule.activeStartHour(),
+                schedule.activeEndHour());
+        int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
+
+        HubWeatherResponse weather = hubWeatherClient.fetchWeather(
+                province, city, schedule.startDate(), schedule.endDate());
+        List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(weather);
+
+        log.info("trip route done job_id={} stops={}", jobId, stops.size());
+        return new TripGenerateResponse(jobId, totalDuration, stops, forecast);
+    }
+
     /** client 요청 → agent RecommendRequest (TripMapping 규칙 적용; province/city 는 정규화된 값). */
     private static RecommendRequest toRecommendRequest(
             TripGenerateRequest req, String province, String city) {
@@ -138,6 +200,7 @@ public class TripService {
                 TripMapping.hourToLocalTime(s.activeStartHour()),
                 TripMapping.hourToLocalTime(s.activeEndHour()));
         // 동기 facade 는 항상 초기 추천이다 — stage="init", exclude 없음.
+        // places 도 비운다: 장소를 골라 오는 흐름은 별도 엔드포인트가 받는다.
         return new RecommendRequest(
                 date,
                 TripMapping.toAgentBudget(req.budget()),
