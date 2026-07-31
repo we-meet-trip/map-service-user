@@ -167,7 +167,14 @@ public class TripService {
         }
     }
 
-    /** places + visit_order + legs → client stops[]. */
+    /**
+     * places + visit_order + legs → client stops[].
+     *
+     * agent(recommend_route)가 visit_order 를 day 오름차순으로 묶어서
+     * 보장하므로(서버 측 재검증됨), 여기서는 순서를 그대로 신뢰하고
+     * day 가 바뀌는 지점만 감지해 시각 계산과 transport_to_next 를
+     * day 단위로 분리한다.
+     */
     private static List<TripStop> toStops(
             TripGenerateRequest req, RecommendResponse result, Schedule schedule
     ) {
@@ -187,26 +194,42 @@ public class TripService {
         String transport = req.transport();
         String label = TripMapping.transportLabel(transport);
 
+        // day 별 총 stop 개수 — stopTime 의 total 인자로 쓰인다.
+        Map<Integer, Integer> dayTotals = new HashMap<>();
+        for (Integer placeId : order) {
+            Place p = byId.get(placeId);
+            if (p == null) {
+                throw new TripGenerationException(
+                        "place_id " + placeId + " missing in places");
+            }
+            dayTotals.merge(p.day(), 1, Integer::sum);
+        }
+
+        Map<Integer, Integer> dayRunningIndex = new HashMap<>();
         List<TripStop> stops = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             Place p = byId.get(order.get(i));
-            if (p == null) {
-                throw new TripGenerationException(
-                        "place_id " + order.get(i) + " missing in places");
-            }
+            int day = p.day();
+            int indexInDay = dayRunningIndex.merge(day, 1, Integer::sum) - 1;
+            int totalInDay = dayTotals.get(day);
+
             TransportToNext toNext = null;
             if (i < n - 1 && legs != null && i < legs.size()) {
-                Leg leg = legs.get(i);
-                toNext = new TransportToNext(
-                        transport, label,
-                        leg.estimatedDurationMin(),
-                        leg.estimatedDistanceKm());
+                Place next = byId.get(order.get(i + 1));
+                if (next != null && next.day() == day) {
+                    Leg leg = legs.get(i);
+                    toNext = new TransportToNext(
+                            transport, label,
+                            leg.estimatedDurationMin(),
+                            leg.estimatedDistanceKm());
+                }
             }
             stops.add(new TripStop(
                     i + 1,
+                    day,
                     p.name(),
                     p.address(),
-                    TripMapping.stopTime(startHour, endHour, i, n),
+                    TripMapping.stopTime(startHour, endHour, indexInDay, totalInDay),
                     p.lat(),
                     p.lng(),
                     toNext));

@@ -103,6 +103,10 @@ public final class TripMapping {
     /**
      * stop 시각 "HH:mm" — 활동 시간대 [startHour, endHour] 균등 분배 (R-2).
      * total<=1 이면 시작 시각. endHour<=startHour 면 전 stop 시작 시각으로 고정.
+     *
+     * index/total 은 트립 전체가 아니라 "해당 day 안에서의" 순서·개수여야
+     * 한다(TripService.toStops 가 day 별로 나눠 호출한다). 그렇지 않으면
+     * 여러 날짜 stop 이 하루 시간대에 다 뭉쳐 나온다.
      */
     public static String stopTime(int startHour, int endHour, int index, int total) {
         int clock;
