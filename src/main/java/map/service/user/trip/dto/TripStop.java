@@ -2,13 +2,16 @@ package map.service.user.trip.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 
 /**
  * TripStop — 일정의 한 방문지
  *
  * TripGenerateResponse.stops 의 원소. agent 의 places + visit_order 를 접어
  * 만들며, 구간 이동은 transportToNext 로 임베드한다(client 계약).
- * 모든 필드는 non-null 보장(client 의 엄격 캐스팅 크래시 방지).
+ * order/name/address/time/latitude/longitude 는 항상 채운다(client 가
+ * 엄격 캐스팅으로 읽어 null 이면 크래시한다). 나머지는 nullable 이며
+ * NON_NULL 직렬화로 키가 빠지므로 client 는 부재를 전제로 읽어야 한다.
  *
  * order: 방문 순서(1부터). visit_order 의 index 기반.
  * name/address: places 의 name/address.
@@ -20,6 +23,16 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * category: 분류 텍스트. 없으면 키 생략.
  * grounded: 실측 후보에 근거한 장소면 true, LLM 단독 생성이면 false.
  *           없으면 키 생략(저신뢰 신호로 client 가 활용).
+ *
+ * 아래 4개는 agent draft 가 이미 갖고 있었으나 stops 로 접을 때 버려지던
+ * 값이다. 전부 nullable 이고 NON_NULL 직렬화라 값이 없으면 키 자체가
+ * 빠지므로, 기존 client 의 파싱을 깨지 않고 덧붙는다.
+ * placeId: agent 가 부여한 장소 식별자. JSON key "place_id".
+ *          장소 상세 조회·선택 장소 재요청에서 장소를 지목하는 키다.
+ * placeUrl: 출처 서비스의 장소 상세 페이지 링크. JSON key "place_url".
+ * reason: 이 장소를 추천한 이유(≤200자).
+ * bullets: 블로그 후기를 종합한 요약 2줄. 근거가 될 후기를 못 구한 장소는
+ *          이 키가 없다 — client 는 없을 때를 전제로 그려야 한다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TripStop(
@@ -32,6 +45,10 @@ public record TripStop(
         @JsonProperty("transport_to_next") TransportToNext transportToNext,
         String source,
         String category,
-        Boolean grounded
+        Boolean grounded,
+        @JsonProperty("place_id") Integer placeId,
+        @JsonProperty("place_url") String placeUrl,
+        String reason,
+        List<String> bullets
 ) {
 }

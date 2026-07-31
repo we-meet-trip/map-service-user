@@ -1,0 +1,236 @@
+package map.service.user.trip;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import map.service.user.recommend.dto.Leg;
+import map.service.user.recommend.dto.Place;
+import map.service.user.recommend.dto.RecommendResponse;
+import map.service.user.trip.dto.HubDirectionsDtos.LegReq;
+import map.service.user.trip.dto.HubDirectionsDtos.Point;
+import map.service.user.trip.dto.HubDirectionsDtos.Route;
+import map.service.user.trip.dto.TransportToNext;
+import map.service.user.trip.dto.TripStop;
+import org.springframework.stereotype.Component;
+
+/**
+ * TripStopsAssembler — 추천 결과(draft)를 client 의 stops[] 로 접는다.
+ *
+ * 추천 결과는 장소 목록(places) · 방문 순서(visit_order) · 구간(legs) 세 조각으로
+ * 흩어져 있다. client 는 "순서대로 늘어선 방문지, 각 방문지에 다음 지점까지의
+ * 이동 카드가 붙은" 하나의 배열을 기대한다. 그 접기를 여기서 한다.
+ *
+ * 같은 접기를 두 곳이 쓴다.
+ *  - 생성 직후 응답(TripService)
+ *  - 저장된 일정 상세 조회(ScheduleService)
+ * 두 화면이 같은 방문 시각·같은 이동 카드·같은 폴리라인을 보여야 하므로
+ * 구현을 하나로 둔다.
+ *
+ * 이동 시간/거리는 두 단계로 만든다. 먼저 추천 결과에 담긴 추정치로 카드를
+ * 세우고, 도로 경로 조회에 성공한 구간만 실측값으로 갈아끼운다. 조회가
+ * 실패하거나 대상이 아닌 이동수단이면 추정치가 그대로 남고 폴리라인이 없어
+ * client 가 직선으로 그린다.
+ */
+@Component
+public class TripStopsAssembler {
+
+    /**
+     * 킥보드 소요시간 보정 계수.
+     *
+     * 킥보드 전용 라우팅 프로파일이 없어 자전거 프로파일로 경로를 받는다.
+     * 그대로 쓰면 자전거 기준 소요시간이 나오므로 이 계수를 곱해 킥보드
+     * 속도로 환산한다. 거리와 폴리라인은 같은 도로를 지나므로 보정하지 않는다.
+     */
+    private static final double KICKBOARD_DURATION_FACTOR = 0.7;
+
+    /** 활동 시간대를 모르는 일정을 조립할 때 쓰는 시작 시각. */
+    public static final int DEFAULT_START_HOUR = 9;
+    /** 활동 시간대를 모르는 일정을 조립할 때 쓰는 종료 시각. */
+    public static final int DEFAULT_END_HOUR = 21;
+
+    private final HubDirectionsClient hubDirectionsClient;
+
+    public TripStopsAssembler(HubDirectionsClient hubDirectionsClient) {
+        this.hubDirectionsClient = hubDirectionsClient;
+    }
+
+    /**
+     * 추천 결과를 stops[] 로 접는다.
+     *
+     * result: 추천 draft. places/visit_order 가 비어 있으면
+     *         TripGenerateException 을 던진다(접을 것이 없다).
+     * transport: 이동수단. null 이면 도로 경로를 조회하지 않고 이동 카드의
+     *            라벨도 수단 없는 표기가 된다.
+     * startHour/endHour: 활동 시간대. 방문 시각을 이 구간에 균등 배치한다.
+     */
+    public List<TripStop> assemble(
+            RecommendResponse result, String transport, int startHour, int endHour
+    ) {
+        List<Place> ordered = orderPlaces(result);
+        List<Route> routes = fetchRoutes(transport, ordered);
+        return toStops(ordered, result.legs(), transport, startHour, endHour, routes);
+    }
+
+    /**
+     * visit_order 를 따라 Place 를 늘어놓는다.
+     *
+     * 순서에 있는 place_id 가 places 에 없으면 그 방문지를 그릴 수 없으므로
+     * 부분 결과를 내지 않고 실패시킨다.
+     */
+    static List<Place> orderPlaces(RecommendResponse result) {
+        List<Place> places = result.places();
+        List<Integer> order = result.visitOrder();
+        if (places == null || places.isEmpty() || order == null || order.isEmpty()) {
+            throw new TripGenerationException("recommendation has no places");
+        }
+        Map<Integer, Place> byId = new HashMap<>();
+        for (Place p : places) {
+            byId.put(p.placeId(), p);
+        }
+        List<Place> ordered = new ArrayList<>(order.size());
+        for (Integer id : order) {
+            Place p = byId.get(id);
+            if (p == null) {
+                throw new TripGenerationException(
+                        "place_id " + id + " missing in places");
+            }
+            ordered.add(p);
+        }
+        return ordered;
+    }
+
+    /**
+     * 순서가 확정된 장소들을 stops[] 로 만든다.
+     *
+     * 이동 카드는 마지막 방문지를 제외한 각 방문지에 붙으며, legs 가 모자라면
+     * 그만큼 카드 없이 남는다. routes 는 legs 와 같은 인덱스로 대응하고 원소가
+     * null 인 구간은 추정치를 유지한다.
+     */
+    static List<TripStop> toStops(
+            List<Place> ordered,
+            List<Leg> legs,
+            String transport,
+            int startHour,
+            int endHour,
+            List<Route> routes
+    ) {
+        int n = ordered.size();
+        String label = TripMapping.transportLabel(transport);
+        List<TripStop> stops = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            Place p = ordered.get(i);
+            TransportToNext toNext = null;
+            if (i < n - 1 && legs != null && i < legs.size()) {
+                Leg leg = legs.get(i);
+                TransportToNext base = new TransportToNext(
+                        transport, label,
+                        leg.estimatedDurationMin(),
+                        leg.estimatedDistanceKm(),
+                        null);
+                Route route = (routes != null && i < routes.size())
+                        ? routes.get(i) : null;
+                toNext = withMeasured(base, route, transport);
+            }
+            stops.add(new TripStop(
+                    i + 1,
+                    p.name(),
+                    p.address(),
+                    TripMapping.stopTime(startHour, endHour, i, n),
+                    p.lat(),
+                    p.lng(),
+                    toNext,
+                    p.source(),
+                    p.category(),
+                    p.grounded(),
+                    p.placeId(),
+                    p.placeUrl(),
+                    p.reason(),
+                    p.bullets()));
+        }
+        return stops;
+    }
+
+    /** stops 의 이동 카드 시간 합. 마지막 방문지는 카드가 없어 합산에서 빠진다. */
+    public static int totalDurationMinutes(List<TripStop> stops) {
+        int total = 0;
+        for (TripStop s : stops) {
+            if (s.transportToNext() != null) {
+                total += s.transportToNext().durationMinutes();
+            }
+        }
+        return total;
+    }
+
+    /**
+     * 이동 구간의 도로 추종 경로를 hub 에 일괄 요청한다.
+     *
+     * 라우팅 대상이 아닌 이동수단(bus/transit)이거나 구간이 없으면 호출하지
+     * 않고 null 을 돌려준다(전 구간 직선 폴백). 그 외는 인접 방문지 좌표쌍으로
+     * legs 를 구성해 배치 1회로 요청한다.
+     *
+     * @return routes(legs 와 같은 길이·인덱스, 실패 구간은 원소가 null),
+     *         또는 미호출 시 null.
+     */
+    private List<Route> fetchRoutes(String transport, List<Place> ordered) {
+        if (ordered.size() < 2 || !isRoutable(transport)) {
+            return null;
+        }
+        List<LegReq> legs = new ArrayList<>(ordered.size() - 1);
+        for (int i = 0; i < ordered.size() - 1; i++) {
+            Place a = ordered.get(i);
+            Place b = ordered.get(i + 1);
+            legs.add(new LegReq(
+                    new Point(a.lat(), a.lng()),
+                    new Point(b.lat(), b.lng()),
+                    legName(a.name()),
+                    legName(b.name())));
+        }
+        return hubDirectionsClient.fetchRoutes(transport, legs);
+    }
+
+    /** 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외). */
+    private static boolean isRoutable(String transport) {
+        return "walk".equals(transport)
+                || "bicycle".equals(transport)
+                || "scooter".equals(transport);
+    }
+
+    /** hub 계약(start_name/goal_name: 1~60자)에 맞게 장소명을 정리한다. */
+    private static String legName(String name) {
+        if (name == null || name.isBlank()) {
+            return "지점";
+        }
+        String trimmed = name.strip();
+        return trimmed.length() > 60 ? trimmed.substring(0, 60) : trimmed;
+    }
+
+    /**
+     * 경로 조회에 성공한 구간의 이동 카드를 실측값으로 대체한다.
+     *
+     * route 가 null(구간 실패/미조회)이면 기저 카드(추정치)를 그대로 둔다.
+     * 성공 시 시간=올림(초→분, 최소 1분), 거리=반올림(m→km, 소수 2자리),
+     * path=도로 폴리라인을 부착한다.
+     */
+    static TransportToNext withMeasured(TransportToNext base, Route route) {
+        return withMeasured(base, route, null);
+    }
+
+    /**
+     * transport 를 함께 받아 킥보드 소요시간 보정까지 적용하는 변형.
+     */
+    static TransportToNext withMeasured(
+            TransportToNext base, Route route, String transport) {
+        if (route == null) {
+            return base;
+        }
+        double durationS = route.durationS();
+        if ("scooter".equalsIgnoreCase(transport == null ? "" : transport.trim())) {
+            durationS *= KICKBOARD_DURATION_FACTOR;
+        }
+        int durationMinutes = Math.max(1, (int) Math.ceil(durationS / 60.0));
+        double distanceKm = Math.round(route.distanceM() / 10.0) / 100.0;
+        return new TransportToNext(
+                base.type(), base.label(), durationMinutes, distanceKm, route.path());
+    }
+}
