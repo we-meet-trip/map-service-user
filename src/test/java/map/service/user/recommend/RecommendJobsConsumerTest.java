@@ -36,7 +36,13 @@ class RecommendJobsConsumerTest {
     }
 
     private MapRecord<String, String, String> record(String jobId, String payload) {
-        return StreamRecords.mapBacked(Map.of("job_id", jobId, "payload", payload))
+        return record(jobId, payload, "done");
+    }
+
+    private MapRecord<String, String, String> record(
+            String jobId, String payload, String status) {
+        return StreamRecords.mapBacked(
+                        Map.of("job_id", jobId, "payload", payload, "status", status))
                 .withStreamKey("agent:jobs:done")
                 .withId(RecordId.of("1-1"));
     }
@@ -59,6 +65,21 @@ class RecommendJobsConsumerTest {
         consumer.onMessage(record("job-2", "{\"places\":[]}"));
 
         verify(draftStore).save("job-2", "{\"places\":[]}");
+        verify(reuseCacheStore, never()).save(any(), any());
+        verify(reuseCacheStore, never()).renewHitsTtl(any());
+    }
+
+    @Test
+    void doesNotCacheFailedPayloadEvenWhenLinkPresent() {
+        // 실패 결과를 캐시하면 같은 조건의 후속 요청이 캐시 TTL(기본 7일) 내내
+        // 실패를 재사용해 일시적 실패가 장기 장애로 굳는다. 연결고리는 소비하되
+        // 캐시 본체는 갱신하지 않아야 한다.
+        when(reuseCacheStore.consumeLink("job-4")).thenReturn(Optional.of("hash-fail"));
+
+        consumer.onMessage(record("job-4", "{\"status\":\"failed\"}", "failed"));
+
+        verify(draftStore).save("job-4", "{\"status\":\"failed\"}");
+        verify(reuseCacheStore).consumeLink("job-4");
         verify(reuseCacheStore, never()).save(any(), any());
         verify(reuseCacheStore, never()).renewHitsTtl(any());
     }

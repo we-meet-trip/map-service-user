@@ -129,7 +129,7 @@ public class RecommendJobsConsumer
         try {
             draftStore.save(jobId, payloadJson);
             jobStore.markFinished(jobId, value.get("status"), payloadJson);
-            updateReuseCacheIfLinked(jobId, payloadJson);
+            updateReuseCacheIfLinked(jobId, payloadJson, value.get("status"));
             ack(recordId);
             log.info("draft saved job_id={} stream_id={}", jobId, recordId);
         } catch (RuntimeException e) {
@@ -147,11 +147,21 @@ public class RecommendJobsConsumer
      * (=진짜 히트로 생성된 job, agent 를 안 거쳤음) 아무 것도 하지 않는다. 조회/저장 중
      * 오류가 나도 조용히 무시한다 — 캐시 갱신 실패가 draft 저장·ack 를 막아서는 안 된다
      * (무중단 원칙).
+     *
+     * status 가 "done" 이 아닌 payload 는 캐시에 넣지 않는다. 실패 결과를 캐시하면
+     * 같은 조건의 후속 요청이 캐시 TTL(기본 7일) 내내 실패 응답을 재사용하게 되어,
+     * 일시적 실패가 장기 장애로 굳는다. 연결고리는 이미 소비(GETDEL)됐으므로
+     * 다음 요청은 캐시 미스로 정상 재시도한다.
      */
-    private void updateReuseCacheIfLinked(String jobId, String payloadJson) {
+    private void updateReuseCacheIfLinked(String jobId, String payloadJson, String status) {
         try {
             reuseCacheStore.consumeLink(jobId)
                     .ifPresent(hash -> {
+                        if (!"done".equals(status)) {
+                            log.warn("reuse cache skipped for non-done job job_id={} status={}",
+                                    jobId, status);
+                            return;
+                        }
                         reuseCacheStore.save(hash, payloadJson);
                         reuseCacheStore.renewHitsTtl(hash);
                     });
