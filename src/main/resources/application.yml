@@ -137,6 +137,13 @@ trip:
 # - cache-time-round-step-minutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분)
 # - cache-refresh-every-hits     : 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
 # - cache-refresh-queue-capacity : 백그라운드 갱신 대기열 최대 크기(초과분은 로그 남기고 버림)
+# 장소 블로그 요약 정책.
+# ReviewSummaryService 가 본 섹션을 참조한다.
+# - summary-ttl-seconds : 장소별 요약 캐시 보관 시간(초). 같은 장소를 여러
+#                         사용자가 눌러도 이 기간 동안 모델을 한 번만 부른다.
+reviews:
+  summary-ttl-seconds: ${REVIEWS_SUMMARY_TTL_SECONDS:86400}
+
 recommend:
   research-daily-limit: ${RESEARCH_DAILY_LIMIT:3}
   cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}

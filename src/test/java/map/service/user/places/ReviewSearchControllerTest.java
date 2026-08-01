@@ -33,6 +33,7 @@ class ReviewSearchControllerTest {
     @Autowired private MockMvc mockMvc;
 
     @MockitoBean private ReviewSearchClient client;
+    @MockitoBean private ReviewSummaryService summaryService;
     // @WebMvcTest 는 서블릿 Filter 빈(JWT/RateLimit)을 컨텍스트에 포함하므로,
     // 실제 의존성(JwtService/RateLimitService) 없이 로드되도록 필터를 모킹한다.
     @MockitoBean private JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -44,8 +45,9 @@ class ReviewSearchControllerTest {
         ReviewSearchResponse response = new ReviewSearchResponse(
                 "cafe",
                 List.of(new ReviewItem("제목", "설명", "블로거", "20260101", "http://x/1")),
-                1);
-        when(client.search(eq("cafe"), any())).thenReturn(response);
+                1, 1);
+        when(client.search(eq("cafe"), any(), any(), any()))
+                .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/reviews").param("query", "cafe").param("display", "5"))
                 .andExpect(status().isOk())
