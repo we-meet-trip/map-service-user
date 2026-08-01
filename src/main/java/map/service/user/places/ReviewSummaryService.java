@@ -4,8 +4,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executor;
 import map.service.user.places.dto.ReviewItem;
 import map.service.user.places.dto.ReviewSearchResponse;
 import map.service.user.places.dto.ReviewSummaryResponse;
@@ -21,6 +26,11 @@ import org.springframework.stereotype.Service;
  *
  * 장소를 누를 때마다 모델을 부르지 않도록, 장소별 요약을 캐시에 담아 재사용
  * 한다. 같은 장소를 여러 사용자가 눌러도 하루에 한 번만 요약한다.
+ *
+ * 일정이 만들어진 직후에는 그 일정의 장소를 미리 요약해 둔다(prewarm). 장소를
+ * 누르는 시점에 만들면 그 자리에서 모델 응답을 기다려야 하는데, 일정에 담긴
+ * 장소는 대부분 한 번씩 눌러 보기 때문이다. 미리 만든 요약도 누를 때 만드는
+ * 요약과 **같은 키·같은 형식**으로 담기므로 읽는 쪽은 구분하지 않는다.
  *
  * 캐시는 요약 결과만 담는다. 블로그 목록은 hub 가 이미 짧게 캐싱하고, 화면이
  * 더보기로 구간을 옮겨 가며 보므로 여기서 또 담을 이유가 없다.
@@ -54,17 +64,29 @@ public class ReviewSummaryService {
     private final AgentSummaryClient summaryClient;
     private final StringRedisTemplate redis;
     private final Duration ttl;
+    private final Executor prewarmExecutor;
+    private final boolean prewarmEnabled;
+    private final int prewarmMaxPlaces;
+    private final int prewarmBatchSize;
 
     public ReviewSummaryService(
             ReviewSearchClient reviewClient,
             AgentSummaryClient summaryClient,
             @Qualifier("cacheRedisTemplate") StringRedisTemplate redis,
-            @Value("${reviews.summary-ttl-seconds:86400}") long ttlSeconds
+            @Value("${reviews.summary-ttl-seconds:86400}") long ttlSeconds,
+            @Qualifier("reviewSummaryPrewarmExecutor") Executor prewarmExecutor,
+            @Value("${reviews.prewarm-enabled:true}") boolean prewarmEnabled,
+            @Value("${reviews.prewarm-max-places:7}") int prewarmMaxPlaces,
+            @Value("${reviews.prewarm-batch-size:7}") int prewarmBatchSize
     ) {
         this.reviewClient = reviewClient;
         this.summaryClient = summaryClient;
         this.redis = redis;
         this.ttl = Duration.ofSeconds(ttlSeconds);
+        this.prewarmExecutor = prewarmExecutor;
+        this.prewarmEnabled = prewarmEnabled;
+        this.prewarmMaxPlaces = prewarmMaxPlaces;
+        this.prewarmBatchSize = prewarmBatchSize;
     }
 
     /**
@@ -92,6 +114,122 @@ public class ReviewSummaryService {
             writeCache(key, bullets, sources.size());
         }
         return new ReviewSummaryResponse(query, bullets, sources.size());
+    }
+
+    /**
+     * 일정에 담긴 장소들의 요약을 미리 만들어 캐시에 담는다.
+     *
+     * 호출 스레드를 막지 않고 즉시 돌아간다 — 일정 응답을 기다리는 사용자가
+     * 이 작업 때문에 늦어지면 안 된다.
+     *
+     * places: 방문 순서대로의 장소. 앞에서부터 상한만큼만 다룬다. 뒤쪽
+     *         장소는 눌렀을 때 그 자리에서 만들어지므로 화면은 정상이다.
+     */
+    public void prewarm(List<PrewarmPlace> places) {
+        if (!prewarmEnabled || places == null || places.isEmpty()) {
+            return;
+        }
+        List<PrewarmPlace> targets = dedupe(places);
+        if (targets.isEmpty()) {
+            return;
+        }
+        for (int from = 0; from < targets.size(); from += prewarmBatchSize) {
+            int to = Math.min(from + prewarmBatchSize, targets.size());
+            List<PrewarmPlace> chunk = List.copyOf(targets.subList(from, to));
+            try {
+                prewarmExecutor.execute(() -> prewarmNow(chunk));
+            } catch (RuntimeException e) {
+                // 대기열이 가득 차 거부되는 경우까지 포함해 흡수한다.
+                log.warn("summary prewarm submit failed reason={}",
+                        e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 이미 담긴 장소를 빼고, 캐시 키 기준 중복을 제거해 상한까지 남긴다.
+     *
+     * 이름이 조금 달라도 같은 키로 접히는 경우가 있어 원문이 아니라 키로
+     * 견준다. 이미 있는지는 존재 확인이 아니라 **읽기**로 판단한다 —
+     * 형식이 다른 옛 값을 미스로 다루는 규칙을 한 곳에만 두기 위함이다.
+     */
+    private List<PrewarmPlace> dedupe(List<PrewarmPlace> places) {
+        Set<String> seen = new HashSet<>();
+        List<PrewarmPlace> out = new ArrayList<>();
+        for (PrewarmPlace place : places) {
+            if (out.size() >= prewarmMaxPlaces) {
+                break;
+            }
+            if (place == null || place.name() == null
+                    || place.name().isBlank()) {
+                continue;
+            }
+            String key = cacheKey(place.name());
+            if (!seen.add(key)) {
+                continue;
+            }
+            if (readCache(key) != null) {
+                continue;
+            }
+            out.add(place);
+        }
+        return out;
+    }
+
+    /**
+     * 실행기 스레드에서 도는 본체 — 어떤 실패도 밖으로 내보내지 않는다.
+     *
+     * 근거를 모아 한 번에 요약을 맡기고, 두 줄을 받은 장소만 담는다.
+     * 요약을 만드는 사이 사용자가 그 장소를 누르면 요약이 한 번 더
+     * 만들어질 수 있다. 그대로 둔다 — 진행 중임을 표시해 두면 그 순간에
+     * 누른 사용자는 실제 요약 대신 빈 화면을 확정으로 받게 되어, 호출
+     * 한 번을 아끼려고 화면의 답을 버리는 거래가 된다.
+     */
+    private void prewarmNow(List<PrewarmPlace> chunk) {
+        try {
+            List<AgentSummaryClient.BatchPlace> batch = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            List<Integer> sourceCounts = new ArrayList<>();
+            for (PrewarmPlace place : chunk) {
+                List<ReviewItem> sources = fetchSources(place.name());
+                if (sources.isEmpty()) {
+                    continue;
+                }
+                names.add(place.name());
+                sourceCounts.add(sources.size());
+                batch.add(new AgentSummaryClient.BatchPlace(
+                        place.name(), place.category(), sources));
+            }
+            if (batch.isEmpty()) {
+                return;
+            }
+            Map<Integer, List<String>> summarized =
+                    summaryClient.summarizeBatch(batch);
+            int written = 0;
+            for (Map.Entry<Integer, List<String>> e : summarized.entrySet()) {
+                int index = e.getKey();
+                if (index < 0 || index >= names.size()) {
+                    continue;
+                }
+                List<String> bullets = e.getValue();
+                if (bullets == null || bullets.isEmpty()) {
+                    continue;
+                }
+                writeCache(
+                        cacheKey(names.get(index)),
+                        bullets,
+                        sourceCounts.get(index));
+                written++;
+            }
+            log.info("summary prewarm done places={} written={}",
+                    batch.size(), written);
+        } catch (RuntimeException e) {
+            log.warn("summary prewarm failed reason={}", e.getMessage());
+        }
+    }
+
+    /** 미리 요약할 장소 한 건 — 이름과 분류만 있으면 된다. */
+    public record PrewarmPlace(String name, String category) {
     }
 
     /** 캐시에 담는 값 — 요약 줄과 그 근거가 된 글 수. */

@@ -12,6 +12,7 @@ import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.security.JwtAuthenticationFilter;
 import map.service.user.places.dto.ReviewItem;
 import map.service.user.places.dto.ReviewSearchResponse;
+import map.service.user.places.dto.ReviewSummaryResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +68,48 @@ class ReviewSearchControllerTest {
     @DisplayName("display 범위 초과 — 400 Bad Request")
     void search_displayOutOfRange_returns400() throws Exception {
         mockMvc.perform(get("/api/v1/reviews").param("query", "cafe").param("display", "20"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("요약 조회 — 200 OK 및 두 줄·근거 수 반환")
+    void summary_valid_returns200() throws Exception {
+        when(summaryService.summarize(eq("속초해변")))
+                .thenReturn(new ReviewSummaryResponse(
+                        "속초해변", List.of("첫 줄", "둘째 줄"), 7));
+
+        mockMvc.perform(get("/api/v1/reviews/summary").param("query", "속초해변"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.query").value("속초해변"))
+                .andExpect(jsonPath("$.bullets[0]").value("첫 줄"))
+                .andExpect(jsonPath("$.bullets[1]").value("둘째 줄"))
+                .andExpect(jsonPath("$.sourceCount").value(7));
+    }
+
+    @Test
+    @DisplayName("요약 조회 — 근거가 없으면 빈 목록(오류가 아님)")
+    void summary_noSources_returnsEmpty() throws Exception {
+        when(summaryService.summarize(eq("무명장소")))
+                .thenReturn(new ReviewSummaryResponse("무명장소", List.of(), 0));
+
+        mockMvc.perform(get("/api/v1/reviews/summary").param("query", "무명장소"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bullets").isEmpty())
+                .andExpect(jsonPath("$.sourceCount").value(0));
+    }
+
+    @Test
+    @DisplayName("요약 조회 — query 공백이면 400")
+    void summary_blankQuery_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/reviews/summary").param("query", "  "))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("요약 조회 — query 길이 상한 초과면 400")
+    void summary_tooLongQuery_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/reviews/summary")
+                        .param("query", "가".repeat(61)))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import map.service.user.places.ReviewSummaryService;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.DateRange;
@@ -48,6 +49,7 @@ public class TripService {
     private final DraftStore draftStore;
     private final HubWeatherClient hubWeatherClient;
     private final TripStopsAssembler stopsAssembler;
+    private final ReviewSummaryService reviewSummaryService;
     private final ObjectMapper objectMapper;
     private final long pollTimeoutSeconds;
     private final long pollIntervalMs;
@@ -57,6 +59,7 @@ public class TripService {
             DraftStore draftStore,
             HubWeatherClient hubWeatherClient,
             TripStopsAssembler stopsAssembler,
+            ReviewSummaryService reviewSummaryService,
             ObjectMapper objectMapper,
             @Value("${trip.poll-timeout-seconds:150}") long pollTimeoutSeconds,
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
@@ -65,9 +68,25 @@ public class TripService {
         this.draftStore = draftStore;
         this.hubWeatherClient = hubWeatherClient;
         this.stopsAssembler = stopsAssembler;
+        this.reviewSummaryService = reviewSummaryService;
         this.objectMapper = objectMapper;
         this.pollTimeoutSeconds = pollTimeoutSeconds;
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    /**
+     * 방문지 목록으로 요약 선작성을 예약한다.
+     *
+     * 제출만 하고 즉시 돌아가므로 응답이 늦어지지 않는다. 이름이 없는
+     * 항목은 캐시 키를 만들 수 없어 건너뛴다.
+     */
+    private void prewarmSummaries(List<TripStop> stops) {
+        List<ReviewSummaryService.PrewarmPlace> places = stops.stream()
+                .filter(s -> s.name() != null && !s.name().isBlank())
+                .map(s -> new ReviewSummaryService.PrewarmPlace(
+                        s.name(), s.category()))
+                .toList();
+        reviewSummaryService.prewarm(places);
     }
 
     /**
@@ -116,7 +135,12 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        // 5) 날씨(best-effort)
+        // 5) 장소 요약을 미리 만들어 둔다. 일정에 담긴 장소는 대부분 한 번씩
+        //    눌러 보는데, 누를 때 만들면 그 자리에서 모델 응답을 기다려야 한다.
+        //    제출만 하고 넘어가므로 이 응답이 늦어지지 않는다.
+        prewarmSummaries(stops);
+
+        // 6) 날씨(best-effort)
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province,
                 city,
@@ -181,6 +205,8 @@ public class TripService {
                 schedule.activeStartHour(),
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
+
+        prewarmSummaries(stops);
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());

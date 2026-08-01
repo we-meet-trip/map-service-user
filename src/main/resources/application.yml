@@ -138,11 +138,26 @@ trip:
 # - cache-refresh-every-hits     : 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
 # - cache-refresh-queue-capacity : 백그라운드 갱신 대기열 최대 크기(초과분은 로그 남기고 버림)
 # 장소 블로그 요약 정책.
-# ReviewSummaryService 가 본 섹션을 참조한다.
-# - summary-ttl-seconds : 장소별 요약 캐시 보관 시간(초). 같은 장소를 여러
-#                         사용자가 눌러도 이 기간 동안 모델을 한 번만 부른다.
+# ReviewSummaryService 와 ReviewSummaryPrewarmConfig 가 본 섹션을 참조한다.
+# - summary-ttl-seconds    : 장소별 요약 캐시 보관 시간(초). 같은 장소를 여러
+#                            사용자가 눌러도 이 기간 동안 모델을 한 번만 부른다.
+# - prewarm-enabled        : 일정이 만들어진 직후 그 일정의 장소 요약을 미리
+#                            만들어 둘지. 끄면 장소를 누르는 시점에 그 자리에서
+#                            만든다(첫 탭이 느려질 뿐 동작은 같다).
+# - prewarm-pool-size      : 선작성 스레드 수. 작업 한 건이 모델 호출 1회를
+#                            쓰는데 모델 분당 상한이 낮아 늘려도 대기만 는다.
+# - prewarm-queue-capacity : 선작성 대기열 최대 크기(초과분은 로그 남기고 버림)
+# - prewarm-max-places     : 일정 하나에서 미리 요약할 장소 수 상한. 방문 순서
+#                            앞에서부터 센다 — 사용자가 먼저 보는 곳이다.
+# - prewarm-batch-size     : 모델 호출 1회에 묶어 보낼 장소 수. agent 요청
+#                            스키마의 상한을 넘기면 요청 전체가 거절된다.
 reviews:
   summary-ttl-seconds: ${REVIEWS_SUMMARY_TTL_SECONDS:86400}
+  prewarm-enabled: ${REVIEWS_PREWARM_ENABLED:true}
+  prewarm-pool-size: ${REVIEWS_PREWARM_POOL_SIZE:1}
+  prewarm-queue-capacity: ${REVIEWS_PREWARM_QUEUE_CAPACITY:50}
+  prewarm-max-places: ${REVIEWS_PREWARM_MAX_PLACES:7}
+  prewarm-batch-size: ${REVIEWS_PREWARM_BATCH_SIZE:7}
 
 recommend:
   research-daily-limit: ${RESEARCH_DAILY_LIMIT:3}
@@ -222,7 +237,7 @@ chat:
   max-participants: ${CHAT_MAX_PARTICIPANTS:10}
   expiry-grace-days: ${CHAT_EXPIRY_GRACE_DAYS:7}
   history-page-size: ${CHAT_HISTORY_PAGE_SIZE:50}
-  invite-base-url: ${CHAT_INVITE_BASE_URL:https://example.invalid/chat/invite/}
+  invite-base-url: ${CHAT_INVITE_BASE_URL:https://map-project-cbd94.web.app/invite/}
   max-message-length: ${CHAT_MAX_MESSAGE_LENGTH:2000}
   send-rate-limit: ${CHAT_SEND_RATE_LIMIT:20}
   send-rate-window-seconds: ${CHAT_SEND_RATE_WINDOW_SECONDS:10}

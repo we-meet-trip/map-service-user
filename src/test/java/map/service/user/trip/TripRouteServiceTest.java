@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import map.service.user.places.ReviewSummaryService;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.JobAccepted;
@@ -45,6 +46,7 @@ class TripRouteServiceTest {
     private DraftStore draftStore;
     private HubWeatherClient hubWeatherClient;
     private TripStopsAssembler stopsAssembler;
+    private ReviewSummaryService reviewSummaryService;
     private TripService service;
 
     @BeforeEach
@@ -53,9 +55,10 @@ class TripRouteServiceTest {
         draftStore = mock(DraftStore.class);
         hubWeatherClient = mock(HubWeatherClient.class);
         stopsAssembler = mock(TripStopsAssembler.class);
+        reviewSummaryService = mock(ReviewSummaryService.class);
         service = new TripService(
                 recommendService, draftStore, hubWeatherClient, stopsAssembler,
-                new ObjectMapper(), 1L, 10L);
+                reviewSummaryService, new ObjectMapper(), 1L, 10L);
         when(recommendService.createRouteJob(any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
     }
