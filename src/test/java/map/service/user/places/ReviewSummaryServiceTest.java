@@ -64,14 +64,30 @@ class ReviewSummaryServiceTest {
     @Test
     @DisplayName("캐시에 있으면 조회도 요약도 하지 않는다")
     void cacheHitSkipsUpstream() {
-        when(ops.get(anyString())).thenReturn("첫 줄" + JOIN + "둘째 줄");
+        when(ops.get(anyString())).thenReturn("2" + JOIN + "첫 줄" + JOIN + "둘째 줄");
 
         ReviewSummaryResponse out = service.summarize("속초해변");
 
         assertThat(out.bullets()).containsExactly("첫 줄", "둘째 줄");
+        // 근거 글 수도 함께 담겨 있어 캐시 히트가 미스와 같은 값을 준다.
+        assertThat(out.sourceCount()).isEqualTo(2);
         verify(reviewClient, never())
                 .search(anyString(), any(), any(), any());
         verify(summaryClient, never()).summarize(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("옛 형식으로 담긴 캐시는 미스로 다뤄 다시 만든다")
+    void legacyCacheShapeIsTreatedAsMiss() {
+        when(ops.get(anyString())).thenReturn("첫 줄" + JOIN + "둘째 줄");
+        sourcesAre(item("a"), item("b"), item("c"));
+        when(summaryClient.summarize(anyString(), any()))
+                .thenReturn(List.of("새 첫 줄", "새 둘째 줄"));
+
+        ReviewSummaryResponse out = service.summarize("속초해변");
+
+        assertThat(out.bullets()).containsExactly("새 첫 줄", "새 둘째 줄");
+        assertThat(out.sourceCount()).isEqualTo(3);
     }
 
     @Test
@@ -148,7 +164,7 @@ class ReviewSummaryServiceTest {
     @Test
     @DisplayName("같은 장소를 다르게 적어도 한 키로 모인다")
     void keyNormalizesQuery() {
-        when(ops.get(anyString())).thenReturn("첫 줄" + JOIN + "둘째 줄");
+        when(ops.get(anyString())).thenReturn("2" + JOIN + "첫 줄" + JOIN + "둘째 줄");
 
         service.summarize("  속초해변  ");
         service.summarize("속초해변");

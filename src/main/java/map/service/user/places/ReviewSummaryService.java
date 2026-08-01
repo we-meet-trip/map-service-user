@@ -77,9 +77,10 @@ public class ReviewSummaryService {
      */
     public ReviewSummaryResponse summarize(String query) {
         String key = cacheKey(query);
-        List<String> cached = readCache(key);
+        Cached cached = readCache(key);
         if (cached != null) {
-            return new ReviewSummaryResponse(query, cached, cached.size());
+            return new ReviewSummaryResponse(
+                    query, cached.bullets(), cached.sourceCount());
         }
 
         List<ReviewItem> sources = fetchSources(query);
@@ -88,9 +89,13 @@ public class ReviewSummaryService {
         }
         List<String> bullets = summaryClient.summarize(query, sources);
         if (!bullets.isEmpty()) {
-            writeCache(key, bullets);
+            writeCache(key, bullets, sources.size());
         }
         return new ReviewSummaryResponse(query, bullets, sources.size());
+    }
+
+    /** 캐시에 담는 값 — 요약 줄과 그 근거가 된 글 수. */
+    private record Cached(List<String> bullets, int sourceCount) {
     }
 
     /** 요약 근거가 될 블로그 글을 모은다. 조회 실패는 근거 없음으로 흡수한다. */
@@ -108,14 +113,33 @@ public class ReviewSummaryService {
         }
     }
 
-    /** 캐시에서 요약을 읽는다. 연결 장애는 캐시 미스와 같게 다룬다. */
-    private List<String> readCache(String key) {
+    /**
+     * 캐시에서 요약을 읽는다. 연결 장애는 캐시 미스와 같게 다룬다.
+     *
+     * 첫 칸이 근거 글 수, 나머지가 요약 줄이다. 근거 수를 함께 담지 않으면
+     * 캐시에 걸린 요청만 근거 수가 요약 줄 수로 바뀌어, 같은 질의가 호출마다
+     * 다른 값을 돌려준다.
+     */
+    private Cached readCache(String key) {
         try {
             String raw = redis.opsForValue().get(key);
             if (raw == null || raw.isEmpty()) {
                 return null;
             }
-            return List.of(raw.split(JOIN));
+            String[] parts = raw.split(JOIN);
+            if (parts.length < 2) {
+                return null;
+            }
+            int sourceCount;
+            try {
+                sourceCount = Integer.parseInt(parts[0]);
+            } catch (NumberFormatException e) {
+                // 형식이 다른 옛 값은 미스로 다뤄 다시 만든다.
+                return null;
+            }
+            List<String> bullets =
+                    List.of(parts).subList(1, parts.length);
+            return new Cached(bullets, sourceCount);
         } catch (RuntimeException e) {
             log.warn("summary cache read failed reason={}", e.getMessage());
             return null;
@@ -123,9 +147,11 @@ public class ReviewSummaryService {
     }
 
     /** 요약을 캐시에 담는다. 연결 장애는 삼킨다 — 담지 못해도 응답은 유효하다. */
-    private void writeCache(String key, List<String> bullets) {
+    private void writeCache(String key, List<String> bullets, int sources) {
         try {
-            redis.opsForValue().set(key, String.join(JOIN, bullets), ttl);
+            String payload =
+                    sources + JOIN + String.join(JOIN, bullets);
+            redis.opsForValue().set(key, payload, ttl);
         } catch (RuntimeException e) {
             log.warn("summary cache write failed reason={}", e.getMessage());
         }

@@ -31,6 +31,16 @@ public class AgentSummaryClient {
     /** 한 번에 근거로 넘길 후기 수 상한. agent 요청 스키마의 상한과 같다. */
     private static final int MAX_SNIPPETS = 7;
 
+    /**
+     * 제목·본문 길이 상한. 받는 쪽 스키마와 같은 값으로 잘라 보낸다.
+     *
+     * 자르지 않으면 긴 글 한 건 때문에 요청 전체가 검증에 걸려, 그 장소는
+     * 요약이 영영 비고 왕복만 반복된다. 외부에서 온 글 길이는 우리가 정할 수
+     * 없으므로 보내는 쪽에서 맞춘다.
+     */
+    private static final int MAX_TITLE = 200;
+    private static final int MAX_DESCRIPTION = 500;
+
     private final RestClient client;
 
     public AgentSummaryClient(
@@ -57,7 +67,8 @@ public class AgentSummaryClient {
                         && !r.description().isBlank())
                 .limit(MAX_SNIPPETS)
                 .map(r -> new Snippet(
-                        r.title() == null ? "" : r.title(), r.description()))
+                        clamp(r.title(), MAX_TITLE),
+                        clamp(r.description(), MAX_DESCRIPTION)))
                 .toList();
         if (snippets.isEmpty()) {
             return List.of();
@@ -79,6 +90,14 @@ public class AgentSummaryClient {
             log.warn("agent reviews summary failed reason={}", e.getMessage());
             return List.of();
         }
+    }
+
+    /** 길이 상한에 맞춰 자른다. null 은 빈 문자열로 접는다. */
+    private static String clamp(String value, int max) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     /** 요청 본문 — agent 의 요약 요청 스키마와 1:1. */
