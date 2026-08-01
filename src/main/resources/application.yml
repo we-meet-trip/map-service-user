@@ -237,7 +237,7 @@ chat:
   max-participants: ${CHAT_MAX_PARTICIPANTS:10}
   expiry-grace-days: ${CHAT_EXPIRY_GRACE_DAYS:7}
   history-page-size: ${CHAT_HISTORY_PAGE_SIZE:50}
-  invite-base-url: ${CHAT_INVITE_BASE_URL:https://map-project-cbd94.web.app/invite/}
+  invite-base-url: ${CHAT_INVITE_BASE_URL:https://mapcenter-b59ca.web.app/invite/}
   max-message-length: ${CHAT_MAX_MESSAGE_LENGTH:2000}
   send-rate-limit: ${CHAT_SEND_RATE_LIMIT:20}
   send-rate-window-seconds: ${CHAT_SEND_RATE_WINDOW_SECONDS:10}
