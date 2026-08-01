@@ -198,6 +198,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 현재 날씨를 만들 수 없을 때 호출된다.
+     *
+     * 카드의 본체인 지금 기온이 없으면 그릴 것이 없어 빈 값 응답 대신 오류로
+     * 알린다. 원인은 로그에만 남기고 클라이언트에는 고정 안내만 준다.
+     */
+    @ExceptionHandler(map.service.user.weather.WeatherUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleWeatherUnavailable(
+            map.service.user.weather.WeatherUnavailableException ex) {
+        log.warn("weather home unavailable: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "weather_unavailable");
+        body.put("message", "날씨 정보를 가져오지 못했어요.");
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
      * trip 추천 잡이 실패(status=failed)했거나 결과가 비정상일 때 호출된다.
      * 호출 측이 {error, message} 를 읽으므로 두 키를 채워 502 로 반환한다.
      */
