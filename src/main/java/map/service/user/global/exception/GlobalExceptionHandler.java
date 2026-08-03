@@ -15,6 +15,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -120,6 +121,25 @@ public class GlobalExceptionHandler {
                         .status(405)
                         .code("METHOD_NOT_ALLOWED")
                         .message("지원하지 않는 HTTP 메서드입니다: " + e.getMethod())
+                        .build()
+        );
+    }
+
+    /**
+     * 매핑되지 않은 경로. 정적 자원 탐색까지 실패하면 여기로 온다.
+     *
+     * 전용 처리가 없으면 최종 폴백이 잡아 500 으로 나가서, 주소를 잘못 부른
+     * 쪽의 문제가 서버 장애처럼 보인다. 재시도해도 소용없음을 상태로 알린다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException e) {
+        log.warn("no handler for path: {}", e.getResourcePath());
+        return ResponseEntity.status(404).body(
+                ErrorResponse.builder()
+                        .timestamp(LocalDateTime.now())
+                        .status(404)
+                        .code("NOT_FOUND")
+                        .message("요청한 경로를 찾을 수 없습니다.")
                         .build()
         );
     }

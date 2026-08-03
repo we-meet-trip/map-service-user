@@ -52,6 +52,7 @@ public class AgentSummaryClient {
     private static final int MAX_TITLE = 200;
     private static final int MAX_DESCRIPTION = 500;
     private static final int MAX_CATEGORY = 80;
+    private static final int MAX_PLACE_NAME = 80;
 
     private final RestClient client;
 
@@ -79,7 +80,7 @@ public class AgentSummaryClient {
             Response res = client.post()
                     .uri("/v1/reviews/summary")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(new Request(placeName, null, snippets))
+                    .body(new Request(clamp(placeName, MAX_PLACE_NAME), null, snippets))
                     .retrieve()
                     .body(Response.class);
             if (res == null || res.bullets() == null) {
@@ -123,7 +124,8 @@ public class AgentSummaryClient {
             }
             callerIndex.add(i);
             sent.add(new BatchRequestPlace(
-                    place.name(), clampOrNull(place.category()), snippets));
+                    clamp(place.name(), MAX_PLACE_NAME),
+                    clampOrNull(place.category()), snippets));
         }
         if (sent.isEmpty()) {
             return Map.of();
