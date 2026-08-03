@@ -85,7 +85,7 @@ spring:
 # AgentClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
 # - base-url        : agent 서비스 base URL
 # - timeout-seconds : RestClient 의 readTimeout (초)
-# - internal-token  : B2 내부 서비스 인증 토큰(SoT §5.5). 비우면 헤더 미부착.
+# - internal-token  : B2 내부 서비스 인증 토큰. 비우면 헤더 미부착.
 #                     agent 의 INTERNAL_SERVICE_TOKEN 과 동일 값이어야 한다.
 agent:
   base-url: ${AGENT_BASE_URL:http://agent:8000}

@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 /**
  * TripMappingKickboardTest — client transport → agent Mobility 매핑 회귀 테스트
  *
- * scooter 를 BICYCLE 로 치환하던 시절에는 hub 룰이 자전거 반경 10km 를 적용해
- * SoT(def §3.6)가 정한 킥보드 7km 가 한 번도 쓰이지 않았다.
+ * scooter 를 BICYCLE 로 치환하면 킥보드 소요시간 보정 계수가 적용되지 않아
+ * 이동 시간이 자전거 기준으로 계산된다.
  */
 @DisplayName("TripMapping.toAgentMobility 킥보드 분리")
 class TripMappingKickboardTest {

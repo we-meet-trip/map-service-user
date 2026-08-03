@@ -57,9 +57,8 @@ public final class TripMapping {
      * client transport → agent Mobility (결정 D-7).
      * bus→transit, walk/bicycle/scooter 는 동일. 그 외는 거부(400 유도).
      *
-     * scooter 를 BICYCLE 로 치환하던 것을 SCOOTER 로 분리했다. 치환하던 시절에는
-     * hub 룰이 자전거 반경 10km 를 적용해 SoT(def §3.6)가 정한 킥보드 7km 가
-     * 한 번도 쓰이지 않았다.
+     * scooter 를 BICYCLE 로 치환하던 것을 SCOOTER 로 분리했다. 치환하면 킥보드
+     * 소요시간 보정 계수가 적용되지 않아 이동 시간이 자전거로 계산된다.
      */
     public static Mobility toAgentMobility(String transport) {
         if (transport == null) {

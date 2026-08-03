@@ -21,9 +21,9 @@ public enum Mobility {
     WALK("walk"),
     BICYCLE("bicycle"),
     /**
-     * 전동 킥보드. SoT(def §3.6) 의 kickboard 와 같은 개념이며 hub 룰이 두 철자를
-     * 모두 받아 반경 7km 를 적용한다. 이 상수가 없던 시절에는 킥보드를 BICYCLE 로
-     * 치환해 보내 킥보드 전용 반경이 한 번도 적용되지 않았다.
+     * 전동 킥보드. kickboard 와 같은 개념이며 hub 룰이 두 철자를 모두 받는다.
+     * 반경은 자전거와 같지만 소요시간 보정 계수와 경로 프로파일이 달라,
+     * BICYCLE 로 치환하지 않고 별도 값으로 전달해야 한다.
      */
     SCOOTER("scooter"),
     CAR("car"),
