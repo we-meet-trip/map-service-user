@@ -52,7 +52,7 @@ public class AgentClientConfig {
         RestClient.Builder configured = builder
                 .baseUrl(baseUrl)
                 .requestFactory(factory);
-        // B2 내부 서비스 인증(SoT §5.5): 토큰이 설정된 배포에서만
+        // B2 내부 서비스 인증: 토큰이 설정된 배포에서만
         // X-Internal-Token 을 모든 agent 요청에 부착한다. agent 는 토큰
         // 설정 시 본 헤더 부재/불일치 요청을 401 로 거부한다.
         if (internalToken != null && !internalToken.isBlank()) {

@@ -15,6 +15,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -124,6 +125,25 @@ public class GlobalExceptionHandler {
         );
     }
 
+    /**
+     * 매핑되지 않은 경로. 정적 자원 탐색까지 실패하면 여기로 온다.
+     *
+     * 전용 처리가 없으면 최종 폴백이 잡아 500 으로 나가서, 주소를 잘못 부른
+     * 쪽의 문제가 서버 장애처럼 보인다. 재시도해도 소용없음을 상태로 알린다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException e) {
+        log.warn("no handler for path: {}", e.getResourcePath());
+        return ResponseEntity.status(404).body(
+                ErrorResponse.builder()
+                        .timestamp(LocalDateTime.now())
+                        .status(404)
+                        .code("NOT_FOUND")
+                        .message("요청한 경로를 찾을 수 없습니다.")
+                        .build()
+        );
+    }
+
     // ── 업스트림 프록시 계열 : 호출 측 계약(Map 본문) 유지 ──────────────────────
 
     /**
@@ -195,6 +215,22 @@ public class GlobalExceptionHandler {
         body.put("error", "agent unreachable");
         body.put("detail", "upstream request timed out");
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(body);
+    }
+
+    /**
+     * 현재 날씨를 만들 수 없을 때 호출된다.
+     *
+     * 카드의 본체인 지금 기온이 없으면 그릴 것이 없어 빈 값 응답 대신 오류로
+     * 알린다. 원인은 로그에만 남기고 클라이언트에는 고정 안내만 준다.
+     */
+    @ExceptionHandler(map.service.user.weather.WeatherUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleWeatherUnavailable(
+            map.service.user.weather.WeatherUnavailableException ex) {
+        log.warn("weather home unavailable: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "weather_unavailable");
+        body.put("message", "날씨 정보를 가져오지 못했어요.");
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
     }
 
     /**

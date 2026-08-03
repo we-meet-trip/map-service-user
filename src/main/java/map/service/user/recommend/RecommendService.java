@@ -299,7 +299,7 @@ public class RecommendService {
      * 기존 draft 의 places[].content_id 를 수집해 exclude 목록을 만들고
      * (실측 근거 없는 항목은 content_id 가 없어 자연 제외), draft 를
      * DraftStore.delete 로 폐기한 뒤 stage="mode1" + exclude 로 재구성한 요청을
-     * agent 에 위임한다(SoT §6.2 exclude_list). draft 가 없거나 파싱 불가하면
+     * agent 에 위임한다(재탐색 제외 목록). draft 가 없거나 파싱 불가하면
      * exclude 없이 진행한다(기존 동작 보존).
      *
      * 재추천 일일 한도(ResearchLimitService)를 가장 먼저 검사한다. scheduleId 가

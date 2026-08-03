@@ -62,7 +62,7 @@ class TripStopsAssemblerMeasuredTest {
     @Test
     @DisplayName("킥보드(scooter)는 실측 duration 에 0.7 보정을 적용한다")
     void appliesKickboardDurationFactor() {
-        // OSRM 은 킥보드 전용 프로파일이 없어 bicycle 값을 돌려준다. SoT def §3.5
+        // OSRM 은 킥보드 전용 프로파일이 없어 bicycle 값을 돌려준다.
         // 가 정한 0.7 보정을 BFF 가 적용해야 카드에 킥보드 속도가 반영된다.
         Route route = new Route(List.of(List.of(37.5, 127.0)), 1420, 1200);
 
