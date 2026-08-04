@@ -36,6 +36,15 @@ import java.util.List;
  * bullets: agent summarize_reviews 노드가 블로그 후기를 종합한 요약 2줄.
  *          근거가 될 후기를 못 구한 장소나 degrade 시 null 이다.
  *
+ * 아래 셋은 agent 가 시간축을 세우면서 계산한 값이다. 시간축 도입 전에
+ * 저장된 일정에는 없으므로 전부 nullable 이며, 없으면 조립기가 활동 시간대를
+ * 균등 분할하던 기존 방식으로 되돌아간다.
+ * stayMinutes: 이 장소에 머무는 시간(분). JSON key "stay_minutes".
+ * visitStart: 확정된 방문 시각("HH:MM"). JSON key "visit_start".
+ *             recommendedVisitTime(자유 텍스트)과 의미가 다르다 — 이쪽은
+ *             이동시간과 체류시간을 쌓아 만든 실제 시각이다.
+ * visitEnd: 그 장소를 떠나는 시각("HH:MM"). JSON key "visit_end".
+ *
  * placeUrl/reason/bullets 의 크기 제약은 수정 요청(EditRequest)으로 들어오는
  * 값에만 적용된다. 이 레코드는 draft 를 그대로 실어 나르는 통로이자 수정
  * 본문의 원소이기도 해서, 제약이 없으면 클라이언트가 임의 길이·임의 개수를
@@ -56,6 +65,9 @@ public record Place(
         Boolean grounded,
         @JsonProperty("place_url") @Size(max = 500) String placeUrl,
         @Size(max = 200) String reason,
-        @Size(max = 2) List<@Size(max = 80) String> bullets
+        @Size(max = 2) List<@Size(max = 80) String> bullets,
+        @JsonProperty("stay_minutes") Integer stayMinutes,
+        @JsonProperty("visit_start") @Size(max = 5) String visitStart,
+        @JsonProperty("visit_end") @Size(max = 5) String visitEnd
 ) {
 }

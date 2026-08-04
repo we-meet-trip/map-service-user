@@ -37,6 +37,12 @@ import java.util.List;
  * reason: 이 장소를 추천한 이유(≤200자).
  * bullets: 블로그 후기를 종합한 요약 2줄. 근거가 될 후기를 못 구한 장소는
  *          이 키가 없다 — client 는 없을 때를 전제로 그려야 한다.
+ *
+ * 아래 둘은 agent 가 시간축을 세운 일정에만 있다. time 이 "언제 도착하나"라면
+ * 이 둘은 "언제까지 얼마나 머무나"를 말한다. 시간축 없이 만들어진 일정에는
+ * 값이 없어 키가 빠지므로, 있을 때만 그리면 된다.
+ * endTime: 그 장소를 떠나는 시각("HH:MM"). JSON key "end_time".
+ * stayMinutes: 머무는 시간(분). JSON key "stay_minutes".
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TripStop(
@@ -54,6 +60,8 @@ public record TripStop(
         @JsonProperty("place_id") Integer placeId,
         @JsonProperty("place_url") String placeUrl,
         String reason,
-        List<String> bullets
+        List<String> bullets,
+        @JsonProperty("end_time") String endTime,
+        @JsonProperty("stay_minutes") Integer stayMinutes
 ) {
 }

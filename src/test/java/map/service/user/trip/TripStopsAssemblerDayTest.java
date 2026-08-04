@@ -25,7 +25,8 @@ class TripStopsAssemblerDayTest {
         return new Place(
                 id, day, "장소" + id, "주소" + id,
                 37.5 + id * 0.01, 127.0 + id * 0.01,
-                "오전", null, null, null, true, null, null, null);
+                "오전", null, null, null, true, null, null, null,
+                null, null, null);
     }
 
     private static Leg leg(int from, int to) {
@@ -81,5 +82,53 @@ class TripStopsAssemblerDayTest {
         assertThat(stops.get(1).transportToNext()).isNotNull();
         assertThat(stops.get(2).transportToNext()).isNotNull();
         assertThat(stops.get(3).transportToNext()).isNull();
+    }
+
+    // ── 시간축 이중 경로 ──────────────────────────────────────
+
+    /** agent 가 계산한 방문 시각을 실은 장소. */
+    private static Place timedPlace(
+            int id, int day, String start, String end, int stay
+    ) {
+        return new Place(
+                id, day, "장소" + id, "주소" + id,
+                37.5 + id * 0.01, 127.0 + id * 0.01,
+                "오전", null, null, null, true, null, null, null,
+                stay, start, end);
+    }
+
+    @Test
+    @DisplayName("계산된 방문 시각이 있으면 균등 분할 대신 그 값을 쓴다")
+    void prefersComputedVisitTimes() {
+        List<TripStop> stops = TripStopsAssembler.toStops(
+                List.of(
+                        timedPlace(0, 1, "09:00", "10:00", 60),
+                        timedPlace(1, 1, "10:30", "11:15", 45),
+                        timedPlace(2, 1, "11:40", "12:40", 60)),
+                List.of(leg(0, 1), leg(1, 2)),
+                "walk", 9, 18, null);
+
+        assertThat(stops).extracting(TripStop::time)
+                .containsExactly("09:00", "10:30", "11:40");
+        assertThat(stops).extracting(TripStop::endTime)
+                .containsExactly("10:00", "11:15", "12:40");
+        assertThat(stops).extracting(TripStop::stayMinutes)
+                .containsExactly(60, 45, 60);
+    }
+
+    @Test
+    @DisplayName("계산된 시각이 없으면 예전처럼 활동 시간대를 균등 분할한다")
+    void fallsBackToEvenSplitWithoutComputedTimes() {
+        List<TripStop> stops = stopsOf(List.of(
+                place(0, 1), place(1, 1), place(2, 1)));
+
+        // 09:00~18:00(540분)을 2등분 → 09:00 / 13:30 / 18:00
+        assertThat(stops).extracting(TripStop::time)
+                .containsExactly("09:00", "13:30", "18:00");
+        // 시간축이 없는 일정에는 이 키들이 아예 없다.
+        assertThat(stops).extracting(TripStop::endTime)
+                .containsOnlyNulls();
+        assertThat(stops).extracting(TripStop::stayMinutes)
+                .containsOnlyNulls();
     }
 }

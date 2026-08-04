@@ -87,7 +87,7 @@ class TripRouteServiceTest {
                         : new map.service.user.trip.dto.TransportToNext(
                                 "walk", "이동: 도보", durationMinutes, 1.2,
                                 List.of(List.of(38.19, 128.60))),
-                null, null, true, order, null, null, null);
+                null, null, true, order, null, null, null, null, null);
     }
 
     @Test

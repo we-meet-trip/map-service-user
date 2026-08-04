@@ -155,12 +155,21 @@ public class TripStopsAssembler {
                         ? routes.get(i) : null;
                 toNext = withMeasured(base, route, transport);
             }
+            // agent 가 시간축을 세웠으면 그 시각을 쓴다. 그쪽은 이동시간과
+            // 체류시간을 쌓아 만든 값이라, 활동 시간대를 방문지 수로 나누는
+            // 아래 폴백보다 실제 일정에 가깝다. 값이 없는 일정(시간축 도입
+            // 전에 저장된 것)은 폴백이 받아 예전과 똑같은 화면을 낸다.
+            String time = hasText(p.visitStart())
+                    ? p.visitStart()
+                    : TripMapping.stopTime(
+                            startHour, endHour, indexInDay, totalInDay);
+
             stops.add(new TripStop(
                     i + 1,
                     day,
                     p.name(),
                     p.address(),
-                    TripMapping.stopTime(startHour, endHour, indexInDay, totalInDay),
+                    time,
                     p.lat(),
                     p.lng(),
                     toNext,
@@ -170,9 +179,16 @@ public class TripStopsAssembler {
                     p.placeId(),
                     p.placeUrl(),
                     p.reason(),
-                    p.bullets()));
+                    p.bullets(),
+                    hasText(p.visitEnd()) ? p.visitEnd() : null,
+                    p.stayMinutes()));
         }
         return stops;
+    }
+
+    /** 값이 있고 공백만은 아닌지. 시간축 필드의 유무 판정에 쓴다. */
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     /**

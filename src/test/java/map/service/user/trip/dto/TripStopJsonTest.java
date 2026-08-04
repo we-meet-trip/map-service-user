@@ -26,7 +26,7 @@ class TripStopJsonTest {
         return new TripStop(
                 1, 1, "속초해변", "강원특별자치도 속초시", "09:00",
                 38.19, 128.60, null, "kakao", "관광", true,
-                placeId, placeUrl, reason, bullets);
+                placeId, placeUrl, reason, bullets, null, null);
     }
 
     @Test
