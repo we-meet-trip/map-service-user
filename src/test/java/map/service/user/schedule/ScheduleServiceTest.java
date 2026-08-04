@@ -19,8 +19,10 @@ import map.service.user.trip.TripStopsAssembler;
  * ScheduleServiceTest — draft 영속화 및 소유자(userId) 기록 검증
  *
  * persist 가 @AuthenticationPrincipal 로 넘어온 userId 를 ScheduleEntity 에
- * 그대로 저장하는지, 익명(null) 인 경우 user_id 를 null 로 저장하여 현행 동작을
- * 보존하는지 확인한다.
+ * 그대로 저장하는지 확인한다.
+ *
+ * 소유자 없는 저장을 막는 것은 서비스가 아니라 HTTP 진입점의 몫이라
+ * (ScheduleController.save 가 401 로 되돌린다) 여기서는 매핑만 본다.
  */
 @DisplayName("ScheduleService 단위 테스트")
 class ScheduleServiceTest {
@@ -60,7 +62,7 @@ class ScheduleServiceTest {
     }
 
     @Test
-    @DisplayName("persist — 익명(userId=null) 은 user_id 를 null 로 저장(현행 동작 보존)")
+    @DisplayName("persist — userId 가 없으면 user_id 를 null 로 매핑(차단은 컨트롤러 몫)")
     void persistWithNullUserIdStoresNull() {
         service.persist(request(), null);
 

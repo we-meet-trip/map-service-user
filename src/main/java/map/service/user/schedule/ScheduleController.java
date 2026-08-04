@@ -1,7 +1,11 @@
 package map.service.user.schedule;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Map;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
+import map.service.user.global.security.JwtAuthenticationFilter;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
 import org.springframework.http.ResponseEntity;
@@ -23,13 +27,17 @@ import org.springframework.web.bind.annotation.RestController;
  * service: ScheduleService. 생성자 주입.
  *
  * 엔드포인트:
- * - POST   /api/v1/schedules       → save   (draft 를 일정으로 저장)
- * - GET    /api/v1/schedules       → list   (내 일정 목록)
- * - GET    /api/v1/schedules/{id}  → detail (방문지까지 조립된 상세)
- * - DELETE /api/v1/schedules/{id}  → delete
+ * - POST   /api/v1/schedules             → save   (draft 를 일정으로 저장)
+ * - GET    /api/v1/schedules             → list   (내 일정 목록)
+ * - GET    /api/v1/schedules/{id}        → detail (방문지까지 조립된 상세)
+ * - POST   /api/v1/schedules/{id}/start  → start  (시작 기록 + 상세)
+ * - DELETE /api/v1/schedules/{id}        → delete
  *
  * 조회·삭제는 소유자 범위로 제한된다. 남의 일정이나 없는 일정은 똑같이
  * 404 다 — 403 과 구분하면 그 일정이 존재한다는 사실이 새어 나간다.
+ *
+ * 저장도 같은 범위를 따른다. 조회가 소유자로 좁혀지는 이상 주인 없는 저장은
+ * 다시 꺼낼 수 없는 행만 남기므로, 소유자를 특정하지 못하면 401 로 되돌린다.
  */
 @RestController
 @RequestMapping("/api/v1/schedules")
@@ -48,17 +56,32 @@ public class ScheduleController {
      * draft 를 일정 엔티티로 저장하고 발급된 schedule_id 를 JSON 으로 돌려준다.
      * draft 가 없으면 서비스 계층에서 ScheduleNotFoundException(404) 으로 처리된다.
      *
+     * <p><b>소유자가 없으면 저장하지 않는다.</b> 목록·상세·삭제가 전부 소유자 조건으로
+     * 조회하므로, 주인 없이 저장된 행은 어떤 경로로도 다시 꺼낼 수 없다. 그런데도 200 을
+     * 돌려주면 클라이언트는 저장에 성공했다고 알리고, 사용자는 목록에서 그 일정을 영영
+     * 찾지 못한다. 저장됐다는 응답은 "다시 꺼낼 수 있다"는 뜻이어야 하므로 401 로 되돌린다.
+     *
+     * <p>토큰을 들고 왔는데 만료돼서 거절된 경우에는 그 사유를 그대로 실어 준다.
+     * 클라이언트는 401 을 받으면 토큰을 갱신해 한 번 다시 시도하는데, 사유가 정확해야
+     * 그 경로가 제대로 걸린다.
+     *
      * request: @Valid @RequestBody ScheduleSaveRequest.
      * userId: @AuthenticationPrincipal 로 주입되는 소유자 식별자. JWT 필터가 채운
-     *         SecurityContext 의 principal(Long). 토큰이 없거나 익명(anonymousUser
-     *         String)인 경우 리졸버가 null 로 해석하여 소유자 미지정으로 저장한다
-     *         (auth.enforced=false + 토큰 부재 시 현행 동작과 동일).
+     *         SecurityContext 의 principal(Long). 토큰이 없거나 검증에 실패하면 null.
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> save(
             @Valid @RequestBody ScheduleSaveRequest request,
-            @AuthenticationPrincipal Long userId
+            @AuthenticationPrincipal Long userId,
+            HttpServletRequest httpRequest
     ) {
+        if (userId == null) {
+            Object rejected =
+                    httpRequest.getAttribute(JwtAuthenticationFilter.REJECTED_TOKEN_ATTR);
+            throw new CustomException(rejected instanceof ErrorCode code
+                    ? code
+                    : ErrorCode.INVALID_TOKEN);
+        }
         Long scheduleId = service.persist(request, userId);
         return ResponseEntity.ok(Map.of("schedule_id", scheduleId));
     }
@@ -87,6 +110,20 @@ public class ScheduleController {
             @AuthenticationPrincipal Long userId
     ) {
         return ResponseEntity.ok(service.detail(scheduleId, userId));
+    }
+
+    /**
+     * 일정을 따라가기 시작했다고 알리고, 시작 화면이 그릴 상세를 받는다.
+     *
+     * 시작 시각은 처음 한 번만 새겨지므로 몇 번을 눌러도 결과가 같다.
+     * 소유자가 아니거나 없는 일정이면 조회와 똑같이 404 다.
+     */
+    @PostMapping("/{scheduleId}/start")
+    public ResponseEntity<ScheduleDetailResponse> start(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        return ResponseEntity.ok(service.start(scheduleId, userId));
     }
 
     /**

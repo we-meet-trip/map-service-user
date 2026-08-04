@@ -26,6 +26,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String AUTHORIZATION = "Authorization";
     private static final String BEARER_PREFIX  = "Bearer ";
 
+    /**
+     * 토큰을 들고 왔는데 그 토큰이 거절됐음을 알리는 요청 속성 키.
+     *
+     * 인증을 강제하지 않는 설정에서는 여기서 거절해도 요청이 그대로 진행되므로,
+     * 뒤쪽에서 보면 "토큰을 아예 안 보낸 요청"과 "보냈는데 만료된 요청"이 똑같이
+     * 주인 없는 요청으로 보인다. 둘을 구분해야 하는 곳이 있어 표시를 남긴다.
+     */
+    public static final String REJECTED_TOKEN_ATTR = "map.jwt.rejected";
+
     private final JwtService jwtService;
 
     @Override
@@ -44,7 +53,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (CustomException e) {
                 log.debug("JWT validation failed: {}", e.getMessage());
-                // SecurityContext 비워둠 → 보호된 엔드포인트는 401로 응답
+                // SecurityContext 비워둠 → 보호된 엔드포인트는 401로 응답.
+                // 인증을 강제하지 않는 설정에서는 여기서 끊지 않고 통과시키되,
+                // 소유자를 요구하는 쪽이 이 표시를 보고 되돌려 보낼 수 있게 한다.
+                request.setAttribute(REJECTED_TOKEN_ATTR, e.getErrorCode());
             }
         }
 

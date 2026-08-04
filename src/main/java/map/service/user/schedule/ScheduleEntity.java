@@ -81,6 +81,15 @@ public class ScheduleEntity {
     private OffsetDateTime createdAt;
 
     /**
+     * 이 일정을 처음 따라가기 시작한 시각. 시작한 적이 없으면 null.
+     *
+     * 두 번째 시작 요청은 이 값을 덮지 않는다 — 덮으면 "언제부터 이 일정을
+     * 따라갔는가"를 잃고, 화면을 다시 열 때마다 시작 시각이 밀린다.
+     */
+    @Column(name = "started_at")
+    private OffsetDateTime startedAt;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected ScheduleEntity() {
@@ -191,6 +200,29 @@ public class ScheduleEntity {
      */
     public Integer getActiveEndHour() {
         return activeEndHour;
+    }
+
+    /**
+     * 처음 시작한 시각 반환. 시작한 적이 없으면 null.
+     */
+    public OffsetDateTime getStartedAt() {
+        return startedAt;
+    }
+
+    /**
+     * 아직 시작한 적이 없을 때만 시작 시각을 새긴다.
+     *
+     * 이미 값이 있으면 그대로 둔다. 같은 일정을 다시 열 때마다 값을 덮으면
+     * 시작 시각이 매번 밀려 "언제부터 따라갔는가"가 남지 않는다.
+     *
+     * @return 이번 호출로 새로 새겼으면 true
+     */
+    public boolean markStarted(OffsetDateTime at) {
+        if (startedAt != null) {
+            return false;
+        }
+        startedAt = at;
+        return true;
     }
 
     /**

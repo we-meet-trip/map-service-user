@@ -25,6 +25,7 @@ import map.service.user.trip.dto.TripStop;
  * totalDurationMinutes: stops 의 이동 시간 합.
  * stops: 방문 순서대로의 방문지 목록.
  * createdAt: 저장 시각.
+ * startedAt: 이 일정을 처음 따라가기 시작한 시각. 시작한 적이 없으면 키가 없다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ScheduleDetailResponse(
@@ -36,6 +37,7 @@ public record ScheduleDetailResponse(
         String transport,
         @JsonProperty("total_duration_minutes") int totalDurationMinutes,
         List<TripStop> stops,
-        @JsonProperty("created_at") OffsetDateTime createdAt
+        @JsonProperty("created_at") OffsetDateTime createdAt,
+        @JsonProperty("started_at") OffsetDateTime startedAt
 ) {
 }

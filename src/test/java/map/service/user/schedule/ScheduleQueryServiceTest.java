@@ -70,7 +70,7 @@ class ScheduleQueryServiceTest {
                 durationMinutes == null ? null
                         : new map.service.user.trip.dto.TransportToNext(
                                 "walk", "이동: 도보", durationMinutes, 1.0, null),
-                "kakao", "관광", true, order, null, null, null);
+                "kakao", "관광", true, order, null, null, null, null, null);
     }
 
     // ── 목록 ──────────────────────────────────────────────
@@ -205,5 +205,52 @@ class ScheduleQueryServiceTest {
         assertThatThrownBy(() -> service.delete(1L, OTHER))
                 .isInstanceOf(SavedScheduleNotFoundException.class);
         verify(repository, never()).delete(any());
+    }
+
+    // ── 시작 ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("시작 — 처음 시작하면 시각을 새기고 상세를 돌려준다")
+    void startMarksAndReturnsDetail() {
+        ScheduleEntity owned = entity(OWNER, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(Optional.of(owned));
+        when(assembler.assemble(any(), eq("walk"), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 10), stop(2, null)));
+
+        ScheduleDetailResponse response = service.start(1L, OWNER);
+
+        assertThat(owned.getStartedAt()).isNotNull();
+        assertThat(response.startedAt()).isEqualTo(owned.getStartedAt());
+        assertThat(response.stops()).hasSize(2);
+        verify(repository).save(owned);
+    }
+
+    @Test
+    @DisplayName("시작 — 두 번째부터는 시각을 덮지 않고 저장도 하지 않는다")
+    void startIsIdempotent() {
+        ScheduleEntity owned = entity(OWNER, "walk", 9, 18);
+        owned.markStarted(java.time.OffsetDateTime.parse("2026-08-01T09:00:00Z"));
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(Optional.of(owned));
+        when(assembler.assemble(any(), eq("walk"), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 10), stop(2, null)));
+
+        ScheduleDetailResponse response = service.start(1L, OWNER);
+
+        assertThat(response.startedAt())
+                .isEqualTo(java.time.OffsetDateTime.parse("2026-08-01T09:00:00Z"));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("시작 — 남의 일정은 404 이고 시작 기록도 남지 않는다")
+    void startOfOtherUserIsNotFound() {
+        when(repository.findByScheduleIdAndUserId(1L, OTHER))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.start(1L, OTHER))
+                .isInstanceOf(SavedScheduleNotFoundException.class);
+        verify(repository, never()).save(any());
     }
 }

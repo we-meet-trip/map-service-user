@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -169,7 +170,38 @@ public class ScheduleService {
      * 필요하지 않다.
      */
     public ScheduleDetailResponse detail(Long scheduleId, Long userId) {
+        return toDetail(findOwned(scheduleId, userId));
+    }
+
+    /**
+     * 일정을 따라가기 시작했다고 기록하고, 상세를 그대로 돌려준다.
+     *
+     * 시작 시각은 처음 한 번만 새긴다. 이미 시작한 일정을 다시 열어도 값을
+     * 덮지 않으므로 이 호출은 몇 번을 해도 결과가 같다 — 화면이 재시도하거나
+     * 사용자가 뒤로 갔다 다시 들어와도 안전하다.
+     *
+     * 상세를 함께 돌려주는 이유는, 시작 화면이 필요로 하는 방문지·이동 카드·
+     * 도로 경로가 상세 조회에서만 오기 때문이다. 시작과 조회를 따로 부르게 하면
+     * 왕복이 두 번이 되고 그 사이에 화면이 빈 채로 남는다.
+     *
+     * 트랜잭션으로 감싸지 않는다. 상세 조립에 외부 왕복이 들어 있어 그 시간
+     * 내내 DB 커넥션을 물게 되기 때문이다. 시작 기록은 repository.save 가
+     * 자체 트랜잭션으로 커밋한다.
+     */
+    public ScheduleDetailResponse start(Long scheduleId, Long userId) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
+        if (entity.markStarted(OffsetDateTime.now())) {
+            repository.save(entity);
+            log.info("schedule started schedule_id={}", scheduleId);
+        }
+        return toDetail(entity);
+    }
+
+    /**
+     * 일정 엔티티를 상세 응답으로 접는다. 조회와 시작이 같은 화면을 만들도록
+     * 조립을 한 곳에 둔다.
+     */
+    private ScheduleDetailResponse toDetail(ScheduleEntity entity) {
         int startHour = entity.getActiveStartHour() != null
                 ? entity.getActiveStartHour()
                 : TripStopsAssembler.DEFAULT_START_HOUR;
@@ -185,7 +217,7 @@ public class ScheduleService {
                     draft, entity.getTransport(), startHour, endHour);
         } catch (JsonProcessingException | TripGenerationException e) {
             log.warn("schedule detail has no renderable stops schedule_id={} reason={}",
-                    scheduleId, e.getMessage());
+                    entity.getScheduleId(), e.getMessage());
             stops = List.of();
         }
 
@@ -198,7 +230,8 @@ public class ScheduleService {
                 entity.getTransport(),
                 TripStopsAssembler.totalDurationMinutes(stops),
                 stops,
-                entity.getCreatedAt());
+                entity.getCreatedAt(),
+                entity.getStartedAt());
     }
 
     /**
