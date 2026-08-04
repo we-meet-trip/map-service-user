@@ -116,6 +116,15 @@ internal:
     trusted-cidrs: ${USER_INTERNAL_TRUSTED_CIDRS:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
     token: ${INTERNAL_SERVICE_TOKEN:}
 
+# ---- ratelimit : 인증 라우트 호출 한도의 클라이언트 식별 ----
+# RateLimitFilter 가 본 섹션을 참조한다.
+# - trusted-proxies : 주소 헤더(X-Real-IP)를 믿어도 되는 직전 발신자 대역.
+#                     이 대역 밖에서 직접 들어온 요청은 헤더를 무시하고 실제 발신
+#                     주소로 카운터를 센다. 대역을 넓게 잡으면 요청자가 헤더로
+#                     카운터 키를 직접 정할 수 있어 한도가 무력화된다.
+ratelimit:
+  trusted-proxies: ${USER_RATELIMIT_TRUSTED_PROXIES:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.0/8}
+
 # ---- trip : 동기 trip 생성 facade 설정 ----
 # TripService 가 본 섹션을 참조한다.
 # - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초).
