@@ -55,7 +55,10 @@ public final class TripMapping {
 
     /**
      * client transport → agent Mobility (결정 D-7).
-     * scooter→bicycle, bus→transit, walk/bicycle 은 동일. 그 외는 거부(400 유도).
+     * bus→transit, walk/bicycle/scooter 는 동일. 그 외는 거부(400 유도).
+     *
+     * scooter 를 BICYCLE 로 치환하던 것을 SCOOTER 로 분리했다. 치환하면 킥보드
+     * 소요시간 보정 계수가 적용되지 않아 이동 시간이 자전거로 계산된다.
      */
     public static Mobility toAgentMobility(String transport) {
         if (transport == null) {
@@ -63,7 +66,8 @@ public final class TripMapping {
         }
         return switch (transport.trim().toLowerCase()) {
             case "walk" -> Mobility.WALK;
-            case "bicycle", "scooter" -> Mobility.BICYCLE;
+            case "bicycle" -> Mobility.BICYCLE;
+            case "scooter" -> Mobility.SCOOTER;
             case "bus" -> Mobility.TRANSIT;
             default -> throw new IllegalArgumentException("unsupported transport: " + transport);
         };
@@ -103,6 +107,10 @@ public final class TripMapping {
     /**
      * stop 시각 "HH:mm" — 활동 시간대 [startHour, endHour] 균등 분배 (R-2).
      * total<=1 이면 시작 시각. endHour<=startHour 면 전 stop 시작 시각으로 고정.
+     *
+     * index/total 은 트립 전체가 아니라 "해당 day 안에서의" 순서·개수여야
+     * 한다(TripService.toStops 가 day 별로 나눠 호출한다). 그렇지 않으면
+     * 여러 날짜 stop 이 하루 시간대에 다 뭉쳐 나온다.
      */
     public static String stopTime(int startHour, int endHour, int index, int total) {
         int clock;

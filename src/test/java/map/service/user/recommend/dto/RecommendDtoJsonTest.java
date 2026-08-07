@@ -57,6 +57,27 @@ class RecommendDtoJsonTest {
 
         assertThat(response.clothing()).isNull();
         assertThat(response.places().get(0).reason()).isNull();
+        assertThat(response.warnings()).isNull();
+        assertThat(response.timelineStatus()).isNull();
+    }
+
+    @Test
+    void deserializesWarningsAndTimelineStatus() throws Exception {
+        String json = """
+                {"job_id":"j3","status":"done",
+                 "places":[],
+                 "visit_order":[],
+                 "legs":[],
+                 "timeline_status":"trimmed",
+                 "warnings":["날씨 정보를 확인하지 못해 일정에 반영하지 못했습니다",
+                             "하루 활동 시간에 맞춰 일부 일정을 줄였습니다"]}""";
+
+        RecommendResponse response =
+                mapper.readValue(json, RecommendResponse.class);
+
+        assertThat(response.timelineStatus()).isEqualTo("trimmed");
+        assertThat(response.warnings()).hasSize(2);
+        assertThat(response.warnings().get(0)).contains("날씨");
     }
 
     @Test
@@ -74,7 +95,8 @@ class RecommendDtoJsonTest {
                 "강남구",
                 "sched-1",
                 "mode1",
-                java.util.List.of("kakao:1")));
+                java.util.List.of("kakao:1"),
+                null));
 
         assertThat(json).contains("\"schedule_id\":\"sched-1\"");
         assertThat(json).contains("\"stage\":\"mode1\"");

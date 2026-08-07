@@ -15,6 +15,7 @@ import map.service.user.global.exception.ErrorCode;
 import map.service.user.recommend.dto.EditRequest;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
+import map.service.user.recommend.dto.SelectedPlace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -111,7 +112,7 @@ public class RecommendService {
      * RecommendController 가 X-Recommend-Cache 디버그 헤더를 채우기 위해 사용한다
      * (검증/관측 목적 — 응답 본문 계약에는 영향 없음).
      */
-    RecommendationResult createRecommendationDetailed(RecommendRequest request) {
+    public RecommendationResult createRecommendationDetailed(RecommendRequest request) {
         // 클라이언트가 보낸 stage/exclude 는 신뢰하지 않는다. 캐시 조회·agent 호출·
         // 백그라운드 갱신 모두 정규화된 요청 하나만 사용해 경로 간 해시가 어긋나지 않게 한다.
         RecommendRequest normalized = withStage(request, "init", List.of());
@@ -126,15 +127,41 @@ public class RecommendService {
         }
 
         String jobId = UUID.randomUUID().toString();
-        draftStore.save(jobId, cached.get());
+        // 캐시 본체는 최초로 그 결과를 만든 job 의 job_id 를 담고 있다. 그대로
+        // 복사하면 GET /api/v1/recommend/{jobId} 가 경로와 다른 job_id 를 담은
+        // 본문을 돌려주어(응답·Redis draft·PG result_payload 전부) 호출 측이
+        // 본문 값으로 후속 요청을 만들면 남의 job 에 작용한다. 사본에만 이번
+        // job_id 를 덮어쓰고 캐시 본체는 건드리지 않는다.
+        String payload = withJobId(cached.get(), jobId);
+        draftStore.save(jobId, payload);
         // 캐시 히트는 agent job 이 없어 완료 이벤트가 영영 오지 않는다. 즉시 완료로
         // 기록해야 findDraft 의 PG 폴백(Redis draft TTL 만료 이후)과 admin 콘솔
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
         // schedule_id 를 심고 markFinished 는 기존 행을 갱신하므로 값이 보존된다.
         jobStore.insertInProgress(jobId, normalized.scheduleId());
-        jobStore.markFinished(jobId, "done", cached.get());
+        jobStore.markFinished(jobId, "done", payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
+    }
+
+    /**
+     * 캐시 사본의 job_id 를 이번 job 식별자로 교체한다. 캐시 본체는 변경하지 않는다.
+     *
+     * 파싱 실패나 루트가 객체가 아닌 경우에는 원문을 그대로 돌려준다. 캐시 히트는
+     * 순수 최적화 경로이므로 여기서 예외를 던져 요청을 실패시키지 않는다(무중단 원칙).
+     */
+    private String withJobId(String payloadJson, String jobId) {
+        try {
+            JsonNode root = objectMapper.readTree(payloadJson);
+            if (!(root instanceof ObjectNode obj)) {
+                return payloadJson;
+            }
+            obj.put("job_id", jobId);
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            log.warn("reuse cache payload job_id rewrite skipped: {}", e.getMessage());
+            return payloadJson;
+        }
     }
 
     /**
@@ -143,7 +170,7 @@ public class RecommendService {
      * accepted: 기존과 동일한 JobAccepted 응답 본문.
      * cacheHit: 재사용 캐시 히트 여부(디버그 헤더용, 응답 본문에는 포함되지 않음).
      */
-    record RecommendationResult(JobAccepted accepted, boolean cacheHit) {
+    public record RecommendationResult(JobAccepted accepted, boolean cacheHit) {
     }
 
     /**
@@ -272,7 +299,7 @@ public class RecommendService {
      * 기존 draft 의 places[].content_id 를 수집해 exclude 목록을 만들고
      * (실측 근거 없는 항목은 content_id 가 없어 자연 제외), draft 를
      * DraftStore.delete 로 폐기한 뒤 stage="mode1" + exclude 로 재구성한 요청을
-     * agent 에 위임한다(SoT §6.2 exclude_list). draft 가 없거나 파싱 불가하면
+     * agent 에 위임한다(재탐색 제외 목록). draft 가 없거나 파싱 불가하면
      * exclude 없이 진행한다(기존 동작 보존).
      *
      * 재추천 일일 한도(ResearchLimitService)를 가장 먼저 검사한다. scheduleId 가
@@ -343,6 +370,20 @@ public class RecommendService {
      */
     private static RecommendRequest withStage(
             RecommendRequest request, String stage, List<String> exclude) {
+        return withStage(request, stage, exclude, null);
+    }
+
+    /**
+     * stage/exclude/places 를 교체한 RecommendRequest 사본 생성.
+     *
+     * places 를 함께 지정하는 이유는 탐색 기반 추천과 사용자 선택 동선이
+     * 같은 요청 타입을 쓰기 때문이다. 탐색 경로에서는 places 를 null 로
+     * 지워 보내고, 동선 경로에서만 채운다 — 둘이 함께 오면 agent 가 어느
+     * 쪽을 따를지 모호해진다.
+     */
+    private static RecommendRequest withStage(
+            RecommendRequest request, String stage, List<String> exclude,
+            List<SelectedPlace> places) {
         return new RecommendRequest(
                 request.date(),
                 request.budget(),
@@ -352,6 +393,28 @@ public class RecommendService {
                 request.city(),
                 request.scheduleId(),
                 stage,
-                exclude);
+                exclude,
+                places);
+    }
+
+    /**
+     * 사용자가 고른 장소들의 동선 작업을 접수한다.
+     *
+     * 재사용 캐시를 타지 않는다. 캐시 키는 지역·기간·테마 같은 검색 조건으로
+     * 만들어지는데, 이 요청의 본질은 "이 장소들"이라 같은 조건이라도 장소
+     * 조합이 다르면 완전히 다른 결과가 나온다. 남의 조합을 돌려주는 사고를
+     * 막기 위해 조회도 등록도 하지 않는다.
+     *
+     * stage 는 서버가 "route" 로 강제하고 exclude 는 비운다(재탐색 전용).
+     * 접수 직후 PG 에 in_progress 로 기록해 진행 중 작업이 콘솔에서 보이게 한다.
+     *
+     * request: 검증 완료된 RecommendRequest. places 는 2~10개.
+     */
+    public JobAccepted createRouteJob(RecommendRequest request) {
+        RecommendRequest normalized =
+                withStage(request, "route", List.of(), request.places());
+        JobAccepted accepted = agentClient.requestRecommend(normalized);
+        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+        return accepted;
     }
 }

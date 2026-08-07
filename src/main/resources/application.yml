@@ -85,7 +85,7 @@ spring:
 # AgentClientConfig 가 본 섹션을 참조하여 RestClient 빈을 구성한다.
 # - base-url        : agent 서비스 base URL
 # - timeout-seconds : RestClient 의 readTimeout (초)
-# - internal-token  : B2 내부 서비스 인증 토큰(SoT §5.5). 비우면 헤더 미부착.
+# - internal-token  : B2 내부 서비스 인증 토큰. 비우면 헤더 미부착.
 #                     agent 의 INTERNAL_SERVICE_TOKEN 과 동일 값이어야 한다.
 agent:
   base-url: ${AGENT_BASE_URL:http://agent:8000}
@@ -116,12 +116,26 @@ internal:
     trusted-cidrs: ${USER_INTERNAL_TRUSTED_CIDRS:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
     token: ${INTERNAL_SERVICE_TOKEN:}
 
+# ---- ratelimit : 인증 라우트 호출 한도의 클라이언트 식별 ----
+# RateLimitFilter 가 본 섹션을 참조한다.
+# - trusted-proxies : 주소 헤더(X-Real-IP)를 믿어도 되는 직전 발신자 대역.
+#                     이 대역 밖에서 직접 들어온 요청은 헤더를 무시하고 실제 발신
+#                     주소로 카운터를 센다. 대역을 넓게 잡으면 요청자가 헤더로
+#                     카운터 키를 직접 정할 수 있어 한도가 무력화된다.
+ratelimit:
+  trusted-proxies: ${USER_RATELIMIT_TRUSTED_PROXIES:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.0/8}
+
 # ---- trip : 동기 trip 생성 facade 설정 ----
 # TripService 가 본 섹션을 참조한다.
-# - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초). agent JOB_TIMEOUT 과 정합.
+# - poll-timeout-seconds : agent 추천 draft 를 기다리는 최대 시간(초).
+#                          대기 상한은 client > 본 값 > 통상 완료 시간 순서여야 한다.
+#                          본 값이 client 보다 길면, client 가 먼저 끊어 버린 요청을
+#                          서버가 계속 폴링하며 스레드를 물고 있게 되고 사용자에게는
+#                          사유 없는 실패만 남는다. agent 쪽 잡 상한(300s)은 별개로
+#                          더 길게 두어 서버가 그보다 먼저 포기하게 한다.
 # - poll-interval-ms     : draft 폴링 간격(ms).
 trip:
-  poll-timeout-seconds: ${TRIP_POLL_TIMEOUT_SECONDS:120}
+  poll-timeout-seconds: ${TRIP_POLL_TIMEOUT_SECONDS:150}
   poll-interval-ms: ${TRIP_POLL_INTERVAL_MS:700}
 
 # ---- recommend : 추천 도메인 설정 ----
@@ -132,6 +146,28 @@ trip:
 # - cache-time-round-step-minutes: timeStart/timeEnd 근사 매칭용 반올림 단위(분)
 # - cache-refresh-every-hits     : 이 값의 배수번째 히트마다 백그라운드로 agent 재호출해 캐시 갱신
 # - cache-refresh-queue-capacity : 백그라운드 갱신 대기열 최대 크기(초과분은 로그 남기고 버림)
+# 장소 블로그 요약 정책.
+# ReviewSummaryService 와 ReviewSummaryPrewarmConfig 가 본 섹션을 참조한다.
+# - summary-ttl-seconds    : 장소별 요약 캐시 보관 시간(초). 같은 장소를 여러
+#                            사용자가 눌러도 이 기간 동안 모델을 한 번만 부른다.
+# - prewarm-enabled        : 일정이 만들어진 직후 그 일정의 장소 요약을 미리
+#                            만들어 둘지. 끄면 장소를 누르는 시점에 그 자리에서
+#                            만든다(첫 탭이 느려질 뿐 동작은 같다).
+# - prewarm-pool-size      : 선작성 스레드 수. 작업 한 건이 모델 호출 1회를
+#                            쓰는데 모델 분당 상한이 낮아 늘려도 대기만 는다.
+# - prewarm-queue-capacity : 선작성 대기열 최대 크기(초과분은 로그 남기고 버림)
+# - prewarm-max-places     : 일정 하나에서 미리 요약할 장소 수 상한. 방문 순서
+#                            앞에서부터 센다 — 사용자가 먼저 보는 곳이다.
+# - prewarm-batch-size     : 모델 호출 1회에 묶어 보낼 장소 수. agent 요청
+#                            스키마의 상한을 넘기면 요청 전체가 거절된다.
+reviews:
+  summary-ttl-seconds: ${REVIEWS_SUMMARY_TTL_SECONDS:86400}
+  prewarm-enabled: ${REVIEWS_PREWARM_ENABLED:true}
+  prewarm-pool-size: ${REVIEWS_PREWARM_POOL_SIZE:1}
+  prewarm-queue-capacity: ${REVIEWS_PREWARM_QUEUE_CAPACITY:50}
+  prewarm-max-places: ${REVIEWS_PREWARM_MAX_PLACES:7}
+  prewarm-batch-size: ${REVIEWS_PREWARM_BATCH_SIZE:7}
+
 recommend:
   research-daily-limit: ${RESEARCH_DAILY_LIMIT:3}
   cache-budget-round-step: ${RECOMMEND_CACHE_BUDGET_ROUND_STEP:50000}
@@ -210,7 +246,7 @@ chat:
   max-participants: ${CHAT_MAX_PARTICIPANTS:10}
   expiry-grace-days: ${CHAT_EXPIRY_GRACE_DAYS:7}
   history-page-size: ${CHAT_HISTORY_PAGE_SIZE:50}
-  invite-base-url: ${CHAT_INVITE_BASE_URL:https://example.invalid/chat/invite/}
+  invite-base-url: ${CHAT_INVITE_BASE_URL:https://mapcenter-b59ca.web.app/invite/}
   max-message-length: ${CHAT_MAX_MESSAGE_LENGTH:2000}
   send-rate-limit: ${CHAT_SEND_RATE_LIMIT:20}
   send-rate-window-seconds: ${CHAT_SEND_RATE_WINDOW_SECONDS:10}

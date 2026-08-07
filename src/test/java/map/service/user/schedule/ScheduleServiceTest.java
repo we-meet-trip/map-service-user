@@ -13,13 +13,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import map.service.user.recommend.DraftStore;
+import map.service.user.trip.TripStopsAssembler;
 
 /**
  * ScheduleServiceTest — draft 영속화 및 소유자(userId) 기록 검증
  *
  * persist 가 @AuthenticationPrincipal 로 넘어온 userId 를 ScheduleEntity 에
- * 그대로 저장하는지, 익명(null) 인 경우 user_id 를 null 로 저장하여 현행 동작을
- * 보존하는지 확인한다.
+ * 그대로 저장하는지 확인한다.
+ *
+ * 소유자 없는 저장을 막는 것은 서비스가 아니라 HTTP 진입점의 몫이라
+ * (ScheduleController.save 가 401 로 되돌린다) 여기서는 매핑만 본다.
  */
 @DisplayName("ScheduleService 단위 테스트")
 class ScheduleServiceTest {
@@ -34,7 +37,8 @@ class ScheduleServiceTest {
     void setUp() {
         draftStore = mock(DraftStore.class);
         repository = mock(ScheduleRepository.class);
-        service = new ScheduleService(draftStore, repository, new ObjectMapper());
+        service = new ScheduleService(draftStore, repository, new ObjectMapper(),
+                mock(TripStopsAssembler.class));
         when(draftStore.find(JOB_ID))
                 .thenReturn(Optional.of("{\"job_id\":\"" + JOB_ID + "\",\"places\":[]}"));
     }
@@ -42,7 +46,8 @@ class ScheduleServiceTest {
     private static ScheduleSaveRequest request() {
         return new ScheduleSaveRequest(
                 JOB_ID, "제주 여행",
-                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7));
+                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
+                "walk", 9, 18);
     }
 
     @Test
@@ -57,7 +62,7 @@ class ScheduleServiceTest {
     }
 
     @Test
-    @DisplayName("persist — 익명(userId=null) 은 user_id 를 null 로 저장(현행 동작 보존)")
+    @DisplayName("persist — userId 가 없으면 user_id 를 null 로 매핑(차단은 컨트롤러 몫)")
     void persistWithNullUserIdStoresNull() {
         service.persist(request(), null);
 

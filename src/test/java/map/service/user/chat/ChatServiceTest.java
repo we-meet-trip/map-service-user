@@ -84,7 +84,8 @@ class ChatServiceTest {
     private Long persistSchedule(Long ownerId, LocalDate dateEnd) {
         ScheduleEntity schedule = new ScheduleEntity(
                 ownerId, UUID.randomUUID(), "속초 당일치기",
-                dateEnd.minusDays(1), dateEnd, objectMapper.createObjectNode());
+                dateEnd.minusDays(1), dateEnd, objectMapper.createObjectNode(),
+                "walk", 9, 18);
         return scheduleRepository.save(schedule).getScheduleId();
     }
 

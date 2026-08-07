@@ -53,6 +53,12 @@ public class AuthService {
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .authProvider(AuthProvider.EMAIL)
                 .emailVerified(false)
+                // 가입 화면이 단계별로 받은 개인 정보와 취향. 뒤 단계를 건너뛰면
+                // 비어 온다.
+                .birthDate(request.getBirthDate())
+                .gender(request.getGender())
+                .interests(request.getInterests())
+                .themes(request.getThemes())
                 .build();
 
         try {

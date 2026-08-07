@@ -1,8 +1,8 @@
 package map.service.user.global.config;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,7 +22,6 @@ import map.service.user.schedule.ScheduleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -35,8 +34,9 @@ import org.springframework.test.web.servlet.MockMvc;
  *
  * 플래그 미설정 시 보호 대상 엔드포인트가 토큰 없이도 도달 가능(permitAll)한지,
  * 그리고 익명 요청에서 @AuthenticationPrincipal Long 이 ClassCastException 없이
- * null 로 해석되어 현행 동작(user_id=null)이 보존되는지 확인한다. 실제 SecurityConfig
- * 필터 체인과 실 JWT/RateLimit 필터, 익명 인증 필터를 그대로 사용한다.
+ * null 로 해석되는지 확인한다. 경로가 열려 있다는 것과 소유자를 요구한다는 것은
+ * 다른 층위라, 저장은 경로가 열려 있어도 소유자가 없으면 막힌다.
+ * 실제 SecurityConfig 필터 체인과 실 JWT/RateLimit 필터, 익명 인증 필터를 그대로 쓴다.
  */
 @WebMvcTest({RecommendController.class, ScheduleController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
@@ -65,21 +65,22 @@ class SecurityConfigDefaultTest {
     }
 
     @Test
-    @DisplayName("익명 POST — @AuthenticationPrincipal Long 이 null 로 해석(현행 동작 보존)")
-    void anonymousPrincipalResolvesToNull() throws Exception {
-        when(scheduleService.persist(any(ScheduleSaveRequest.class), any())).thenReturn(100L);
-
-        // 인증 없이 POST. 익명 principal("anonymousUser" String)은 Long 파라미터로
-        // 캐스팅되지 않아 리졸버가 null 을 주입한다(ClassCastException 아님) → 200.
+    @DisplayName("익명 POST — 익명 principal 이 null 로 해석되고, 저장은 401 로 막힌다")
+    void anonymousPrincipalResolvesToNullAndSaveIsRejected() throws Exception {
+        // 익명 principal("anonymousUser" String)은 Long 파라미터로 캐스팅되지 않아
+        // 리졸버가 null 을 주입한다 — 여기서 ClassCastException 이 나면 500 이 된다.
+        // null 이 들어왔음은 컨트롤러가 401 로 막았다는 사실로 확인한다.
+        //
+        // 플래그가 꺼져 있어 경로 자체는 열려 있지만(permitAll), 주인 없이 저장한
+        // 일정은 목록·상세·삭제 어디서도 다시 꺼낼 수 없어 저장을 시도하지 않는다.
         mockMvc.perform(post("/api/v1/schedules")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"job_id\":\"11111111-1111-1111-1111-111111111111\","
                                 + "\"title\":\"t\",\"date_start\":\"2026-07-06\","
                                 + "\"date_end\":\"2026-07-07\"}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
 
-        ArgumentCaptor<Long> userIdCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(scheduleService).persist(any(ScheduleSaveRequest.class), userIdCaptor.capture());
-        assertThat(userIdCaptor.getValue()).isNull();
+        verify(scheduleService, never())
+                .persist(any(ScheduleSaveRequest.class), any());
     }
 }

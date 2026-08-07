@@ -82,7 +82,13 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                             // actuator: health/info + prometheus 메트릭(map-net 내부 스크레이프).
                             .requestMatchers("/actuator/health", "/actuator/info",
-                                    "/actuator/prometheus").permitAll();
+                                    "/actuator/prometheus").permitAll()
+                            // 내 정보는 플래그와 무관하게 항상 토큰이 있어야 한다.
+                            // '누구의' 정보인지가 정해지지 않으면 무엇을 돌려줘도
+                            // 틀리고, 공개로 두면 만료된 토큰이 401 을 못 받아
+                            // 클라이언트의 토큰 갱신 흐름이 이 화면에서만 멈춘다.
+                            // 아래 시행 분기보다 먼저 두어야 매처가 우선한다.
+                            .requestMatchers("/api/v1/users/me").authenticated();
                     if (authEnforced) {
                         // 인가 시행: 도메인 엔드포인트와 나머지 전부 인증 필수.
                         // JWT 필터가 채운 SecurityContext 가 없으면 401(HttpStatusEntryPoint).

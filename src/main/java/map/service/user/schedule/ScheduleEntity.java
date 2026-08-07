@@ -31,6 +31,13 @@ import org.hibernate.type.SqlTypes;
  * - payload: draft JSON 스냅샷. JSONB 컬럼 + @JdbcTypeCode(SqlTypes.JSON). NOT NULL.
  * - createdAt: 생성 시각. @CreationTimestamp 로 영속 시 채워져 save 직후에도
  *   조회 가능(updatable=false). DB DEFAULT now() 와도 정합.
+ *
+ * 아래 3개는 payload(추천 결과 원본)에 없는 화면 복원용 메타다. 방문 시각은
+ * 활동 시간대를 균등 분할해 만들고 이동 카드/경로 프로파일은 이동수단으로
+ * 정해지므로, 이 값이 없으면 상세 조회가 생성 직후 화면과 달라진다.
+ * 메타 도입 이전에 저장된 행은 전부 null 이다.
+ * - transport: 이동수단(walk|bicycle|scooter|bus).
+ * - activeStartHour / activeEndHour: 하루 활동 시간대(0~24).
  */
 @Entity
 @Table(name = "schedules", schema = "user_service")
@@ -60,9 +67,27 @@ public class ScheduleEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode payload;
 
+    @Column(name = "transport")
+    private String transport;
+
+    @Column(name = "active_start_hour")
+    private Integer activeStartHour;
+
+    @Column(name = "active_end_hour")
+    private Integer activeEndHour;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    /**
+     * 이 일정을 처음 따라가기 시작한 시각. 시작한 적이 없으면 null.
+     *
+     * 두 번째 시작 요청은 이 값을 덮지 않는다 — 덮으면 "언제부터 이 일정을
+     * 따라갔는가"를 잃고, 화면을 다시 열 때마다 시작 시각이 밀린다.
+     */
+    @Column(name = "started_at")
+    private OffsetDateTime startedAt;
 
     /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
@@ -82,6 +107,8 @@ public class ScheduleEntity {
      * dateStart: 시작일.
      * dateEnd: 종료일.
      * payload: draft JSON 스냅샷.
+     * transport: 이동수단(미지정 시 null).
+     * activeStartHour / activeEndHour: 활동 시간대(미지정 시 null).
      */
     public ScheduleEntity(
             Long userId,
@@ -89,7 +116,10 @@ public class ScheduleEntity {
             String title,
             LocalDate dateStart,
             LocalDate dateEnd,
-            JsonNode payload
+            JsonNode payload,
+            String transport,
+            Integer activeStartHour,
+            Integer activeEndHour
     ) {
         this.userId = userId;
         this.jobId = jobId;
@@ -97,6 +127,9 @@ public class ScheduleEntity {
         this.dateStart = dateStart;
         this.dateEnd = dateEnd;
         this.payload = payload;
+        this.transport = transport;
+        this.activeStartHour = activeStartHour;
+        this.activeEndHour = activeEndHour;
     }
 
     /**
@@ -146,6 +179,50 @@ public class ScheduleEntity {
      */
     public JsonNode getPayload() {
         return payload;
+    }
+
+    /**
+     * 이동수단 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public String getTransport() {
+        return transport;
+    }
+
+    /**
+     * 활동 시작 시각 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public Integer getActiveStartHour() {
+        return activeStartHour;
+    }
+
+    /**
+     * 활동 종료 시각 반환. 메타 도입 이전 행이거나 미지정이면 null.
+     */
+    public Integer getActiveEndHour() {
+        return activeEndHour;
+    }
+
+    /**
+     * 처음 시작한 시각 반환. 시작한 적이 없으면 null.
+     */
+    public OffsetDateTime getStartedAt() {
+        return startedAt;
+    }
+
+    /**
+     * 아직 시작한 적이 없을 때만 시작 시각을 새긴다.
+     *
+     * 이미 값이 있으면 그대로 둔다. 같은 일정을 다시 열 때마다 값을 덮으면
+     * 시작 시각이 매번 밀려 "언제부터 따라갔는가"가 남지 않는다.
+     *
+     * @return 이번 호출로 새로 새겼으면 true
+     */
+    public boolean markStarted(OffsetDateTime at) {
+        if (startedAt != null) {
+            return false;
+        }
+        startedAt = at;
+        return true;
     }
 
     /**

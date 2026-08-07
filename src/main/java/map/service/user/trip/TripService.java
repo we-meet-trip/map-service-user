@@ -3,27 +3,20 @@ package map.service.user.trip;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import map.service.user.recommend.AgentClient;
+import map.service.user.places.ReviewSummaryService;
 import map.service.user.recommend.DraftStore;
+import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.DateRange;
 import map.service.user.recommend.dto.JobAccepted;
-import map.service.user.recommend.dto.Leg;
-import map.service.user.recommend.dto.Place;
 import map.service.user.recommend.dto.RecommendRequest;
 import map.service.user.recommend.dto.RecommendResponse;
-import map.service.user.trip.dto.HubDirectionsDtos.LegReq;
-import map.service.user.trip.dto.HubDirectionsDtos.Point;
-import map.service.user.trip.dto.HubDirectionsDtos.Route;
 import map.service.user.trip.dto.HubWeatherResponse;
 import map.service.user.trip.dto.Schedule;
-import map.service.user.trip.dto.TransportToNext;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripRouteRequest;
 import map.service.user.trip.dto.TripStop;
 import map.service.user.trip.dto.WeatherForecastItem;
 import org.slf4j.Logger;
@@ -52,30 +45,48 @@ public class TripService {
 
     private static final Logger log = LoggerFactory.getLogger(TripService.class);
 
-    private final AgentClient agentClient;
+    private final RecommendService recommendService;
     private final DraftStore draftStore;
     private final HubWeatherClient hubWeatherClient;
-    private final HubDirectionsClient hubDirectionsClient;
+    private final TripStopsAssembler stopsAssembler;
+    private final ReviewSummaryService reviewSummaryService;
     private final ObjectMapper objectMapper;
     private final long pollTimeoutSeconds;
     private final long pollIntervalMs;
 
     public TripService(
-            AgentClient agentClient,
+            RecommendService recommendService,
             DraftStore draftStore,
             HubWeatherClient hubWeatherClient,
-            HubDirectionsClient hubDirectionsClient,
+            TripStopsAssembler stopsAssembler,
+            ReviewSummaryService reviewSummaryService,
             ObjectMapper objectMapper,
-            @Value("${trip.poll-timeout-seconds:120}") long pollTimeoutSeconds,
+            @Value("${trip.poll-timeout-seconds:150}") long pollTimeoutSeconds,
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
     ) {
-        this.agentClient = agentClient;
+        this.recommendService = recommendService;
         this.draftStore = draftStore;
         this.hubWeatherClient = hubWeatherClient;
-        this.hubDirectionsClient = hubDirectionsClient;
+        this.stopsAssembler = stopsAssembler;
+        this.reviewSummaryService = reviewSummaryService;
         this.objectMapper = objectMapper;
         this.pollTimeoutSeconds = pollTimeoutSeconds;
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    /**
+     * 방문지 목록으로 요약 선작성을 예약한다.
+     *
+     * 제출만 하고 즉시 돌아가므로 응답이 늦어지지 않는다. 이름이 없는
+     * 항목은 캐시 키를 만들 수 없어 건너뛴다.
+     */
+    private void prewarmSummaries(List<TripStop> stops) {
+        List<ReviewSummaryService.PrewarmPlace> places = stops.stream()
+                .filter(s -> s.name() != null && !s.name().isBlank())
+                .map(s -> new ReviewSummaryService.PrewarmPlace(
+                        s.name(), s.category()))
+                .toList();
+        reviewSummaryService.prewarm(places);
     }
 
     /**
@@ -90,11 +101,18 @@ public class TripService {
         String province = TripMapping.normalizeProvince(request.location().province());
         String city = request.location().city();
 
-        // 1) 요청 변환 → agent 위임
+        // 1) 요청 변환 → RecommendService 경유 위임
+        //    agentClient 를 직접 부르지 않는다. RecommendService 를 거쳐야
+        //    재사용 캐시 조회·연결고리 등록·recommend_jobs in_progress 기록이
+        //    함께 이뤄진다. 직접 호출하던 시절에는 client 유일 경로인 이 흐름이
+        //    캐시를 전혀 쓰지 못했고, 완료 이벤트가 오기 전까지 admin 콘솔에
+        //    진행 중 job 이 보이지 않았다.
         RecommendRequest recommendRequest = toRecommendRequest(request, province, city);
-        JobAccepted accepted = agentClient.requestRecommend(recommendRequest);
+        RecommendService.RecommendationResult delegated =
+                recommendService.createRecommendationDetailed(recommendRequest);
+        JobAccepted accepted = delegated.accepted();
         String jobId = accepted.jobId();
-        log.info("trip generate started job_id={}", jobId);
+        log.info("trip generate started job_id={} cacheHit={}", jobId, delegated.cacheHit());
 
         // 2) draft 폴링(동기 대기)
         String draftJson = awaitDraft(jobId);
@@ -106,18 +124,23 @@ public class TripService {
             throw new TripGenerationException(reason);
         }
 
-        // 4) stops 변환 (경로 성공 구간은 이동 시간/거리를 OSRM 실측으로 대체)
+        // 4) stops 변환 (경로 성공 구간은 이동 시간/거리를 실측으로 대체)
+        //    저장된 일정 상세 조회도 같은 조립기를 쓴다 — 두 화면이 같은
+        //    방문 시각·이동 카드·폴리라인을 보여야 한다.
         Schedule schedule = request.schedule();
-        List<TripStop> stops = toStops(request, result, schedule);
-        // total 은 최종 이동 카드의 시간 합(실측 대체 반영). 마지막 stop 은 카드 없음.
-        int totalDuration = 0;
-        for (TripStop s : stops) {
-            if (s.transportToNext() != null) {
-                totalDuration += s.transportToNext().durationMinutes();
-            }
-        }
+        List<TripStop> stops = stopsAssembler.assemble(
+                result,
+                request.transport(),
+                schedule.activeStartHour(),
+                schedule.activeEndHour());
+        int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        // 5) 날씨(best-effort)
+        // 5) 장소 요약을 미리 만들어 둔다. 일정에 담긴 장소는 대부분 한 번씩
+        //    눌러 보는데, 누를 때 만들면 그 자리에서 모델 응답을 기다려야 한다.
+        //    제출만 하고 넘어가므로 이 응답이 늦어지지 않는다.
+        prewarmSummaries(stops);
+
+        // 6) 날씨(best-effort)
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province,
                 city,
@@ -127,7 +150,74 @@ public class TripService {
 
         log.info("trip generate done job_id={} stops={} weatherDays={}",
                 jobId, stops.size(), forecast.size());
-        return new TripGenerateResponse(jobId, totalDuration, stops, forecast);
+        return new TripGenerateResponse(
+                jobId, totalDuration, stops, forecast,
+                result.warnings(), result.timelineStatus());
+    }
+
+    /**
+     * 사용자가 고른 장소들의 동선을 동기로 만들어 돌려준다.
+     *
+     * generate 와 같은 흐름이되 장소 탐색·선정을 건너뛴다. 결과 형태도 같아서
+     * client 는 생성 직후 화면과 같은 코드로 렌더링한다 — 방문 시각, 이동 카드,
+     * 도로 폴리라인까지 여기서 조립해 넘긴다.
+     *
+     * 예산·테마를 받지 않는다. 후보를 고르는 데 쓰는 조건인데 장소가 이미
+     * 정해진 요청이라 쓸 곳이 없다.
+     *
+     * request: 검증 완료된 TripRouteRequest.
+     */
+    public TripGenerateResponse route(TripRouteRequest request) {
+        String province = TripMapping.normalizeProvince(request.location().province());
+        String city = request.location().city();
+        Schedule schedule = request.schedule();
+
+        DateRange date = new DateRange(
+                schedule.startDate(),
+                schedule.endDate(),
+                TripMapping.hourToLocalTime(schedule.activeStartHour()),
+                TripMapping.hourToLocalTime(schedule.activeEndHour()));
+        // stage 는 서비스가 강제하므로 여기서는 비워 보낸다.
+        RecommendRequest recommendRequest = new RecommendRequest(
+                date,
+                null,
+                null,
+                TripMapping.toAgentMobility(request.transport()),
+                province,
+                city,
+                null,
+                null,
+                null,
+                request.places());
+
+        JobAccepted accepted = recommendService.createRouteJob(recommendRequest);
+        String jobId = accepted.jobId();
+        log.info("trip route started job_id={} places={}",
+                jobId, request.places().size());
+
+        RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
+        if ("failed".equalsIgnoreCase(result.status())) {
+            String reason = result.error() != null ? result.error() : "recommendation failed";
+            throw new TripGenerationException(reason);
+        }
+
+        List<TripStop> stops = stopsAssembler.assemble(
+                result,
+                request.transport(),
+                schedule.activeStartHour(),
+                schedule.activeEndHour());
+        int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
+
+        prewarmSummaries(stops);
+
+        HubWeatherResponse weather = hubWeatherClient.fetchWeather(
+                province, city, schedule.startDate(), schedule.endDate());
+        List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(weather);
+
+        log.info("trip route done job_id={} stops={}", jobId, stops.size());
+        return new TripGenerateResponse(
+                jobId, totalDuration, stops, forecast,
+                result.warnings(), result.timelineStatus());
     }
 
     /** client 요청 → agent RecommendRequest (TripMapping 규칙 적용; province/city 는 정규화된 값). */
@@ -140,6 +230,7 @@ public class TripService {
                 TripMapping.hourToLocalTime(s.activeStartHour()),
                 TripMapping.hourToLocalTime(s.activeEndHour()));
         // 동기 facade 는 항상 초기 추천이다 — stage="init", exclude 없음.
+        // places 도 비운다: 장소를 골라 오는 흐름은 별도 엔드포인트가 받는다.
         return new RecommendRequest(
                 date,
                 TripMapping.toAgentBudget(req.budget()),
@@ -149,6 +240,7 @@ public class TripService {
                 city,
                 null,
                 "init",
+                null,
                 null);
     }
 
@@ -183,128 +275,4 @@ public class TripService {
         }
     }
 
-    /** places + visit_order + legs → client stops[]. 경로 성공 구간은 실측 대체. */
-    private List<TripStop> toStops(
-            TripGenerateRequest req, RecommendResponse result, Schedule schedule
-    ) {
-        List<Place> places = result.places();
-        List<Integer> order = result.visitOrder();
-        List<Leg> legs = result.legs();
-        if (places == null || places.isEmpty() || order == null || order.isEmpty()) {
-            throw new TripGenerationException("recommendation has no places");
-        }
-        Map<Integer, Place> byId = new HashMap<>();
-        for (Place p : places) {
-            byId.put(p.placeId(), p);
-        }
-        int n = order.size();
-        int startHour = schedule.activeStartHour();
-        int endHour = schedule.activeEndHour();
-        String transport = req.transport();
-        String label = TripMapping.transportLabel(transport);
-
-        // 방문 순서대로 Place 를 미리 확정(누락 검증 포함) → 구간 좌표 구성에 재사용.
-        List<Place> ordered = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            Place p = byId.get(order.get(i));
-            if (p == null) {
-                throw new TripGenerationException(
-                        "place_id " + order.get(i) + " missing in places");
-            }
-            ordered.add(p);
-        }
-
-        // 도로 추종 경로 배치 조회(best-effort). null 이면 전 구간 직선 폴백.
-        List<Route> routes = fetchRoutes(transport, ordered);
-
-        List<TripStop> stops = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            Place p = ordered.get(i);
-            TransportToNext toNext = null;
-            if (i < n - 1 && legs != null && i < legs.size()) {
-                Leg leg = legs.get(i);
-                // 기저 이동 카드(LLM 추정치)에서 시작, 경로 성공 구간은 실측 대체.
-                TransportToNext base = new TransportToNext(
-                        transport, label,
-                        leg.estimatedDurationMin(),
-                        leg.estimatedDistanceKm(),
-                        null);
-                Route route = (routes != null && i < routes.size())
-                        ? routes.get(i) : null;
-                toNext = withMeasured(base, route);
-            }
-            stops.add(new TripStop(
-                    i + 1,
-                    p.name(),
-                    p.address(),
-                    TripMapping.stopTime(startHour, endHour, i, n),
-                    p.lat(),
-                    p.lng(),
-                    toNext,
-                    p.source(),
-                    p.category(),
-                    p.grounded()));
-        }
-        return stops;
-    }
-
-    /**
-     * 이동 구간의 도로 추종 경로를 hub 에 일괄 요청한다.
-     *
-     * 라우팅 대상이 아닌 이동수단(bus/transit) 또는 구간이 1개 미만이면
-     * 호출하지 않고 null(전 구간 직선 폴백)을 돌려준다. 그 외는 인접 방문지
-     * 좌표쌍으로 legs 를 구성해 배치 1회 호출한다(hub 가 내부에서 병렬 팬아웃).
-     *
-     * ordered: 방문 순서대로 확정된 Place 목록.
-     * @return routes(legs 와 같은 길이·인덱스, 원소는 실패 시 null), 또는 미호출 시 null.
-     */
-    private List<Route> fetchRoutes(String transport, List<Place> ordered) {
-        if (ordered.size() < 2 || !isRoutable(transport)) {
-            return null;
-        }
-        List<LegReq> legs = new ArrayList<>(ordered.size() - 1);
-        for (int i = 0; i < ordered.size() - 1; i++) {
-            Place a = ordered.get(i);
-            Place b = ordered.get(i + 1);
-            legs.add(new LegReq(
-                    new Point(a.lat(), a.lng()),
-                    new Point(b.lat(), b.lng()),
-                    legName(a.name()),
-                    legName(b.name())));
-        }
-        return hubDirectionsClient.fetchRoutes(transport, legs);
-    }
-
-    /** 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외). */
-    private static boolean isRoutable(String transport) {
-        return "walk".equals(transport)
-                || "bicycle".equals(transport)
-                || "scooter".equals(transport);
-    }
-
-    /** hub 계약(start_name/goal_name: 1~60자)에 맞게 장소명을 정리한다. */
-    private static String legName(String name) {
-        if (name == null || name.isBlank()) {
-            return "지점";
-        }
-        String trimmed = name.strip();
-        return trimmed.length() > 60 ? trimmed.substring(0, 60) : trimmed;
-    }
-
-    /**
-     * 경로 성공 구간의 이동 카드를 실측값으로 대체한다.
-     *
-     * route 가 null(구간 실패/미조회)이면 기저 카드(LLM 추정)를 그대로 둔다.
-     * 성공 시 시간=올림(초→분, 최소 1분), 거리=반올림(m→km, 소수 2자리),
-     * path=도로 폴리라인을 부착한다.
-     */
-    static TransportToNext withMeasured(TransportToNext base, Route route) {
-        if (route == null) {
-            return base;
-        }
-        int durationMinutes = Math.max(1, (int) Math.ceil(route.durationS() / 60.0));
-        double distanceKm = Math.round(route.distanceM() / 10.0) / 100.0;
-        return new TransportToNext(
-                base.type(), base.label(), durationMinutes, distanceKm, route.path());
-    }
 }

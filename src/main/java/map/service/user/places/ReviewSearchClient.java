@@ -33,13 +33,24 @@ public class ReviewSearchClient {
      *
      * query: 검색어(필수).
      * display: 결과 개수. null 이면 hub 기본값.
+     * start: 조회 시작 위치. null 이면 첫 구간.
+     * sort: 정렬 기준("sim" 정확도 · "date" 최신순). null 이면 hub 기본값.
+     *       장소 상세의 블로그 목록은 최신순으로 보여주므로 이 값이 필요하다.
      */
-    public ReviewSearchResponse search(String query, Integer display) {
+    public ReviewSearchResponse search(
+            String query, Integer display, Integer start, String sort
+    ) {
         return client.get()
                 .uri(uri -> {
                     uri.path("/v1/reviews").queryParam("query", query);
                     if (display != null) {
                         uri.queryParam("display", display);
+                    }
+                    if (start != null) {
+                        uri.queryParam("start", start);
+                    }
+                    if (sort != null) {
+                        uri.queryParam("sort", sort);
                     }
                     return uri.build();
                 })

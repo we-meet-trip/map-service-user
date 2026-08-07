@@ -50,7 +50,7 @@ class ReviewSearchClientTest {
                 .andExpect(queryParam("display", "5"))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
-        ReviewSearchResponse response = client.search("cafe", 5);
+        ReviewSearchResponse response = client.search("cafe", 5, null, null);
 
         assertThat(response.query()).isEqualTo("cafe");
         assertThat(response.count()).isEqualTo(1);
@@ -70,7 +70,7 @@ class ReviewSearchClientTest {
                         "{\"query\":\"cafe\",\"reviews\":[],\"count\":0}",
                         MediaType.APPLICATION_JSON));
 
-        ReviewSearchResponse response = client.search("cafe", null);
+        ReviewSearchResponse response = client.search("cafe", null, null, null);
 
         assertThat(response.count()).isZero();
         server.verify();
@@ -82,7 +82,7 @@ class ReviewSearchClientTest {
         server.expect(requestTo(startsWith("http://hub:8000/v1/reviews")))
                 .andRespond(withServerError().body("upstream boom"));
 
-        assertThatThrownBy(() -> client.search("cafe", 3))
+        assertThatThrownBy(() -> client.search("cafe", 3, null, null))
                 .isInstanceOf(ReviewSearchException.class)
                 .satisfies(e -> {
                     ReviewSearchException ex = (ReviewSearchException) e;

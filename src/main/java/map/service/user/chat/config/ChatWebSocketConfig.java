@@ -51,7 +51,10 @@ public class ChatWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic");
+        // /topic 은 방 브로드캐스트, /queue 는 보낸 사람 한 명에게만 가는 통지에 쓴다.
+        // /queue 를 빼면 사용자 전용 목적지(/user/queue/**)가 브로커에 등록되지 않아
+        // 구독도 전달도 조용히 무시된다 — 실패 통지가 사라지는 형태로 드러난다.
+        registry.enableSimpleBroker("/topic", "/queue");
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
     }
