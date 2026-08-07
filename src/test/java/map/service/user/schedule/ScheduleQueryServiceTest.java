@@ -151,6 +151,28 @@ class ScheduleQueryServiceTest {
 
         assertThat(out.stops()).isEmpty();
         assertThat(out.totalDurationMinutes()).isZero();
+        // 그릴 것이 없는 화면에는 생성 당시 안내도 싣지 않는다.
+        assertThat(out.warnings()).isNull();
+    }
+
+    @Test
+    @DisplayName("상세 — payload 의 warnings 와 timeline_status 를 그대로 싣는다")
+    void detailPassesThroughWarnings() {
+        ScheduleEntity saved = entity(OWNER, "walk", 9, 18);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) saved.getPayload())
+                .put("timeline_status", "trimmed")
+                .putArray("warnings")
+                .add("하루 활동 시간에 맞춰 일부 일정을 줄였습니다");
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(Optional.of(saved));
+        when(assembler.assemble(any(), any(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, null)));
+
+        ScheduleDetailResponse out = service.detail(1L, OWNER);
+
+        assertThat(out.warnings())
+                .containsExactly("하루 활동 시간에 맞춰 일부 일정을 줄였습니다");
+        assertThat(out.timelineStatus()).isEqualTo("trimmed");
     }
 
     @Test

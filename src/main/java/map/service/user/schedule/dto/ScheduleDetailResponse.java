@@ -26,6 +26,11 @@ import map.service.user.trip.dto.TripStop;
  * stops: 방문 순서대로의 방문지 목록.
  * createdAt: 저장 시각.
  * startedAt: 이 일정을 처음 따라가기 시작한 시각. 시작한 적이 없으면 키가 없다.
+ * warnings: 추천 당시 반영하지 못한 조건 안내. 저장된 draft 의 값을 그대로
+ *           전달한다. 생성 직후 화면과 저장 후 재열람이 같은 안내를 보여야
+ *           하므로 상세에도 싣는다. 없으면 키가 없다.
+ * timelineStatus: 방문 시각 계산 상태("ok"|"trimmed"|"unverified"). 타임라인
+ *                 이전 draft 에는 없다. JSON key "timeline_status".
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ScheduleDetailResponse(
@@ -38,6 +43,8 @@ public record ScheduleDetailResponse(
         @JsonProperty("total_duration_minutes") int totalDurationMinutes,
         List<TripStop> stops,
         @JsonProperty("created_at") OffsetDateTime createdAt,
-        @JsonProperty("started_at") OffsetDateTime startedAt
+        @JsonProperty("started_at") OffsetDateTime startedAt,
+        List<String> warnings,
+        @JsonProperty("timeline_status") String timelineStatus
 ) {
 }

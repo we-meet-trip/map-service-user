@@ -210,11 +210,17 @@ public class ScheduleService {
                 : TripStopsAssembler.DEFAULT_END_HOUR;
 
         List<TripStop> stops;
+        List<String> warnings = null;
+        String timelineStatus = null;
         try {
             RecommendResponse draft = objectMapper.treeToValue(
                     entity.getPayload(), RecommendResponse.class);
             stops = stopsAssembler.assemble(
                     draft, entity.getTransport(), startHour, endHour);
+            // 조립에 성공한 경우에만 싣는다 — 그릴 것이 없는 빈 화면에
+            // 생성 당시 안내만 남으면 무엇에 대한 경고인지 알 수 없다.
+            warnings = draft.warnings();
+            timelineStatus = draft.timelineStatus();
         } catch (JsonProcessingException | TripGenerationException e) {
             log.warn("schedule detail has no renderable stops schedule_id={} reason={}",
                     entity.getScheduleId(), e.getMessage());
@@ -231,7 +237,9 @@ public class ScheduleService {
                 TripStopsAssembler.totalDurationMinutes(stops),
                 stops,
                 entity.getCreatedAt(),
-                entity.getStartedAt());
+                entity.getStartedAt(),
+                warnings,
+                timelineStatus);
     }
 
     /**

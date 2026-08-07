@@ -150,7 +150,9 @@ public class TripService {
 
         log.info("trip generate done job_id={} stops={} weatherDays={}",
                 jobId, stops.size(), forecast.size());
-        return new TripGenerateResponse(jobId, totalDuration, stops, forecast);
+        return new TripGenerateResponse(
+                jobId, totalDuration, stops, forecast,
+                result.warnings(), result.timelineStatus());
     }
 
     /**
@@ -213,7 +215,9 @@ public class TripService {
         List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(weather);
 
         log.info("trip route done job_id={} stops={}", jobId, stops.size());
-        return new TripGenerateResponse(jobId, totalDuration, stops, forecast);
+        return new TripGenerateResponse(
+                jobId, totalDuration, stops, forecast,
+                result.warnings(), result.timelineStatus());
     }
 
     /** client 요청 → agent RecommendRequest (TripMapping 규칙 적용; province/city 는 정규화된 값). */

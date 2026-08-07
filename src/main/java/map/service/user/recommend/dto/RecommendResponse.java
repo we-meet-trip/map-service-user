@@ -18,6 +18,10 @@ import java.util.List;
  *           degrade 시 null 일 수 있다.
  * error: 오류 메시지(있을 때).
  * retryAfterSeconds: 재시도 권장 대기 시간. JSON key "retry_after_seconds".
+ * warnings: 추천 과정에서 반영하지 못한 조건 안내(예: 날씨 미확인).
+ *           사용자에게 그대로 보여줄 문장 목록이며, 없으면 null.
+ * timelineStatus: 방문 시각 계산 상태. "ok" | "trimmed" | "unverified".
+ *                 타임라인 이전에 만들어진 draft 에는 없다. JSON key "timeline_status".
  */
 public record RecommendResponse(
         @JsonProperty("job_id") String jobId,
@@ -27,6 +31,8 @@ public record RecommendResponse(
         List<Leg> legs,
         String clothing,
         String error,
-        @JsonProperty("retry_after_seconds") Integer retryAfterSeconds
+        @JsonProperty("retry_after_seconds") Integer retryAfterSeconds,
+        List<String> warnings,
+        @JsonProperty("timeline_status") String timelineStatus
 ) {
 }

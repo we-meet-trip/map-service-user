@@ -126,6 +126,37 @@ class TripRouteServiceTest {
     }
 
     @Test
+    @DisplayName("draft 의 warnings 와 timeline_status 를 응답에 그대로 싣는다")
+    void passesThroughWarningsAndTimelineStatus() {
+        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\","
+                        + "\"places\":[],\"visit_order\":[],\"legs\":[],"
+                        + "\"timeline_status\":\"unverified\","
+                        + "\"warnings\":[\"날씨 정보를 확인하지 못해 일정에 반영하지 못했습니다\"]}"));
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, null)));
+
+        TripGenerateResponse out = service.route(request());
+
+        assertThat(out.warnings())
+                .containsExactly("날씨 정보를 확인하지 못해 일정에 반영하지 못했습니다");
+        assertThat(out.timelineStatus()).isEqualTo("unverified");
+    }
+
+    @Test
+    @DisplayName("warnings 가 없는 draft 는 응답에도 warnings 가 없다")
+    void omitsWarningsWhenDraftHasNone() {
+        draftIsDone();
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, null)));
+
+        TripGenerateResponse out = service.route(request());
+
+        assertThat(out.warnings()).isNull();
+        assertThat(out.timelineStatus()).isNull();
+    }
+
+    @Test
     @DisplayName("탐색 기반 추천 경로(재사용 캐시)를 타지 않는다")
     void doesNotUseRecommendationCachePath() {
         draftIsDone();
