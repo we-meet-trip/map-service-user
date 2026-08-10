@@ -48,8 +48,12 @@ public class ChatRealtimeService {
      *
      * 저장 전에 사용자별 전송 레이트리밋을 검사해, 짧은 시간에 지나치게 많은 전송을 막는다.
      * 한도를 넘으면 RATE_LIMIT_EXCEEDED(429)로 거부한다(Redis 장애 시에는 허용=fail-open).
+     *
+     * clientMsgId 는 보낸 쪽이 붙여 온 임시 식별자로, 저장하지 않고 응답과 방송에만 실어
+     * 되돌려 준다. 보낸 사람은 자기 메시지도 방송으로 다시 받기 때문에, 이 값이 없으면
+     * 미리 그려 둔 말풍선과 돌아온 것을 짝지을 수 없어 같은 말이 두 번 남는다.
      */
-    public MessageResponse sendMessage(Long roomId, Long userId, String content) {
+    public MessageResponse sendMessage(Long roomId, Long userId, String content, String clientMsgId) {
         boolean allowed = rateLimitService.isAllowed(
                 "chat:send:" + userId,
                 chatProperties.getSendRateLimit(),
@@ -57,7 +61,7 @@ public class ChatRealtimeService {
         if (!allowed) {
             throw new CustomException(ErrorCode.RATE_LIMIT_EXCEEDED);
         }
-        MessageResponse response = messageService.send(roomId, userId, content);
+        MessageResponse response = messageService.send(roomId, userId, content, clientMsgId);
         relay.publish(ChatEventEnvelope.message(response));
         return response;
     }

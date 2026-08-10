@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import map.service.user.chat.dto.RoomResponse;
 import map.service.user.chat.dto.RoomSummary;
 import map.service.user.chat.entity.ChatMessage;
@@ -117,7 +118,10 @@ public class ChatRoomService {
      *
      * 각 방의 안 읽은 개수는 방의 메시지 순번이 1 부터 빈틈없이 증가하는 성질을 이용해,
      * 최신 순번(next_seq)에서 내 마지막 읽은 순번을 뺀 값(음수면 0)으로 즉시 구한다.
-     * 마지막 메시지 미리보기는 최신 메시지 본문을 사용한다.
+     * 마지막 메시지 미리보기는 최신 메시지 본문과 시각을 함께 사용한다.
+     *
+     * 방마다 인원수를 한 번씩 더 세므로 방 수에 비례해 질의가 는다. 한 사람이 드는 방이
+     * 많지 않고 방 정원도 작아 지금은 그대로 두지만, 목록이 길어지면 이 지점부터 손봐야 한다.
      */
     @Transactional(readOnly = true)
     public List<RoomSummary> listMyRooms(Long userId) {
@@ -131,17 +135,17 @@ public class ChatRoomService {
             }
             long latestSeq = room.getNextSeq();
             long unread = Math.max(0, latestSeq - membership.getLastReadMessageSeq());
-            String lastMessage = messageRepository.findTopByRoomIdOrderBySeqDesc(room.getRoomId())
-                    .map(ChatMessage::getContent)
-                    .orElse(null);
+            Optional<ChatMessage> latest = messageRepository.findTopByRoomIdOrderBySeqDesc(room.getRoomId());
             summaries.add(new RoomSummary(
                     room.getRoomId(),
                     room.getScheduleId(),
                     room.getTitle(),
                     room.isReadOnly(),
                     unread,
-                    lastMessage,
-                    latestSeq));
+                    latest.map(ChatMessage::getContent).orElse(null),
+                    latest.map(ChatMessage::getCreatedAt).orElse(null),
+                    latestSeq,
+                    access.activeCount(room.getRoomId())));
         }
         return summaries;
     }

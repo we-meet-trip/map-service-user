@@ -64,10 +64,10 @@ class ChatRealtimeServiceTest {
     void sendMessage_publishesMessageEnvelope() {
         when(rateLimitService.isAllowed(any(), anyInt(), any())).thenReturn(true);
         MessageResponse saved = new MessageResponse(10L, 1L, 1L, "TEXT", "hi", null,
-                OffsetDateTime.now(), 2L);
-        when(messageService.send(10L, 1L, "hi")).thenReturn(saved);
+                OffsetDateTime.now(), 2L, "c-1");
+        when(messageService.send(10L, 1L, "hi", "c-1")).thenReturn(saved);
 
-        realtimeService().sendMessage(10L, 1L, "hi");
+        realtimeService().sendMessage(10L, 1L, "hi", "c-1");
 
         ArgumentCaptor<ChatEventEnvelope> captor = capturePublish();
         verify(relay).publish(captor.capture());
@@ -81,12 +81,12 @@ class ChatRealtimeServiceTest {
     void sendMessage_rateLimited_rejects() {
         when(rateLimitService.isAllowed(any(), anyInt(), any())).thenReturn(false);
 
-        assertThatThrownBy(() -> realtimeService().sendMessage(10L, 1L, "hi"))
+        assertThatThrownBy(() -> realtimeService().sendMessage(10L, 1L, "hi", "c-1"))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.RATE_LIMIT_EXCEEDED);
 
-        verify(messageService, never()).send(any(), any(), any());
+        verify(messageService, never()).send(any(), any(), any(), any());
         verify(relay, never()).publish(any());
     }
 

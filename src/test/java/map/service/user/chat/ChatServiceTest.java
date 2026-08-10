@@ -13,6 +13,8 @@ import java.util.UUID;
 import map.service.user.chat.dto.InvitePreview;
 import map.service.user.chat.dto.InviteResponse;
 import map.service.user.chat.dto.RoomResponse;
+import map.service.user.chat.dto.RoomSummary;
+import map.service.user.chat.entity.ChatMessage;
 import map.service.user.chat.entity.ChatParticipant;
 import map.service.user.chat.entity.ChatRoom;
 import map.service.user.chat.repository.ChatMessageRepository;
@@ -157,6 +159,37 @@ class ChatServiceTest {
         OffsetDateTime expected = dateEnd.plusDays(props.getExpiryGraceDays())
                 .atTime(23, 59, 59).atZone(KST).toOffsetDateTime();
         assertThat(response.expiresAt().toInstant()).isEqualTo(expected.toInstant());
+    }
+
+    // ── 목록 ────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("목록 — 아무도 말하지 않은 방은 마지막 대화 시각이 비어 있고 인원은 1")
+    void listMyRooms_emptyRoom() {
+        createRoomAsOwner(LocalDate.now().plusDays(3));
+
+        RoomSummary summary = roomService.listMyRooms(OWNER).get(0);
+
+        assertThat(summary.lastMessage()).isNull();
+        assertThat(summary.lastMessageAt()).isNull();
+        assertThat(summary.participantCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("목록 — 마지막 대화의 본문·시각과 현재 인원수를 함께 준다")
+    void listMyRooms_carriesPreviewAndHeadcount() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        String token = inviteService.generateOrRotate(roomId, OWNER).token();
+        inviteService.join(token, 2L);
+        messageRepository.save(ChatMessage.text(roomId, 1L, OWNER, "먼저 한 말"));
+        ChatMessage latest = messageRepository.save(ChatMessage.text(roomId, 2L, 2L, "나중에 한 말"));
+
+        RoomSummary summary = roomService.listMyRooms(OWNER).get(0);
+
+        // 목록은 최근 대화 순으로 정렬하므로 가장 마지막 것이 실려야 한다.
+        assertThat(summary.lastMessage()).isEqualTo("나중에 한 말");
+        assertThat(summary.lastMessageAt()).isEqualTo(latest.getCreatedAt());
+        assertThat(summary.participantCount()).isEqualTo(2);
     }
 
     // ── 초대 ────────────────────────────────────────────────────────────────

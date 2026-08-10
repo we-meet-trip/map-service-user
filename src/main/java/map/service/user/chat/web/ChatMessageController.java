@@ -53,7 +53,7 @@ public class ChatMessageController {
             @Valid @RequestBody SendMessageRequest request,
             @AuthenticationPrincipal Long userId
     ) {
-        MessageResponse response = realtimeService.sendMessage(roomId, userId, request.content());
+        MessageResponse response = realtimeService.sendMessage(roomId, userId, request.content(), request.clientMsgId());
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
