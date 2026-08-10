@@ -2,14 +2,19 @@ package map.service.user.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import map.service.user.chat.dto.InvitePreview;
 import map.service.user.chat.dto.InviteResponse;
 import map.service.user.chat.dto.RoomResponse;
+import map.service.user.chat.dto.RoomSummary;
+import map.service.user.chat.entity.ChatMessage;
 import map.service.user.chat.entity.ChatParticipant;
 import map.service.user.chat.entity.ChatRoom;
 import map.service.user.chat.repository.ChatMessageRepository;
@@ -156,6 +161,37 @@ class ChatServiceTest {
         assertThat(response.expiresAt().toInstant()).isEqualTo(expected.toInstant());
     }
 
+    // ── 목록 ────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("목록 — 아무도 말하지 않은 방은 마지막 대화 시각이 비어 있고 인원은 1")
+    void listMyRooms_emptyRoom() {
+        createRoomAsOwner(LocalDate.now().plusDays(3));
+
+        RoomSummary summary = roomService.listMyRooms(OWNER).get(0);
+
+        assertThat(summary.lastMessage()).isNull();
+        assertThat(summary.lastMessageAt()).isNull();
+        assertThat(summary.participantCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("목록 — 마지막 대화의 본문·시각과 현재 인원수를 함께 준다")
+    void listMyRooms_carriesPreviewAndHeadcount() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        String token = inviteService.generateOrRotate(roomId, OWNER).token();
+        inviteService.join(token, 2L);
+        messageRepository.save(ChatMessage.text(roomId, 1L, OWNER, "먼저 한 말"));
+        ChatMessage latest = messageRepository.save(ChatMessage.text(roomId, 2L, 2L, "나중에 한 말"));
+
+        RoomSummary summary = roomService.listMyRooms(OWNER).get(0);
+
+        // 목록은 최근 대화 순으로 정렬하므로 가장 마지막 것이 실려야 한다.
+        assertThat(summary.lastMessage()).isEqualTo("나중에 한 말");
+        assertThat(summary.lastMessageAt()).isEqualTo(latest.getCreatedAt());
+        assertThat(summary.participantCount()).isEqualTo(2);
+    }
+
     // ── 초대 ────────────────────────────────────────────────────────────────
 
     @Test
@@ -211,6 +247,76 @@ class ChatServiceTest {
         InviteResponse issued = inviteService.generateOrRotate(roomId, OWNER);
 
         assertThat(inviteService.preview(issued.token()).joinable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("초대 — 방이 한참 뒤에 닫히면 링크의 7일이 유효기간이 된다")
+    void invite_ttlWinsOverDistantRoomExpiry() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(60));
+
+        InviteResponse issued = inviteService.generateOrRotate(roomId, OWNER);
+
+        ChatRoom room = roomRepository.findById(roomId).orElseThrow();
+        assertThat(issued.expiresAt())
+                .isCloseTo(OffsetDateTime.now().plusDays(7), within(1, ChronoUnit.MINUTES))
+                .isBefore(room.getExpiresAt());
+    }
+
+    @Test
+    @DisplayName("초대 — 방이 먼저 닫히면 방 만료가 유효기간이 된다")
+    void invite_roomExpiryWinsOverLongTtl() {
+        // 링크 수명을 방보다 길게 잡아, 이른 쪽이 이기는지만 본다.
+        props.setInviteTtlDays(30);
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+
+        InviteResponse issued = inviteService.generateOrRotate(roomId, OWNER);
+
+        ChatRoom room = roomRepository.findById(roomId).orElseThrow();
+        assertThat(issued.expiresAt()).isEqualTo(room.getExpiresAt());
+    }
+
+    @Test
+    @DisplayName("초대 — 유효기간이 지난 링크로 참가하면 CHAT_INVITE_REVOKED")
+    void invite_join_expiredLink() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(30));
+        String raw = tokenFactory.newRawToken();
+        ChatRoom room = roomRepository.findById(roomId).orElseThrow();
+        room.rotateInvite(tokenFactory.hash(raw), OffsetDateTime.now().minusMinutes(1));
+        roomRepository.saveAndFlush(room);
+
+        assertThatThrownBy(() -> inviteService.join(raw, 2L))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.CHAT_INVITE_REVOKED);
+    }
+
+    @Test
+    @DisplayName("초대 — 유효기간이 지난 링크의 미리보기는 거부 대신 joinable=false 와 방 정보를 준다")
+    void invite_preview_expiredLink() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(30));
+        String raw = tokenFactory.newRawToken();
+        ChatRoom room = roomRepository.findById(roomId).orElseThrow();
+        room.rotateInvite(tokenFactory.hash(raw), OffsetDateTime.now().minusMinutes(1));
+        roomRepository.saveAndFlush(room);
+
+        InvitePreview preview = inviteService.preview(raw);
+
+        // 받은 사람이 무엇에 초대받았는지는 알아야 다음 행동을 정할 수 있다.
+        assertThat(preview.joinable()).isFalse();
+        assertThat(preview.roomId()).isEqualTo(roomId);
+        assertThat(preview.title()).isEqualTo("속초 당일치기");
+    }
+
+    @Test
+    @DisplayName("초대 — 폐기하면 링크 유효기간도 함께 비워진다")
+    void invite_revoke_clearsExpiry() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        inviteService.generateOrRotate(roomId, OWNER);
+        assertThat(roomRepository.findById(roomId).orElseThrow().getInviteExpiresAt()).isNotNull();
+
+        inviteService.revoke(roomId, OWNER);
+
+        assertThat(roomRepository.findById(roomId).orElseThrow().getInviteExpiresAt()).isNull();
     }
 
     // ── 참가 ────────────────────────────────────────────────────────────────
@@ -293,7 +399,9 @@ class ChatServiceTest {
         ChatRoom room = new ChatRoom(persistSchedule(OWNER, LocalDate.now().plusDays(1)),
                 OWNER, "만료방", OffsetDateTime.now().minusDays(1));
         String raw = tokenFactory.newRawToken();
-        room.rotateInvite(tokenFactory.hash(raw));
+        // 링크는 살려 둔다. 링크가 먼저 죽으면 방 만료가 아니라 링크 만료로 걸려
+        // 이 테스트가 이름과 다른 것을 재게 된다.
+        room.rotateInvite(tokenFactory.hash(raw), OffsetDateTime.now().plusDays(7));
         roomRepository.save(room);
         participantRepository.save(new ChatParticipant(room.getRoomId(), OWNER, ChatParticipant.Role.OWNER));
 

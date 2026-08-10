@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
 import map.service.user.trip.dto.TripRouteRequest;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,12 +41,16 @@ public class TripController {
      * 본문 형식 위반 시 400, 추천 실패 시 502, 시간초과 시 504(전역 핸들러).
      *
      * request: @Valid @RequestBody TripGenerateRequest.
+     * userId: 토큰이 실려 있고 유효할 때만 채워진다. 이 경로는 인증을
+     *         요구하지 않으므로 비로그인 요청에서는 null 이며, 그때는
+     *         저장된 취향 없이 기존과 동일하게 처리된다.
      */
     @PostMapping("/generate")
     public TripGenerateResponse generate(
-            @Valid @RequestBody TripGenerateRequest request
+            @Valid @RequestBody TripGenerateRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        return service.generate(request);
+        return service.generate(request, userId);
     }
 
     /**

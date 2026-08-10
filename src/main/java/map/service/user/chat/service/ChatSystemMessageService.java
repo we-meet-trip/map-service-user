@@ -79,8 +79,9 @@ public class ChatSystemMessageService {
         ChatRoom room = access.requireRoomForUpdate(roomId);
         long seq = room.allocateNextSeq();
         ChatMessage message = messageRepository.save(ChatMessage.system(roomId, seq, content, systemPayload));
+        // 시스템 메시지는 사용자가 보낸 것이 아니라 짝지을 임시 식별자가 없다.
         MessageResponse response = new MessageResponse(
-                roomId, seq, null, "SYSTEM", content, systemPayload, message.getCreatedAt(), 0L);
+                roomId, seq, null, "SYSTEM", content, systemPayload, message.getCreatedAt(), 0L, null);
         publishAfterCommit(ChatEventEnvelope.message(response));
     }
 

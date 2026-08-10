@@ -12,6 +12,7 @@ import map.service.user.global.config.ChatSecurityConfig;
 import map.service.user.global.config.CorsProperties;
 import map.service.user.global.config.SecurityConfig;
 import map.service.user.global.jwt.JwtService;
+import map.service.user.global.ratelimit.ClientIpResolver;
 import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.ratelimit.RateLimitService;
 import map.service.user.global.security.JwtAuthenticationFilter;
@@ -34,7 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest(ChatRoomController.class)
 @Import({ChatSecurityConfig.class, SecurityConfig.class, JwtAuthenticationFilter.class,
-        RateLimitFilter.class, CorsProperties.class, map.service.user.global.config.ChatProperties.class})
+        RateLimitFilter.class, ClientIpResolver.class, CorsProperties.class, map.service.user.global.config.ChatProperties.class})
 @DisplayName("ChatSecurityConfig 필터체인 테스트")
 class ChatSecurityConfigTest {
 

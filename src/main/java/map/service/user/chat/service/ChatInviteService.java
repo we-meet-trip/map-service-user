@@ -48,6 +48,11 @@ public class ChatInviteService {
      *
      * 새 원시 토큰을 만들어 방에 해시를 저장하고 버전을 올린다(이전 링크 무효화).
      * 만료/보관 방에는 발급하지 않는다. 응답의 원시 토큰은 여기서 한 번만 노출된다.
+     *
+     * 발급 시점부터 설정된 일수 뒤를 링크의 만료로 잡는다. 방 만료와 별개로 두는
+     * 이유는, 여행이 먼 일정일수록 방이 오래 살아 있어서 링크도 그만큼 오래 열려
+     * 있게 되기 때문이다. 응답에 싣는 만료는 방 만료와 견준 이른 쪽이다 — 화면이
+     * 표시하는 유효기간과 실제로 참가가 막히는 시점이 어긋나면 안 된다.
      */
     @Transactional
     public InviteResponse generateOrRotate(Long roomId, Long userId) {
@@ -56,9 +61,12 @@ public class ChatInviteService {
         access.assertSendable(room);
 
         String rawToken = tokenFactory.newRawToken();
-        room.rotateInvite(tokenFactory.hash(rawToken));
+        OffsetDateTime inviteExpiresAt =
+                OffsetDateTime.now().plusDays(chatProperties.getInviteTtlDays());
+        room.rotateInvite(tokenFactory.hash(rawToken), inviteExpiresAt);
         String url = chatProperties.getInviteBaseUrl() + rawToken;
-        return new InviteResponse(rawToken, url, room.getInviteTokenVersion(), room.getExpiresAt());
+        return new InviteResponse(
+                rawToken, url, room.getInviteTokenVersion(), room.effectiveInviteExpiresAt());
     }
 
     /** 초대 링크 폐기(소유자 전용). 저장된 해시를 지우고 버전을 올려 배포된 링크를 무효화한다. */
@@ -75,17 +83,24 @@ public class ChatInviteService {
      * 토큰 해시로 방을 찾고, 방 제목·현재 인원과 함께 지금 참가할 수 있는지(joinable)를
      * 계산해 돌려준다. 알 수 없는 토큰만 CHAT_INVITE_INVALID 로 거부하고, 폐기·만료·정원
      * 초과는 예외 대신 joinable=false 로 표현해 클라이언트가 방 정보를 보여줄 수 있게 한다.
+     *
+     * 이 호출은 로그인을 요구하지 않는다. 링크를 받은 사람은 아직 계정이 없을 수 있고,
+     * 이 호출은 아무것도 바꾸지 않기 때문이다. 그래서 만료된 링크에도 방 제목을 실어
+     * 보낸다 — 받은 쪽이 무엇에 초대받았는지는 알아야 다음 행동을 정할 수 있다.
      */
     @Transactional(readOnly = true)
     public InvitePreview preview(String rawToken) {
         ChatRoom room = roomRepository.findByInviteTokenHash(tokenFactory.hash(rawToken))
                 .orElseThrow(() -> new CustomException(ErrorCode.CHAT_INVITE_INVALID));
+        OffsetDateTime now = OffsetDateTime.now();
         int count = access.activeCount(room.getRoomId());
         boolean joinable = !room.isInviteRevoked()
+                && !room.isInviteExpired(now)
                 && !room.isReadOnly()
-                && !room.isExpired(OffsetDateTime.now())
+                && !room.isExpired(now)
                 && count < chatProperties.getMaxParticipants();
-        return new InvitePreview(room.getRoomId(), room.getTitle(), count, joinable, room.getExpiresAt());
+        return new InvitePreview(
+                room.getRoomId(), room.getTitle(), count, joinable, room.effectiveInviteExpiresAt());
     }
 
     /**

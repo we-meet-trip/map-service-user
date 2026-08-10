@@ -46,7 +46,7 @@ public class ChatStompController {
     public void send(@DestinationVariable Long roomId,
                      @Payload SendMessageRequest request,
                      Principal principal) {
-        realtimeService.sendMessage(roomId, userId(principal), request.content());
+        realtimeService.sendMessage(roomId, userId(principal), request.content(), request.clientMsgId());
     }
 
     @MessageMapping("/rooms/{roomId}/read")

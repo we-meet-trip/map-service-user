@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -11,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.Optional;
 import map.service.user.global.jwt.JwtService;
+import map.service.user.global.ratelimit.ClientIpResolver;
 import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.ratelimit.RateLimitService;
 import map.service.user.global.security.JwtAuthenticationFilter;
@@ -27,6 +29,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.mockito.ArgumentCaptor;
+import map.service.user.recommend.dto.JobAccepted;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -40,7 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest({RecommendController.class, ScheduleController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
-        RateLimitFilter.class, CorsProperties.class})
+        RateLimitFilter.class, ClientIpResolver.class, CorsProperties.class})
 @DisplayName("SecurityConfig 기본(플래그 off) 테스트")
 class SecurityConfigDefaultTest {
 
@@ -82,5 +86,32 @@ class SecurityConfigDefaultTest {
 
         verify(scheduleService, never())
                 .persist(any(ScheduleSaveRequest.class), any());
+    }
+
+    @Test
+    @DisplayName("익명 POST /recommend — principal 이 null 로 들어가고 202 로 접수된다")
+    void anonymousRecommendCreateReachesControllerWithNullPrincipal()
+            throws Exception {
+        // 추천 접수는 인증을 요구하지 않는 공개 경로다. 익명 principal 은
+        // "anonymousUser" 문자열이라 Long 파라미터로 캐스팅되지 않는데,
+        // 여기서 리졸버가 예외를 던지면 익명 트래픽 전체가 500 이 된다.
+        // 정상 접수(202)와 서비스로 null 이 전달된 사실로 확인한다.
+        when(recommendService.createRecommendationDetailed(any(), any()))
+                .thenReturn(new RecommendService.RecommendationResult(
+                        new JobAccepted("job-anon", "in_progress", 3), false));
+
+        mockMvc.perform(post("/api/v1/recommend")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"date\":{\"date_start\":\"2026-07-06\","
+                                + "\"date_end\":\"2026-07-06\","
+                                + "\"time_start\":\"09:00:00\","
+                                + "\"time_end\":\"18:00:00\"},"
+                                + "\"province\":\"서울특별시\",\"city\":\"강남구\"}"))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<Long> userId = ArgumentCaptor.forClass(Long.class);
+        verify(recommendService).createRecommendationDetailed(
+                any(), userId.capture());
+        assertThat(userId.getValue()).isNull();
     }
 }

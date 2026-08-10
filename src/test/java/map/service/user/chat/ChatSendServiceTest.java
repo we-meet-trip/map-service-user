@@ -75,8 +75,8 @@ class ChatSendServiceTest {
     void send_allocatesSeqAndAdvancesSenderPointer() {
         long roomId = freshRoom(OffsetDateTime.now().plusDays(8), 2L);
 
-        MessageResponse first = messageService.send(roomId, OWNER, "속초 드디어 가는군요!!!");
-        MessageResponse second = messageService.send(roomId, 2L, "바다가 진짜 예쁠 거예요");
+        MessageResponse first = messageService.send(roomId, OWNER, "속초 드디어 가는군요!!!", null);
+        MessageResponse second = messageService.send(roomId, 2L, "바다가 진짜 예쁠 거예요", null);
 
         assertThat(first.seq()).isEqualTo(1);
         assertThat(second.seq()).isEqualTo(2);
@@ -94,7 +94,7 @@ class ChatSendServiceTest {
     void send_unreadExcludesSender() {
         long roomId = freshRoom(OffsetDateTime.now().plusDays(8), 2L, 3L); // owner+2+3 = 3명
 
-        MessageResponse response = messageService.send(roomId, OWNER, "안녕하세요");
+        MessageResponse response = messageService.send(roomId, OWNER, "안녕하세요", null);
 
         assertThat(response.unreadCount()).isEqualTo(2); // 3명 - 발신자 1
     }
@@ -104,7 +104,7 @@ class ChatSendServiceTest {
     void send_expiredRoom() {
         long roomId = freshRoom(OffsetDateTime.now().minusDays(1));
 
-        assertThatThrownBy(() -> messageService.send(roomId, OWNER, "x"))
+        assertThatThrownBy(() -> messageService.send(roomId, OWNER, "x", null))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CHAT_ROOM_EXPIRED);
@@ -115,7 +115,7 @@ class ChatSendServiceTest {
     void send_nonParticipant() {
         long roomId = freshRoom(OffsetDateTime.now().plusDays(8));
 
-        assertThatThrownBy(() -> messageService.send(roomId, 777L, "x"))
+        assertThatThrownBy(() -> messageService.send(roomId, 777L, "x", null))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CHAT_NOT_PARTICIPANT);
@@ -126,7 +126,7 @@ class ChatSendServiceTest {
     void send_blankContent() {
         long roomId = freshRoom(OffsetDateTime.now().plusDays(8));
 
-        assertThatThrownBy(() -> messageService.send(roomId, OWNER, "   "))
+        assertThatThrownBy(() -> messageService.send(roomId, OWNER, "   ", null))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CHAT_MESSAGE_INVALID);
@@ -138,7 +138,7 @@ class ChatSendServiceTest {
         long roomId = freshRoom(OffsetDateTime.now().plusDays(8));
         String tooLong = "a".repeat(props.getMaxMessageLength() + 1);
 
-        assertThatThrownBy(() -> messageService.send(roomId, OWNER, tooLong))
+        assertThatThrownBy(() -> messageService.send(roomId, OWNER, tooLong, null))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CHAT_MESSAGE_INVALID);

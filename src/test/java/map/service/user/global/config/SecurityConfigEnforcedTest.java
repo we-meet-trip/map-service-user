@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 import java.util.Optional;
 import map.service.user.global.jwt.JwtService;
+import map.service.user.global.ratelimit.ClientIpResolver;
 import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.ratelimit.RateLimitService;
 import map.service.user.global.security.JwtAuthenticationFilter;
@@ -38,7 +39,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest(RecommendController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
-        RateLimitFilter.class, CorsProperties.class})
+        RateLimitFilter.class, ClientIpResolver.class, CorsProperties.class})
 @TestPropertySource(properties = "auth.enforced=true")
 @DisplayName("SecurityConfig 인가 시행(플래그 on) 테스트")
 class SecurityConfigEnforcedTest {

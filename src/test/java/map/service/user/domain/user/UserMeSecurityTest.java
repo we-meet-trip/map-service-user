@@ -18,6 +18,7 @@ import map.service.user.global.config.SecurityConfig;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import map.service.user.global.jwt.JwtService;
+import map.service.user.global.ratelimit.ClientIpResolver;
 import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.ratelimit.RateLimitService;
 import map.service.user.global.security.JwtAuthenticationFilter;
@@ -42,7 +43,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest(UserController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
-        RateLimitFilter.class, CorsProperties.class})
+        RateLimitFilter.class, ClientIpResolver.class, CorsProperties.class})
 @DisplayName("users/me 인증 필수 테스트")
 class UserMeSecurityTest {
 

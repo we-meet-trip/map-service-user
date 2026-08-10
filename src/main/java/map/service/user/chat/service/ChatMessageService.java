@@ -57,7 +57,7 @@ public class ChatMessageService {
      * 브로드캐스트는 트랜잭션 커밋 이후 상위 파사드가 수행한다.
      */
     @Transactional
-    public MessageResponse send(Long roomId, Long userId, String content) {
+    public MessageResponse send(Long roomId, Long userId, String content, String clientMsgId) {
         validateContent(content);
         ChatRoom room = access.requireRoomForUpdate(roomId);
         access.requireActiveParticipant(roomId, userId);
@@ -68,7 +68,7 @@ public class ChatMessageService {
         participantRepository.advanceReadPointer(roomId, userId, seq);
 
         long unread = Math.max(0L, access.activeCount(roomId) - 1L);
-        return toResponse(message, unread);
+        return toResponse(message, unread, clientMsgId);
     }
 
     /**
@@ -101,7 +101,7 @@ public class ChatMessageService {
             long unread = (message.getType() == ChatMessage.MessageType.SYSTEM)
                     ? 0L
                     : countPointersBelow(pointers, message.getSeq());
-            items.add(toResponse(message, unread));
+            items.add(toResponse(message, unread, null));
         }
 
         Long nextCursor = messages.size() < pageSize
@@ -181,8 +181,13 @@ public class ChatMessageService {
         return low;
     }
 
-    /** 메시지 엔티티를 응답 DTO 로 매핑한다. 안 읽은 인원수는 호출부에서 계산해 넣는다. */
-    private MessageResponse toResponse(ChatMessage message, long unreadCount) {
+    /**
+     * 메시지 엔티티를 응답 DTO 로 매핑한다. 안 읽은 인원수는 호출부에서 계산해 넣는다.
+     *
+     * clientMsgId 는 방금 보낸 요청을 되돌려 줄 때만 채운다. 저장하는 값이 아니라서
+     * 지난 메시지를 다시 읽을 때는 넣을 것이 없다.
+     */
+    private MessageResponse toResponse(ChatMessage message, long unreadCount, String clientMsgId) {
         return new MessageResponse(
                 message.getRoomId(),
                 message.getSeq(),
@@ -191,6 +196,7 @@ public class ChatMessageService {
                 message.getContent(),
                 message.getSystemPayload(),
                 message.getCreatedAt(),
-                unreadCount);
+                unreadCount,
+                clientMsgId);
     }
 }

@@ -74,14 +74,25 @@ public class ChatRoomAccessService {
     }
 
     /**
-     * 링크로 참가할 수 있는 상태인지 검증한다. 폐기된 링크는 CHAT_INVITE_REVOKED,
-     * 보관 전용/만료 방은 CHAT_ROOM_EXPIRED 로 거부한다(정원 검사는 호출자 담당).
+     * 링크로 참가할 수 있는 상태인지 검증한다. 폐기되었거나 유효기간이 지난 링크는
+     * CHAT_INVITE_REVOKED, 보관 전용/만료 방은 CHAT_ROOM_EXPIRED 로 거부한다
+     * (정원 검사는 호출자 담당).
+     *
+     * 참가 가능 여부를 정하는 곳은 여기 하나다. 미리보기는 같은 조건을 예외 대신
+     * 값으로 돌려주지만, 실제로 막는 것은 이 검사다.
+     *
+     * 폐기와 기간 만료에 같은 코드를 쓰는 이유: 링크를 받은 쪽에서 보면 둘 다 "이제
+     * 못 쓰는 링크"이고, 어느 쪽인지 알려 주면 발급자가 언제 거뒀는지가 드러난다.
+     *
+     * 시각을 한 번만 읽는 이유: 두 검사가 서로 다른 시점을 보면 그 경계에 걸친
+     * 요청이 어느 쪽으로도 걸리지 않고 빠져나갈 수 있다.
      */
     public void assertJoinable(ChatRoom room) {
-        if (room.isInviteRevoked()) {
+        OffsetDateTime now = OffsetDateTime.now();
+        if (room.isInviteRevoked() || room.isInviteExpired(now)) {
             throw new CustomException(ErrorCode.CHAT_INVITE_REVOKED);
         }
-        if (room.isReadOnly() || room.isExpired(OffsetDateTime.now())) {
+        if (room.isReadOnly() || room.isExpired(now)) {
             throw new CustomException(ErrorCode.CHAT_ROOM_EXPIRED);
         }
     }

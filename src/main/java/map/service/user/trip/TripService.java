@@ -96,6 +96,17 @@ public class TripService {
      * request: 검증 완료된 TripGenerateRequest.
      */
     public TripGenerateResponse generate(TripGenerateRequest request) {
+        return generate(request, null);
+    }
+
+    /**
+     * 위와 같되, 로그인한 사용자면 저장해 둔 취향을 추천에 얹는다.
+     *
+     * userId: 유효한 토큰이 있을 때만 채워진다. null 이면 기존 경로와
+     *         완전히 같게 동작한다.
+     */
+    public TripGenerateResponse generate(
+            TripGenerateRequest request, Long userId) {
         // 0) 시/도 명칭 정규화 (잠재오류①: client 구 명칭 → region_grid 개편 명칭).
         //    agent 위임과 hub 날씨 호출 양쪽에 동일한 정규화 값을 사용한다.
         String province = TripMapping.normalizeProvince(request.location().province());
@@ -109,7 +120,8 @@ public class TripService {
         //    진행 중 job 이 보이지 않았다.
         RecommendRequest recommendRequest = toRecommendRequest(request, province, city);
         RecommendService.RecommendationResult delegated =
-                recommendService.createRecommendationDetailed(recommendRequest);
+                recommendService.createRecommendationDetailed(
+                        recommendRequest, userId);
         JobAccepted accepted = delegated.accepted();
         String jobId = accepted.jobId();
         log.info("trip generate started job_id={} cacheHit={}", jobId, delegated.cacheHit());

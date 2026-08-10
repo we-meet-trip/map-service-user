@@ -252,6 +252,9 @@ chat:
   send-rate-window-seconds: ${CHAT_SEND_RATE_WINDOW_SECONDS:10}
   invite-rate-limit: ${CHAT_INVITE_RATE_LIMIT:10}
   invite-rate-window-seconds: ${CHAT_INVITE_RATE_WINDOW_SECONDS:60}
+  invite-ttl-days: ${CHAT_INVITE_TTL_DAYS:7}
+  invite-preview-rate-limit: ${CHAT_INVITE_PREVIEW_RATE_LIMIT:30}
+  invite-preview-rate-window-seconds: ${CHAT_INVITE_PREVIEW_RATE_WINDOW_SECONDS:60}
   broadcast-channel: ${CHAT_BROADCAST_CHANNEL:chat:broadcast}
   ws-endpoint: ${CHAT_WS_ENDPOINT:/ws/chat}
   expiry-sweep-interval-ms: ${CHAT_EXPIRY_SWEEP_INTERVAL_MS:60000}

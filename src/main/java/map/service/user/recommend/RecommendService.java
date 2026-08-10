@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -54,6 +55,15 @@ public class RecommendService {
     /** agent B2 계약의 exclude 목록 상한(초과분은 앞에서부터 절단). */
     private static final int EXCLUDE_MAX = 50;
 
+    /**
+     * 고른 테마 + 저장된 취향을 합쳤을 때의 상한.
+     *
+     * 받는 쪽이 테마 하나당 장소 검색을 한 번씩 던지므로 개수가 곧 외부
+     * 호출량이고 응답 지연이다. 직접 고른 테마는 이 상한 때문에 잘리지
+     * 않는다 — 이미 상한을 채웠으면 취향을 아예 덧붙이지 않는다.
+     */
+    private static final int THEME_MERGE_MAX = 6;
+
     private final AgentClient agentClient;
     private final DraftStore draftStore;
     private final ObjectMapper objectMapper;
@@ -61,6 +71,7 @@ public class RecommendService {
     private final RecommendJobStore jobStore;
     private final ReuseCacheStore reuseCacheStore;
     private final RecommendCacheKey cacheKeyBuilder;
+    private final ProfileThemeProvider profileThemeProvider;
     private final Executor cacheRefreshExecutor;
     private final long refreshEveryHits;
 
@@ -72,6 +83,7 @@ public class RecommendService {
             RecommendJobStore jobStore,
             ReuseCacheStore reuseCacheStore,
             RecommendCacheKey cacheKeyBuilder,
+            ProfileThemeProvider profileThemeProvider,
             @Qualifier("recommendCacheRefreshExecutor") Executor cacheRefreshExecutor,
             @Value("${recommend.cache-refresh-every-hits:3}") long refreshEveryHits
     ) {
@@ -82,6 +94,7 @@ public class RecommendService {
         this.jobStore = jobStore;
         this.reuseCacheStore = reuseCacheStore;
         this.cacheKeyBuilder = cacheKeyBuilder;
+        this.profileThemeProvider = profileThemeProvider;
         this.cacheRefreshExecutor = cacheRefreshExecutor;
         this.refreshEveryHits = refreshEveryHits;
     }
@@ -113,15 +126,50 @@ public class RecommendService {
      * (검증/관측 목적 — 응답 본문 계약에는 영향 없음).
      */
     public RecommendationResult createRecommendationDetailed(RecommendRequest request) {
+        return createRecommendationDetailed(request, null);
+    }
+
+    /**
+     * 위와 같되, 로그인한 사용자면 저장해 둔 취향을 테마에 얹는다.
+     *
+     * <p>취향은 <b>캐시를 조회한 뒤에만</b> 붙인다. 캐시 키를 취향이 섞인
+     * 값으로 계산하면 이미 쌓아 둔 캐시가 통째로 빗나가고, 취향이 다른
+     * 사용자마다 키가 갈라져 적중률이 무너진다.
+     *
+     * <p>취향이 붙은 요청의 결과는 <b>캐시에 저장하지 않는다.</b> 그 결과는
+     * 그 사람에게 맞춘 것이라 같은 조건으로 요청한 다른 사람에게 내보내면
+     * 안 된다. 저장을 막는 방법은 완료된 job 을 캐시 키에 연결하지 않는
+     * 것이다 — 연결이 없으면 완료 이벤트를 받아도 캐시 본체를 쓰지 않는다.
+     *
+     * <p>대신 캐시가 맞은 요청은 취향을 반영하지 못한다. 같은 사용자라도
+     * 캐시 상태에 따라 반영 여부가 갈리는데, 이는 기존 캐시를 무효화하지
+     * 않기 위해 받아들인 맞바꿈이다.
+     *
+     * userId: 인증된 사용자 식별자. null 이면 취향을 조회하지 않고
+     *         기존 경로와 완전히 같게 동작한다.
+     */
+    public RecommendationResult createRecommendationDetailed(
+            RecommendRequest request, Long userId) {
         // 클라이언트가 보낸 stage/exclude 는 신뢰하지 않는다. 캐시 조회·agent 호출·
         // 백그라운드 갱신 모두 정규화된 요청 하나만 사용해 경로 간 해시가 어긋나지 않게 한다.
-        RecommendRequest normalized = withStage(request, "init", List.of());
-        String hash = cacheKeyBuilder.hash(normalized);
+        // final 로 둔다 — 아래 취향 병합이 이 값을 덮으면 캐시 키와 백그라운드
+        // 갱신이 함께 오염된다.
+        final RecommendRequest normalized = withStage(request, "init", List.of());
+        final String hash = cacheKeyBuilder.hash(normalized);
         Optional<String> cached = findCached(hash);
 
         if (cached.isEmpty()) {
-            JobAccepted accepted = agentClient.requestRecommend(normalized);
-            linkJobSafely(accepted.jobId(), hash);
+            List<String> merged = mergeProfileThemes(normalized.theme(), userId);
+            RecommendRequest outbound =
+                    merged == null ? normalized : withTheme(normalized, merged);
+            JobAccepted accepted = agentClient.requestRecommend(outbound);
+            if (merged == null) {
+                linkJobSafely(accepted.jobId(), hash);
+            } else {
+                log.info(
+                        "reuse cache link skipped (themes merged) hash={} themes={}",
+                        hash, merged.size());
+            }
             jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
             return new RecommendationResult(accepted, false);
         }
@@ -395,6 +443,75 @@ public class RecommendService {
                 stage,
                 exclude,
                 places);
+    }
+
+    /**
+     * theme 만 교체한 RecommendRequest 사본 생성.
+     *
+     * 다른 필드는 손대지 않는다. 캐시 키를 만든 원본과 이 사본의 차이가
+     * theme 하나뿐이어야, 나중에 무엇 때문에 캐시에 넣지 않았는지가 분명하다.
+     */
+    private static RecommendRequest withTheme(
+            RecommendRequest request, List<String> theme) {
+        return new RecommendRequest(
+                request.date(),
+                request.budget(),
+                theme,
+                request.mobility(),
+                request.province(),
+                request.city(),
+                request.scheduleId(),
+                request.stage(),
+                request.exclude(),
+                request.places());
+    }
+
+    /**
+     * 사용자가 고른 테마 뒤에 저장해 둔 취향을 덧붙인다.
+     *
+     * 덧붙일 것이 하나도 없으면 <b>null</b> 을 돌려준다. 호출 측은 이 한
+     * 가지 신호만 보고 "오늘과 똑같이 처리할지"를 정한다 — 빈 목록과
+     * 원본을 구분하려 들면 판단 지점이 여러 곳으로 흩어진다.
+     *
+     * 고른 테마는 순서도 내용도 그대로 앞에 남긴다. 받는 쪽이 목록 앞을
+     * 더 중요하게 다루므로, 직접 고른 것이 저장된 취향을 이긴다. 이미
+     * 상한만큼 골랐으면 아무것도 덧붙이지 않는다 — 취향을 넣겠다고 사용자가
+     * 직접 고른 테마를 밀어내면 안 된다.
+     */
+    private List<String> mergeProfileThemes(
+            List<String> explicit, Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        List<String> base = explicit == null ? List.of() : explicit;
+        int room = THEME_MERGE_MAX - base.size();
+        if (room <= 0) {
+            return null;
+        }
+        List<String> profile;
+        try {
+            profile = profileThemeProvider.themesFor(userId);
+        } catch (RuntimeException e) {
+            // 취향은 추천에 얹는 덤이다. 조회처가 무엇이든 그 실패가 여행
+            // 일정 자체를 실패시키면 안 된다 — 캐시 조회 실패를 미스로
+            // 접는 것과 같은 규약이다.
+            log.warn("profile themes unavailable, sending request as-is: {}",
+                    e.getClass().getSimpleName());
+            return null;
+        }
+        if (profile == null || profile.isEmpty()) {
+            return null;
+        }
+        List<String> merged = new ArrayList<>(base);
+        for (String code : profile) {
+            if (merged.size() >= THEME_MERGE_MAX) {
+                break;
+            }
+            if (!merged.contains(code)) {
+                merged.add(code);
+            }
+        }
+        return merged.size() == base.size() ? null : merged;
     }
 
     /**
