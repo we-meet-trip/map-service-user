@@ -2,6 +2,7 @@ package map.service.user.global.exception;
 
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import map.service.user.places.PlacePhotosException;
 import map.service.user.places.PlaceSearchException;
 import map.service.user.places.ReviewSearchException;
 import map.service.user.recommend.AgentRequestException;
@@ -186,6 +187,21 @@ public class GlobalExceptionHandler {
                 ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "review_search_upstream_error");
+        body.put("upstream_status", ex.statusCode());
+        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * hub 장소 사진 조회가 비정상 응답을 반환했을 때 호출된다.
+     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     */
+    @ExceptionHandler(PlacePhotosException.class)
+    public ResponseEntity<Map<String, Object>> handlePlacePhotos(PlacePhotosException ex) {
+        log.warn("place photos upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "place_photos_upstream_error");
         body.put("upstream_status", ex.statusCode());
         body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
