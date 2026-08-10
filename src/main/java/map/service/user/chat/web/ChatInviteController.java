@@ -1,5 +1,6 @@
 package map.service.user.chat.web;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import map.service.user.chat.dto.InvitePreview;
 import map.service.user.chat.dto.InviteResponse;
@@ -9,6 +10,7 @@ import map.service.user.chat.service.ChatRealtimeService;
 import map.service.user.global.config.ChatProperties;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
+import map.service.user.global.ratelimit.ClientIpResolver;
 import map.service.user.global.ratelimit.RateLimitService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 엔드포인트:
  * - POST   /rooms/{roomId}/invite → 발급/재발급(소유자)
  * - DELETE /rooms/{roomId}/invite → 폐기(소유자)
- * - GET    /invites/{token}       → 미리보기(참가 안 함)
+ * - GET    /invites/{token}       → 미리보기(무인증, 참가 안 함)
  * - POST   /invites/{token}/join  → 참가
  */
 @RestController
@@ -38,15 +40,18 @@ public class ChatInviteController {
     private final ChatInviteService inviteService;
     private final ChatRealtimeService realtimeService;
     private final RateLimitService rateLimitService;
+    private final ClientIpResolver clientIpResolver;
     private final ChatProperties chatProperties;
 
     public ChatInviteController(ChatInviteService inviteService,
                                 ChatRealtimeService realtimeService,
                                 RateLimitService rateLimitService,
+                                ClientIpResolver clientIpResolver,
                                 ChatProperties chatProperties) {
         this.inviteService = inviteService;
         this.realtimeService = realtimeService;
         this.rateLimitService = rateLimitService;
+        this.clientIpResolver = clientIpResolver;
         this.chatProperties = chatProperties;
     }
 
@@ -72,8 +77,25 @@ public class ChatInviteController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * 초대 링크 미리보기. 로그인하지 않아도 호출할 수 있다.
+     *
+     * 인증을 요구하지 않으므로 사용자 단위로 셀 수가 없어 발신 주소로 한도를 센다.
+     * 발급 한도와 키 공간을 나누어, 링크를 나눠 준 사람이 받은 사람들의 조회 때문에
+     * 발급을 막히는 일이 없게 한다.
+     *
+     * 이 메서드는 principal 을 받지 않는다. 익명 요청에서는 principal 이 비어 있어,
+     * 받아 두면 로그인한 사람과 아닌 사람의 처리가 갈리는 자리가 생긴다.
+     */
     @GetMapping("/invites/{token}")
-    public InvitePreview preview(@PathVariable String token) {
+    public InvitePreview preview(@PathVariable String token, HttpServletRequest request) {
+        boolean allowed = rateLimitService.isAllowed(
+                "chat:invite-preview:" + clientIpResolver.resolve(request),
+                chatProperties.getInvitePreviewRateLimit(),
+                Duration.ofSeconds(chatProperties.getInvitePreviewRateWindowSeconds()));
+        if (!allowed) {
+            throw new CustomException(ErrorCode.RATE_LIMIT_EXCEEDED);
+        }
         return inviteService.preview(token);
     }
 

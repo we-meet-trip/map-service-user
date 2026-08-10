@@ -4,6 +4,7 @@ import map.service.user.global.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -26,6 +27,13 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * - 핸드셰이크 경로 : permitAll. 브라우저/네이티브 클라이언트의 업그레이드 요청은
  *   Authorization 헤더를 싣기 어려우므로, 실제 사용자 인증은 STOMP CONNECT 프레임에서
  *   한 단계 위 계층이 수행한다(여기서는 핸드셰이크만 통과시킨다).
+ * - 초대 미리보기 GET : permitAll. 링크를 받은 사람은 정의상 아직 로그인하지 않았고,
+ *   이 호출은 아무것도 바꾸지 않는다. 로그인부터 시키면 자신이 무엇에 초대받았는지
+ *   모르는 채 가입해야 한다. 남용은 IP 별 한도로 막는다.
+ *
+ * 미리보기만 여는 것이 중요하다. 참가(POST)는 인증을 유지해야 하므로 메서드를
+ * 고정한다. 초대 토큰은 URL 안전 base64 라 슬래시가 없어서, 한 세그먼트 패턴이
+ * 뒤따르는 /join 까지 삼킬 수 없다.
  *
  * jwtAuthenticationFilter/corsConfigurationSource 는 기존 빈을 그대로 재사용한다.
  */
@@ -33,6 +41,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 public class ChatSecurityConfig {
 
     private static final String CHAT_API = "/api/v1/chat/**";
+    private static final String CHAT_INVITE_PREVIEW = "/api/v1/chat/invites/{token}";
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final CorsConfigurationSource corsConfigurationSource;
@@ -60,6 +69,8 @@ public class ChatSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 핸드셰이크는 통과시키고 인증은 CONNECT 프레임에서 수행한다.
                         .requestMatchers(wsPath, wsPathSub).permitAll()
+                        // 초대 미리보기는 조회만 하므로 연다. 참가(POST)는 열지 않는다.
+                        .requestMatchers(HttpMethod.GET, CHAT_INVITE_PREVIEW).permitAll()
                         // 나머지(= /api/v1/chat/**)는 항상 인증 필수.
                         .anyRequest().authenticated())
                 .exceptionHandling(e ->
