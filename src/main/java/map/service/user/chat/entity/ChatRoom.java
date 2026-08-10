@@ -29,6 +29,7 @@ import org.hibernate.annotations.CreationTimestamp;
  * - inviteTokenHash    : 초대 원시토큰의 SHA-256 hex. NULL = 활성 링크 없음.
  * - inviteTokenVersion : 재발급/폐기마다 증가. 구 링크 무효화용.
  * - inviteRevoked      : 링크 폐기 여부.
+ * - inviteExpiresAt    : 링크 자체의 만료 시각. NULL = 독립 만료 없음(구 링크).
  * - expiresAt          : date_end + 7일 23:59:59 Asia/Seoul 스냅샷. NOT NULL.
  * - readOnly           : sweep 가 만료 시 전환. 전송 차단의 authoritative 는 실검사(isExpired).
  * - createdAt          : 생성 시각. @CreationTimestamp(updatable=false).
@@ -69,6 +70,9 @@ public class ChatRoom {
 
     @Column(name = "invite_revoked", nullable = false)
     private boolean inviteRevoked;
+
+    @Column(name = "invite_expires_at")
+    private OffsetDateTime inviteExpiresAt;
 
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;
@@ -126,21 +130,52 @@ public class ChatRoom {
     /**
      * 초대 링크를 (재)발급한다. 새 토큰 해시를 설정하고 버전을 증가시키며 폐기 상태를 해제한다.
      * 버전 증가로 이전에 배포된 링크가 무효화된다.
+     *
+     * 만료 시각을 인자로 강제하는 이유: 인자 없는 형태를 함께 두면 나중에 그쪽을 부른
+     * 코드가 만료 없는 링크를 조용히 발급하게 된다. 발급하는 쪽이 언제까지 살릴지를
+     * 매번 밝히도록 한다.
      */
-    public void rotateInvite(String newTokenHash) {
+    public void rotateInvite(String newTokenHash, OffsetDateTime inviteExpiresAt) {
         this.inviteTokenHash = newTokenHash;
         this.inviteTokenVersion += 1;
         this.inviteRevoked = false;
+        this.inviteExpiresAt = inviteExpiresAt;
     }
 
     /**
      * 초대 링크를 폐기한다. 토큰 해시를 제거하고 버전을 증가시키며 폐기 플래그를 세운다.
      * 이후 구 링크의 토큰 해시는 매칭되지 않는다.
+     *
+     * 만료 시각도 함께 비운다. 가리킬 링크가 없는데 만료만 남겨 두면 그 행을 읽는
+     * 쪽이 아직 살아 있는 링크가 있다고 오해한다.
      */
     public void revokeInvite() {
         this.inviteTokenHash = null;
         this.inviteTokenVersion += 1;
         this.inviteRevoked = true;
+        this.inviteExpiresAt = null;
+    }
+
+    /**
+     * 주어진 시각 기준 초대 링크가 스스로 만료되었는지 반환한다.
+     * 독립 만료가 없는 구 링크(NULL)는 여기서 만료로 보지 않는다 — 그 경우 방 만료가 판정한다.
+     */
+    public boolean isInviteExpired(OffsetDateTime now) {
+        return this.inviteExpiresAt != null && !now.isBefore(this.inviteExpiresAt);
+    }
+
+    /**
+     * 링크가 실제로 언제까지 쓸 수 있는지. 링크 만료와 방 만료 중 이른 쪽이다.
+     *
+     * 방이 먼저 닫히면 링크가 살아 있어도 들어갈 곳이 없으므로, 둘 중 이른 시각이
+     * 사용자가 체감하는 유효기간이 된다. 이 계산을 여기 한 곳에만 두어 응답마다
+     * 다른 값이 나가는 일을 막는다.
+     */
+    public OffsetDateTime effectiveInviteExpiresAt() {
+        if (this.inviteExpiresAt == null) {
+            return this.expiresAt;
+        }
+        return this.inviteExpiresAt.isBefore(this.expiresAt) ? this.inviteExpiresAt : this.expiresAt;
     }
 
     /**
@@ -180,6 +215,10 @@ public class ChatRoom {
 
     public boolean isInviteRevoked() {
         return inviteRevoked;
+    }
+
+    public OffsetDateTime getInviteExpiresAt() {
+        return inviteExpiresAt;
     }
 
     public OffsetDateTime getExpiresAt() {

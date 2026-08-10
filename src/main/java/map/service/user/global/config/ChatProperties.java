@@ -25,6 +25,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * - inviteRateLimit       : inviteRateWindowSeconds 창 동안 한 사용자가 발급할 수 있는
  *                           최대 초대 링크 수(발급 남용 억제).
  * - inviteRateWindowSeconds : 초대 발급 레이트리밋을 계산하는 시간 창(초).
+ * - inviteTtlDays         : 발급한 초대 링크가 며칠 뒤 스스로 만료되는지. 방 만료와
+ *                           별개이며, 실제 유효기간은 둘 중 이른 쪽이다.
+ * - invitePreviewRateLimit : invitePreviewRateWindowSeconds 창 동안 한 IP 가 조회할 수
+ *                           있는 최대 미리보기 수. 미리보기는 무인증이라 사용자
+ *                           단위로 셀 수 없어 IP 로 센다.
+ * - invitePreviewRateWindowSeconds : 미리보기 레이트리밋을 계산하는 시간 창(초).
  * - broadcastChannel      : 인스턴스 간 메시지 팬아웃에 쓰는 Redis 발행/구독 채널명.
  * - wsEndpoint            : 클라이언트가 실시간 연결을 맺는 WebSocket 핸드셰이크 경로.
  */
@@ -50,6 +56,12 @@ public class ChatProperties {
     private int inviteRateLimit = 10;
 
     private int inviteRateWindowSeconds = 60;
+
+    private int inviteTtlDays = 7;
+
+    private int invitePreviewRateLimit = 30;
+
+    private int invitePreviewRateWindowSeconds = 60;
 
     private String broadcastChannel = "chat:broadcast";
 

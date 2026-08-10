@@ -44,6 +44,9 @@ class ChatConfigTest {
             assertThat(p.getMaxMessageLength()).isEqualTo(2000);
             assertThat(p.getSendRateLimit()).isEqualTo(20);
             assertThat(p.getSendRateWindowSeconds()).isEqualTo(10);
+            assertThat(p.getInviteTtlDays()).isEqualTo(7);
+            assertThat(p.getInvitePreviewRateLimit()).isEqualTo(30);
+            assertThat(p.getInvitePreviewRateWindowSeconds()).isEqualTo(60);
             assertThat(p.getBroadcastChannel()).isEqualTo("chat:broadcast");
             assertThat(p.getWsEndpoint()).isEqualTo("/ws/chat");
         });
@@ -59,6 +62,9 @@ class ChatConfigTest {
                 "chat.max-message-length=500",
                 "chat.send-rate-limit=7",
                 "chat.send-rate-window-seconds=15",
+                "chat.invite-ttl-days=3",
+                "chat.invite-preview-rate-limit=11",
+                "chat.invite-preview-rate-window-seconds=90",
                 "chat.broadcast-channel=chat:test",
                 "chat.ws-endpoint=/ws/test",
                 "chat.invite-base-url=https://example.invalid/x/"
@@ -70,6 +76,9 @@ class ChatConfigTest {
             assertThat(p.getMaxMessageLength()).isEqualTo(500);
             assertThat(p.getSendRateLimit()).isEqualTo(7);
             assertThat(p.getSendRateWindowSeconds()).isEqualTo(15);
+            assertThat(p.getInviteTtlDays()).isEqualTo(3);
+            assertThat(p.getInvitePreviewRateLimit()).isEqualTo(11);
+            assertThat(p.getInvitePreviewRateWindowSeconds()).isEqualTo(90);
             assertThat(p.getBroadcastChannel()).isEqualTo("chat:test");
             assertThat(p.getWsEndpoint()).isEqualTo("/ws/test");
             assertThat(p.getInviteBaseUrl()).isEqualTo("https://example.invalid/x/");
