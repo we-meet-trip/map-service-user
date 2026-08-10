@@ -8,6 +8,7 @@ import map.service.user.recommend.dto.RecommendRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,12 +51,17 @@ public class RecommendController {
      * (검증/관측 목적 — 응답 본문 계약은 캐시 히트와 무관하게 동일하다).
      *
      * request: @Valid @RequestBody RecommendRequest. 본문 형식 위반 시 400.
+     * userId: 토큰이 실려 있고 유효할 때만 채워진다. 이 경로는 인증을
+     *         요구하지 않으므로 비로그인 요청에서는 null 이며, 그때는
+     *         저장된 취향 없이 기존과 동일하게 처리된다.
      */
     @PostMapping
     public ResponseEntity<JobAccepted> create(
-            @Valid @RequestBody RecommendRequest request
+            @Valid @RequestBody RecommendRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        RecommendService.RecommendationResult result = service.createRecommendationDetailed(request);
+        RecommendService.RecommendationResult result =
+                service.createRecommendationDetailed(request, userId);
         return ResponseEntity.accepted()
                 .header("X-Recommend-Cache", result.cacheHit() ? "HIT" : "MISS")
                 .body(result.accepted());

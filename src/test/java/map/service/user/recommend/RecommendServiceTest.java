@@ -1,6 +1,7 @@
 package map.service.user.recommend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -47,6 +48,7 @@ class RecommendServiceTest {
     private ResearchLimitService researchLimitService;
     private RecommendJobStore jobStore;
     private ReuseCacheStore reuseCacheStore;
+    private ProfileThemeProvider profileThemeProvider;
     private RecommendService service;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -74,9 +76,14 @@ class RecommendServiceTest {
         researchLimitService = mock(ResearchLimitService.class);
         jobStore = mock(RecommendJobStore.class);
         reuseCacheStore = mock(ReuseCacheStore.class);
+        profileThemeProvider = mock(ProfileThemeProvider.class);
+        // 기본은 "저장된 취향 없음". 이 상태에서 기존 테스트들이 전부
+        // 도입 전과 같은 경로를 타야 한다 — 그게 회귀 방어선이다.
+        when(profileThemeProvider.themesFor(any())).thenReturn(List.of());
         service = new RecommendService(
                 agentClient, draftStore, objectMapper, researchLimitService, jobStore,
-                reuseCacheStore, cacheKeyBuilder, immediateExecutor, 3L);
+                reuseCacheStore, cacheKeyBuilder, profileThemeProvider,
+                immediateExecutor, 3L);
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
         // 기본은 한도 이내(허용). 한도 초과 시나리오는 개별 테스트에서 재정의한다.
@@ -409,5 +416,173 @@ class RecommendServiceTest {
         service.createRouteJob(routeRequest("init"));
 
         verify(jobStore).insertInProgress("job-2", "sched-1");
+    }
+
+    // ─── 저장된 취향 병합 ────────────────────────────────────────
+    //
+    // 가장 중요한 계약은 "취향이 없으면 도입 전과 완전히 같다" 와
+    // "취향이 섞인 결과는 공용 캐시에 들어가지 않는다" 둘이다.
+
+    private static final Long USER = 42L;
+
+    /** 취향 병합이 관여하는 단언은 레코드 동등 스텁 대신 captor 로 본다. */
+    private RecommendRequest capturedOutbound() {
+        ArgumentCaptor<RecommendRequest> captor =
+                ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(agentClient).requestRecommend(captor.capture());
+        return captor.getValue();
+    }
+
+    // userId 가 없으면 요청이 그대로 나가고 취향을 조회조차 하지 않는다
+    @Test
+    void nullUserIdSendsOriginalRequestUnchanged() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+
+        service.createRecommendationDetailed(cacheRequest, null);
+
+        assertThat(capturedOutbound()).isEqualTo(cacheRequest);
+        verify(profileThemeProvider, never()).themesFor(any());
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    // 저장된 취향이 비어 있으면 요청이 그대로 나가고 캐시에도 정상 등록된다
+    @Test
+    void emptyProfileSendsOriginalRequestUnchanged() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER)).thenReturn(List.of());
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        assertThat(capturedOutbound()).isEqualTo(cacheRequest);
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    // 병합이 일어나도 캐시는 병합 전 테마로 조회한다
+    @Test
+    void cacheLookupUsesOriginalThemeHashEvenWhenMerging() {
+        String originalHash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(originalHash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER))
+                .thenReturn(List.of("cafe", "food"));
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        // 병합된 값으로 키를 만들었다면 이 해시로는 조회하지 않았을 것이다.
+        verify(reuseCacheStore).find(originalHash);
+        assertThat(capturedOutbound().theme())
+                .containsExactly("역사", "cafe", "food");
+    }
+
+    // 취향이 섞인 결과는 캐시에 연결하지 않는다
+    @Test
+    void mergedRequestIsNeverLinkedToCache() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER)).thenReturn(List.of("cafe"));
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        // 연결이 없으면 완료 이벤트가 와도 캐시 본체를 쓰지 않는다.
+        verify(reuseCacheStore, never()).linkJob(anyString(), anyString());
+    }
+
+    // 고른 테마가 앞에 남고 중복은 빠지며 상한 6에서 멈춘다
+    @Test
+    void mergedThemeKeepsExplicitFirstAndCapsAtSix() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER)).thenReturn(
+                List.of("역사", "cafe", "food", "nature", "photo", "night"));
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        assertThat(capturedOutbound().theme()).containsExactly(
+                "역사", "cafe", "food", "nature", "photo", "night");
+    }
+
+    // 고른 테마가 이미 상한만큼이면 취향을 덧붙이지 않는다
+    @Test
+    void explicitThemesAreNeverTruncated() {
+        RecommendRequest many = withTheme(cacheRequest,
+                List.of("a", "b", "c", "d", "e", "f", "g"));
+        String hash = cacheKeyBuilder.hash(many);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER)).thenReturn(List.of("cafe"));
+
+        service.createRecommendationDetailed(many, USER);
+
+        assertThat(capturedOutbound().theme()).hasSize(7);
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    // 취향이 고른 테마에 이미 다 들어 있으면 병합으로 보지 않는다
+    @Test
+    void profileSubsetOfExplicitIsNotAMerge() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER)).thenReturn(List.of("역사"));
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        assertThat(capturedOutbound()).isEqualTo(cacheRequest);
+        // 덧붙은 것이 없으니 캐시에 넣지 못할 이유도 없다.
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    // 캐시가 맞으면 취향을 조회하지 않는다
+    @Test
+    void cacheHitSkipsProfileLookupEntirely() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash))
+                .thenReturn(Optional.of("{\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(1L);
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        verify(profileThemeProvider, never()).themesFor(any());
+        verify(agentClient, never()).requestRecommend(any());
+    }
+
+    // 배경 갱신은 병합 전 테마로 나간다
+    @Test
+    void backgroundRefreshUsesOriginalThemeNotMergedTheme() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash))
+                .thenReturn(Optional.of("{\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(3L);
+        when(profileThemeProvider.themesFor(USER)).thenReturn(List.of("cafe"));
+
+        service.createRecommendationDetailed(cacheRequest, USER);
+
+        // 갱신이 병합본으로 나가면 그 결과가 공용 해시에 저장되어
+        // 무관한 사용자 전원에게 특정인 취향이 서빙된다.
+        assertThat(capturedOutbound()).isEqualTo(cacheRequest);
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    // 취향 조회가 실패해도 추천은 원본 요청으로 진행한다
+    @Test
+    void profileLookupFailureFallsBackToUnmergedRequest() {
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.empty());
+        when(profileThemeProvider.themesFor(USER))
+                .thenThrow(new RuntimeException("db down"));
+
+        assertThatCode(() ->
+                service.createRecommendationDetailed(cacheRequest, USER))
+                .doesNotThrowAnyException();
+
+        assertThat(capturedOutbound()).isEqualTo(cacheRequest);
+        verify(reuseCacheStore).linkJob("job-2", hash);
+    }
+
+    private static RecommendRequest withTheme(
+            RecommendRequest base, List<String> theme) {
+        return new RecommendRequest(
+                base.date(), base.budget(), theme, base.mobility(),
+                base.province(), base.city(), base.scheduleId(),
+                base.stage(), base.exclude(), base.places());
     }
 }
