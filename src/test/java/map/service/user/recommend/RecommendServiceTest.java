@@ -366,7 +366,8 @@ class RecommendServiceTest {
                 new java.util.ArrayList<>();
         for (int i = 0; i < n; i++) {
             out.add(new map.service.user.recommend.dto.SelectedPlace(
-                    "고른곳" + i, "주소", 37.5 + i * 0.01, 127.0 + i * 0.01, null, null));
+                    "고른곳" + i, "주소", 37.5 + i * 0.01, 127.0 + i * 0.01, null, null,
+                    null));
         }
         return out;
     }

@@ -26,6 +26,11 @@ import jakarta.validation.constraints.Size;
  *      1일차로 접으므로, 일차 구분 없이 고른 요청도 그대로 통한다.
  * contentId: 실측 출처 식별자. JSON key "content_id". 있으면 리뷰 조회에
  *            그대로 쓰이고, 없으면 이름으로 조회한다.
+ * category: 장소 분류. 고른 장소로 동선만 다시 짤 때는 장소를 새로 찾지
+ *           않으므로 받는 쪽이 분류를 알아낼 길이 없다. 처음 내보냈던 값을
+ *           호출 측이 되돌려 주는 통로다. 길이를 제한하지 않는다 — 우리가
+ *           내보내는 쪽에 상한이 없어, 여기서만 막으면 자기가 준 값을
+ *           자기가 거절하게 된다. 다듬는 일은 받는 쪽이 한다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SelectedPlace(
@@ -37,6 +42,7 @@ public record SelectedPlace(
         @DecimalMin("33.0") @DecimalMax("43.0") double lat,
         @DecimalMin("124.0") @DecimalMax("132.0") double lng,
         @Min(1) Integer day,
-        @JsonProperty("content_id") @Size(max = 64) String contentId
+        @JsonProperty("content_id") @Size(max = 64) String contentId,
+        String category
 ) {
 }

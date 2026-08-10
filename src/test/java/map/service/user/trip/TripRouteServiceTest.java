@@ -70,8 +70,9 @@ class TripRouteServiceTest {
                 "walk",
                 new Location("강원도", "속초시"),
                 List.of(
-                        new SelectedPlace("속초해변", "강원 속초시", 38.19, 128.60, 1, "kakao:1"),
-                        new SelectedPlace("영금정", null, 38.21, 128.60, null, null)));
+                        new SelectedPlace("속초해변", "강원 속초시", 38.19, 128.60, 1, "kakao:1",
+                                "여행 / 관광,명소 / 해수욕장,해변"),
+                        new SelectedPlace("영금정", null, 38.21, 128.60, null, null, null)));
     }
 
     private void draftIsDone() {
