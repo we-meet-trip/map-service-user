@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 /**
@@ -42,8 +43,9 @@ public class RecommendJobStore {
     /**
      * 추천 작업을 in_progress 상태로 최초 기록한다(write-through).
      *
-     * jobId 가 유효한 UUID 가 아니면 무시한다. 이미 같은 PK 가 있으면 merge 로
-     * 유지된다. 어떤 예외도 던지지 않는다.
+     * jobId 가 유효한 UUID 가 아니면 무시한다. 같은 job_id 가 이미 있으면 그대로 둔다
+     * — 완료 처리가 먼저 도착했을 수 있고, 그것을 진행 중으로 되돌리면 안 된다.
+     * 어떤 예외도 던지지 않는다.
      *
      * jobId: agent 발급 작업 UUID 문자열.
      * scheduleId: 연관 일정 식별자(nullable).
@@ -54,8 +56,15 @@ public class RecommendJobStore {
             return;
         }
         try {
+            if (repository.existsById(uuid)) {
+                return;
+            }
             repository.save(new RecommendJobEntity(
                     uuid, scheduleId, "in_progress", null, null, null));
+        } catch (DataIntegrityViolationException e) {
+            // 있는지 보고 넣는 사이에 완료 처리가 같은 행을 만들었다. 그쪽이 더
+            // 나중 상태이므로 이쪽은 물러난다.
+            log.debug("recommend job insert lost race job_id={}", jobId);
         } catch (RuntimeException e) {
             log.warn("recommend job insert failed job_id={} reason={}", jobId, e.getMessage());
         }
@@ -80,19 +89,31 @@ public class RecommendJobStore {
         try {
             JsonNode payload = parsePayload(payloadJson);
             String normalized = normalizeStatus(status);
-            RecommendJobEntity entity = repository.findById(uuid).orElse(null);
-            if (entity == null) {
-                entity = new RecommendJobEntity(
-                        uuid, null, normalized, payload, null, OffsetDateTime.now());
-            } else {
-                entity.setStatus(normalized);
-                entity.setResultPayload(payload);
-                entity.setFinishedAt(OffsetDateTime.now());
+            try {
+                writeFinished(uuid, normalized, payload);
+            } catch (DataIntegrityViolationException e) {
+                // 행이 없다고 보고 새로 넣는 사이에 최초 기록이 같은 행을 만들었다.
+                // 이제는 있으므로 갱신 경로로 한 번 더 간다. 이 한 번을 포기하면
+                // 실제로 끝난 작업이 진행 중인 채로 영영 남는다.
+                writeFinished(uuid, normalized, payload);
             }
-            repository.save(entity);
         } catch (RuntimeException e) {
             log.warn("recommend job finish failed job_id={} reason={}", jobId, e.getMessage());
         }
+    }
+
+    /** 완료 상태를 기록한다. 행이 있으면 갱신, 없으면 생성. */
+    private void writeFinished(UUID uuid, String status, JsonNode payload) {
+        RecommendJobEntity entity = repository.findById(uuid).orElse(null);
+        if (entity == null) {
+            entity = new RecommendJobEntity(
+                    uuid, null, status, payload, null, OffsetDateTime.now());
+        } else {
+            entity.setStatus(status);
+            entity.setResultPayload(payload);
+            entity.setFinishedAt(OffsetDateTime.now());
+        }
+        repository.save(entity);
     }
 
     /**

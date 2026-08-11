@@ -105,4 +105,21 @@ class RecommendJobStoreTest {
 
         assertThat(store.findFinishedPayload(jobId)).isEmpty();
     }
+
+    @Test
+    @DisplayName("완료 기록이 먼저 도착해도 뒤늦은 최초 기록이 그것을 되돌리지 않는다")
+    void lateInsertDoesNotRevertFinished() {
+        // 작업이 즉시 실패하면 완료 이벤트가 최초 기록보다 먼저 온다.
+        String jobId = UUID.randomUUID().toString();
+        store.markFinished(jobId, "failed", "{\"status\":\"failed\"}");
+        flushAndClear();
+
+        store.insertInProgress(jobId, "sched-late");
+        flushAndClear();
+
+        RecommendJobEntity saved = repository.findById(UUID.fromString(jobId)).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo("failed");
+        assertThat(saved.getFinishedAt()).isNotNull();
+        assertThat(saved.getResultPayload()).isNotNull();
+    }
 }
