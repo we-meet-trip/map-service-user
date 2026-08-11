@@ -98,7 +98,11 @@ public class SecurityConfig {
                                         "/api/v1/schedules/**",
                                         "/api/v1/trip/**",
                                         "/api/v1/places/**",
-                                        "/api/v1/reviews/**").authenticated()
+                                        "/api/v1/reviews/**",
+                                        // 아래 둘은 발급처 하루 호출 한도를
+                                        // 나눠 쓰므로 시행 시 인증을 받는다.
+                                        "/api/v1/transit/**",
+                                        "/api/v1/mobility/**").authenticated()
                                 .anyRequest().authenticated();
                     } else {
                         // 현행(기본) 동작 보존: 전 엔드포인트 공개. JWT 필터는 토큰이 있을 때만

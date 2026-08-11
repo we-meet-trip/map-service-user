@@ -2,10 +2,13 @@ package map.service.user.global.exception;
 
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import map.service.user.mobility.BikeStationException;
+import map.service.user.mobility.PmVehicleException;
 import map.service.user.places.PlacePhotosException;
 import map.service.user.places.PlaceSearchException;
 import map.service.user.places.ReviewSearchException;
 import map.service.user.recommend.AgentRequestException;
+import map.service.user.transit.SubwayRouteException;
 import map.service.user.trip.TripGenerationException;
 import map.service.user.trip.TripTimeoutException;
 import org.springframework.http.HttpStatus;
@@ -202,6 +205,55 @@ public class GlobalExceptionHandler {
                 ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "place_photos_upstream_error");
+        body.put("upstream_status", ex.statusCode());
+        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * hub 지하철 경로 조회가 비정상 응답을 반환했을 때 호출된다.
+     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     *
+     * 발급처 조회가 실패한 경우는 여기로 오지 않는다. hub 가 그 경우를
+     * 오류가 아니라 응답의 status 로 알려 주므로, 여기 걸리는 것은 hub 에
+     * 닿지 못했거나 계약이 어긋난 때뿐이다.
+     */
+    @ExceptionHandler(SubwayRouteException.class)
+    public ResponseEntity<Map<String, Object>> handleSubwayRoute(SubwayRouteException ex) {
+        log.warn("subway route upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "subway_route_upstream_error");
+        body.put("upstream_status", ex.statusCode());
+        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * hub 따릉이 대여소 조회가 비정상 응답을 반환했을 때 호출된다.
+     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     */
+    @ExceptionHandler(BikeStationException.class)
+    public ResponseEntity<Map<String, Object>> handleBikeStation(BikeStationException ex) {
+        log.warn("bike stations upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "bike_stations_upstream_error");
+        body.put("upstream_status", ex.statusCode());
+        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * hub 공유 킥보드 조회가 비정상 응답을 반환했을 때 호출된다.
+     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     */
+    @ExceptionHandler(PmVehicleException.class)
+    public ResponseEntity<Map<String, Object>> handlePmVehicle(PmVehicleException ex) {
+        log.warn("pm vehicles upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "pm_vehicles_upstream_error");
         body.put("upstream_status", ex.statusCode());
         body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
