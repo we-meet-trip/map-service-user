@@ -12,7 +12,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 값이 없는 항목은 키째 빠진다. 화면은 부재를 전제로 그려야 하며, 없는
  * 항목의 자리를 비워 두는 대신 그 줄을 통째로 생략한다.
  *
- * temp: 지금 기온(℃).
+ * temp: 지금 기온(℃). hub 에 신선한 실황이 없으면 빠진다 — 그때 화면은
+ *       기온 줄을 그리지 않는다. 오래된 값을 지금 기온이라고 보여 주는
+ *       것보다 그 자리를 비우는 편이 낫다.
  * pty: 강수 형태 코드. 0 이면 강수 없음. 아이콘 결정에 쓴다.
  * sky: 하늘 상태 텍스트(예: "맑음"). 예보가 없으면 빠진다.
  * yesterdayDiff: 어제 같은 시간대 대비 기온 차(℃). 어제 기록이 없으면
@@ -22,11 +24,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * pop: 강수 확률(%).
  * pm10/pm25: 미세먼지·초미세먼지 농도(㎍/㎥).
  * pm10Grade/pm25Grade: 농도에 대응하는 한글 등급.
+ * observedAt: 기온이 실제로 관측된 시각(ISO8601, KST). 서버가 미리 받아 둔
+ *             값을 내보내므로 지금 시각과 다를 수 있어, 화면이 "몇 시 기준"
+ *             인지 밝힐 수 있게 함께 보낸다. JSON key "observed_at".
+ * airObservedAt: 미세먼지가 실제로 측정된 시각. JSON key "air_observed_at".
  * attribution: 출처 표기 문구. 화면 하단에 그대로 노출한다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record WeatherHomeResponse(
-        double temp,
+        Double temp,
         Integer pty,
         String sky,
         @JsonProperty("yesterday_diff") Double yesterdayDiff,
@@ -37,6 +43,8 @@ public record WeatherHomeResponse(
         Integer pm25,
         @JsonProperty("pm10_grade") String pm10Grade,
         @JsonProperty("pm25_grade") String pm25Grade,
+        @JsonProperty("observed_at") String observedAt,
+        @JsonProperty("air_observed_at") String airObservedAt,
         String attribution
 ) {
 }

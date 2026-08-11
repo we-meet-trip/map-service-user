@@ -10,7 +10,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * nx/ny: 요청 좌표가 속한 격자.
  * province/city: 격자로 역조회한 행정구역. 매칭이 없으면 null.
- * now: 지금 관측값. hub 가 항상 채운다.
+ * now: 지금 관측값. hub 에 신선한 실황이 없으면 null — 그때 화면은
+ *      기온을 그리지 않는다.
  * yesterday: 어제 같은 시간대 기록. 기록이 없으면 null.
  * today: 오늘 예보 요약. 행정구역을 못 찾으면 null.
  * air: 대기오염 정보. 조회 실패면 null.
@@ -31,13 +32,16 @@ public record HubWeatherNowResponse(
      *
      * tempC: 관측 기온(℃). JSON key "temp_c".
      * pty: 강수 형태 코드. 0 이면 강수 없음.
-     * baseDate/baseTime: 관측 발표 일자·시각.
+     * baseDate/baseTime: 관측 발표 일자·시각(KST).
+     * observedAt: 실제 관측 시각(ISO8601, KST). hub 가 미리 받아 둔 값을
+     *             내보내므로 지금 시각과 다를 수 있다. JSON key "observed_at".
      */
     public record Observation(
             @JsonProperty("temp_c") double tempC,
             Integer pty,
             @JsonProperty("base_date") String baseDate,
-            @JsonProperty("base_time") String baseTime
+            @JsonProperty("base_time") String baseTime,
+            @JsonProperty("observed_at") String observedAt
     ) {
     }
 
@@ -74,13 +78,15 @@ public record HubWeatherNowResponse(
      * pm10/pm25: 농도(㎍/㎥).
      * pm10Grade/pm25Grade: 한글 등급.
      * station: 값을 채택한 측정소 이름.
+     * observedAt: 실제 측정 시각(ISO8601, KST). JSON key "observed_at".
      */
     public record Air(
             Integer pm10,
             Integer pm25,
             @JsonProperty("pm10_grade") String pm10Grade,
             @JsonProperty("pm25_grade") String pm25Grade,
-            String station
+            String station,
+            @JsonProperty("observed_at") String observedAt
     ) {
     }
 }

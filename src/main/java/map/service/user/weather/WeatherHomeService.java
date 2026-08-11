@@ -31,8 +31,12 @@ public class WeatherHomeService {
      *
      * lat/lng: 기기 위치.
      *
-     * hub 호출이 실패하거나 실황이 비어 있으면 WeatherUnavailableException.
-     * 예보·대기오염이 비는 것은 정상 상황이라 해당 항목만 빠진다.
+     * hub 호출 자체가 실패하면 WeatherUnavailableException.
+     *
+     * 항목이 비어 오는 것은 실패가 아니다. hub 는 미리 받아 둔 값을 돌려주고,
+     * 그 값이 너무 오래됐으면 해당 항목을 비워 보낸다. 기온이 비었다고 카드를
+     * 통째로 실패시키면 남아 있는 예보·미세먼지까지 함께 사라진다 — 있는
+     * 것만 담아 보내고 무엇을 그릴지는 화면이 정한다.
      */
     public WeatherHomeResponse fetchHome(double lat, double lng) {
         HubWeatherNowResponse hub;
@@ -41,13 +45,14 @@ public class WeatherHomeService {
         } catch (RuntimeException e) {
             throw new WeatherUnavailableException("hub weather now failed", e);
         }
-        if (hub == null || hub.now() == null) {
-            throw new WeatherUnavailableException("hub returned no observation");
+        if (hub == null) {
+            throw new WeatherUnavailableException("hub returned no body");
         }
 
-        double temp = hub.now().tempC();
+        HubWeatherNowResponse.Observation now = hub.now();
+        Double temp = now != null ? now.tempC() : null;
         Double yesterdayDiff = null;
-        if (hub.yesterday() != null) {
+        if (temp != null && hub.yesterday() != null) {
             // 소수 첫째 자리까지만 둔다 — 화면이 "1.8도 낮아요" 식으로 한 자리만
             // 쓰는데, 부동소수 연산 결과를 그대로 내보내면 자릿수가 길어진다.
             yesterdayDiff =
@@ -59,7 +64,7 @@ public class WeatherHomeService {
 
         return new WeatherHomeResponse(
                 temp,
-                hub.now().pty(),
+                now != null ? now.pty() : null,
                 today != null ? today.skyCondition() : null,
                 yesterdayDiff,
                 today != null ? today.tempMax() : null,
@@ -69,6 +74,8 @@ public class WeatherHomeService {
                 air != null ? air.pm25() : null,
                 air != null ? air.pm10Grade() : null,
                 air != null ? air.pm25Grade() : null,
+                now != null ? now.observedAt() : null,
+                air != null ? air.observedAt() : null,
                 ATTRIBUTION);
     }
 }

@@ -41,7 +41,10 @@ class WeatherControllerTest {
         when(service.fetchHome(anyDouble(), anyDouble())).thenReturn(
                 new WeatherHomeResponse(
                         27.3, 0, "맑음", -1.8, 31, 24, 30,
-                        21, 11, "좋음", "좋음", "기상청, 한국환경공단 제공"));
+                        21, 11, "좋음", "좋음",
+                        "2026-08-01T10:00:00+09:00",
+                        "2026-08-01T10:00:00+09:00",
+                        "기상청, 한국환경공단 제공"));
 
         mockMvc.perform(get("/api/v1/weather/home")
                         .param("lat", "37.5665").param("lng", "126.9780"))
@@ -60,7 +63,8 @@ class WeatherControllerTest {
         when(service.fetchHome(anyDouble(), anyDouble())).thenReturn(
                 new WeatherHomeResponse(
                         27.3, null, null, null, null, null, null,
-                        null, null, null, null, "기상청, 한국환경공단 제공"));
+                        null, null, null, null, null, null,
+                        "기상청, 한국환경공단 제공"));
 
         mockMvc.perform(get("/api/v1/weather/home")
                         .param("lat", "37.5665").param("lng", "126.9780"))

@@ -22,7 +22,7 @@ class WeatherHomeServiceTest {
 
     private static HubWeatherNowResponse.Observation obs(double temp) {
         return new HubWeatherNowResponse.Observation(
-                temp, 0, "20260801", "1000");
+                temp, 0, "20260801", "1000", "2026-08-01T10:00:00+09:00");
     }
 
     private static WeatherHomeResponse call(HubWeatherNowResponse hub) {
@@ -39,7 +39,9 @@ class WeatherHomeServiceTest {
                 obs(27.3),
                 new HubWeatherNowResponse.Yesterday(29.1, 10),
                 new HubWeatherNowResponse.Today(31, 24, 30, "맑음"),
-                new HubWeatherNowResponse.Air(21, 11, "좋음", "좋음", "중구")));
+                new HubWeatherNowResponse.Air(
+                        21, 11, "좋음", "좋음", "중구",
+                        "2026-08-01T10:00:00+09:00")));
 
         assertThat(out.temp()).isEqualTo(27.3);
         assertThat(out.sky()).isEqualTo("맑음");
@@ -84,14 +86,51 @@ class WeatherHomeServiceTest {
     }
 
     @Test
-    @DisplayName("실황이 없으면 오류로 알린다")
-    void failsWithoutObservation() {
+    @DisplayName("hub 가 본문을 안 주면 오류로 알린다")
+    void failsWithoutBody() {
         HubWeatherNowClient client = mock(HubWeatherNowClient.class);
         when(client.fetchNow(anyDouble(), anyDouble())).thenReturn(null);
 
         assertThatThrownBy(
                 () -> new WeatherHomeService(client).fetchHome(37.5, 127.0))
                 .isInstanceOf(WeatherUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("실황이 비어 와도 남은 항목으로 응답한다")
+    void survivesWithoutObservation() {
+        // 서버가 미리 받아 둔 실황이 낡아 비워 보낸 상황. 기온만 없을 뿐
+        // 예보와 미세먼지는 살아 있는데, 여기서 실패시키면 그것까지 함께
+        // 사라져 카드가 통째로 비어 버린다.
+        WeatherHomeResponse out = call(new HubWeatherNowResponse(
+                60, 127, "서울특별시", "중구",
+                null,
+                new HubWeatherNowResponse.Yesterday(29.1, 10),
+                new HubWeatherNowResponse.Today(31, 24, 30, "맑음"),
+                new HubWeatherNowResponse.Air(
+                        21, 11, "좋음", "좋음", "중구",
+                        "2026-08-01T10:00:00+09:00")));
+
+        assertThat(out.temp()).isNull();
+        assertThat(out.pty()).isNull();
+        assertThat(out.observedAt()).isNull();
+        // 기준 기온이 없으면 비교도 뜻이 없다.
+        assertThat(out.yesterdayDiff()).isNull();
+        // 남은 것은 그대로 나간다.
+        assertThat(out.sky()).isEqualTo("맑음");
+        assertThat(out.pm10()).isEqualTo(21);
+        assertThat(out.airObservedAt()).isEqualTo("2026-08-01T10:00:00+09:00");
+    }
+
+    @Test
+    @DisplayName("관측 시각을 그대로 실어 보낸다")
+    void passesObservedAt() {
+        // 미리 받아 둔 값이라 지금 시각과 다를 수 있다. 화면이 "몇 시 기준"
+        // 인지 밝히려면 이 값이 있어야 한다.
+        WeatherHomeResponse out = call(new HubWeatherNowResponse(
+                60, 127, "서울특별시", "중구", obs(27.3), null, null, null));
+
+        assertThat(out.observedAt()).isEqualTo("2026-08-01T10:00:00+09:00");
     }
 
     @Test
