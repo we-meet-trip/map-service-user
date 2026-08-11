@@ -1,6 +1,7 @@
 package map.service.user.trip;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -217,27 +218,50 @@ public class TripStopsAssembler {
      * 이동 구간의 도로 추종 경로를 hub 에 일괄 요청한다.
      *
      * 라우팅 대상이 아닌 이동수단(bus/transit)이거나 구간이 없으면 호출하지
-     * 않고 null 을 돌려준다(전 구간 직선 폴백). 그 외는 인접 방문지 좌표쌍으로
-     * legs 를 구성해 배치 1회로 요청한다.
+     * 않고 null 을 돌려준다(전 구간 직선 폴백).
      *
-     * @return routes(legs 와 같은 길이·인덱스, 실패 구간은 원소가 null),
-     *         또는 미호출 시 null.
+     * 날짜가 바뀌는 자리는 묻지 않는다. 그 자리에는 이동 카드가 붙지 않아
+     * (toStops 가 같은 날일 때만 카드를 만든다) 경로를 받아도 쓸 데가 없고,
+     * 하루의 마지막 방문지에서 다음 날 첫 방문지까지를 걸어가는 경로로 그리면
+     * 화면에도 어긋난다. 물어보지 않은 자리는 아래에서 다시 비워, 돌려주는
+     * 목록의 인덱스는 구간 번호와 그대로 맞춘다.
+     *
+     * @return routes(구간 수와 같은 길이·인덱스, 경로가 없는 구간은 원소가 null),
+     *         또는 미호출·전량 실패 시 null.
      */
     private List<Route> fetchRoutes(String transport, List<Place> ordered) {
         if (ordered.size() < 2 || !isRoutable(transport)) {
             return null;
         }
-        List<LegReq> legs = new ArrayList<>(ordered.size() - 1);
-        for (int i = 0; i < ordered.size() - 1; i++) {
+        int legCount = ordered.size() - 1;
+        List<LegReq> legs = new ArrayList<>(legCount);
+        int[] legIndex = new int[legCount];
+        for (int i = 0; i < legCount; i++) {
             Place a = ordered.get(i);
             Place b = ordered.get(i + 1);
+            if (dayOf(a) != dayOf(b)) {
+                continue;
+            }
+            legIndex[legs.size()] = i;
             legs.add(new LegReq(
                     new Point(a.lat(), a.lng()),
                     new Point(b.lat(), b.lng()),
                     legName(a.name()),
                     legName(b.name())));
         }
-        return hubDirectionsClient.fetchRoutes(transport, legs);
+        if (legs.isEmpty()) {
+            return null;
+        }
+
+        List<Route> fetched = hubDirectionsClient.fetchRoutes(transport, legs);
+        if (fetched == null) {
+            return null;
+        }
+        List<Route> byLeg = new ArrayList<>(Collections.nCopies(legCount, null));
+        for (int i = 0; i < legs.size() && i < fetched.size(); i++) {
+            byLeg.set(legIndex[i], fetched.get(i));
+        }
+        return byLeg;
     }
 
     /** 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외). */

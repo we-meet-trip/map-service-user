@@ -1,5 +1,7 @@
 package map.service.user.trip;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import map.service.user.trip.dto.HubDirectionsDtos.BatchRequest;
 import map.service.user.trip.dto.HubDirectionsDtos.BatchResponse;
@@ -10,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * HubDirectionsClient — hub POST /v1/directions/batch 호출 어댑터 (경계 B3)
@@ -31,6 +34,17 @@ public class HubDirectionsClient {
     private static final Logger log =
             LoggerFactory.getLogger(HubDirectionsClient.class);
 
+    /**
+     * 한 번의 요청에 실어 보낼 구간 수의 상한.
+     *
+     * hub 요청 본문이 받는 구간 수와 같은 값이어야 한다 — 이 값이 더 크면
+     * 요청이 통째로 거절되고, 그러면 부분 실패가 아니라 그 요청이 담당한
+     * 구간 전부가 경로 없이 나간다. 일정이 길어질수록 구간 수는 제한 없이
+     * 늘어나므로, 여기서 나눠 보내지 않으면 긴 일정은 경로를 하나도 받지
+     * 못한다.
+     */
+    private static final int MAX_LEGS_PER_BATCH = 20;
+
     private final RestClient client;
 
     public HubDirectionsClient(@Qualifier("hubRestClient") RestClient client) {
@@ -38,27 +52,71 @@ public class HubDirectionsClient {
     }
 
     /**
-     * hub POST /v1/directions/batch 호출. 실패 시 null(전 구간 폴백 유도).
+     * 구간들의 도로 추종 경로를 hub 에서 받아 온다. 전부 실패하면 null.
+     *
+     * 구간이 상한을 넘으면 상한 단위로 나눠 여러 번 보내고, 받은 결과를 원래
+     * 구간 순서 그대로 이어 붙인다. 한 번의 요청이 실패해도 그 요청이 담당한
+     * 구간만 경로 없이 남고 나머지 구간은 살아남는다 — 나눠 보내는 이유가
+     * 실패 범위를 좁히는 데도 있다.
      *
      * mode: 이동수단(walk|bicycle|scooter). bus 는 호출측이 애초에 부르지 않는다.
-     * legs: 구간 목록(1~20). 반환 routes 는 legs 와 같은 길이·인덱스.
-     * @return 배치 응답의 routes(원소는 실패 시 null), 또는 배치 자체 실패 시 null.
+     * legs: 구간 목록. 반환 routes 는 legs 와 같은 길이·인덱스.
+     * @return legs 와 같은 길이의 routes(경로를 못 받은 구간은 원소가 null),
+     *         또는 모든 요청이 실패했을 때 null.
      */
     public List<Route> fetchRoutes(String mode, List<LegReq> legs) {
+        if (legs == null || legs.isEmpty()) {
+            return null;
+        }
+
+        List<Route> merged = new ArrayList<>(legs.size());
+        boolean anySucceeded = false;
+
+        for (int from = 0; from < legs.size(); from += MAX_LEGS_PER_BATCH) {
+            int to = Math.min(from + MAX_LEGS_PER_BATCH, legs.size());
+            List<LegReq> batch = legs.subList(from, to);
+            List<Route> routes = fetchOneBatch(mode, batch);
+            if (routes == null) {
+                // 이 요청이 담당한 구간만 경로 없이 남긴다.
+                merged.addAll(Collections.nCopies(batch.size(), null));
+                continue;
+            }
+            anySucceeded = true;
+            // 응답이 요청보다 짧게 와도 인덱스가 밀리지 않도록 길이를 맞춘다.
+            for (int i = 0; i < batch.size(); i++) {
+                merged.add(i < routes.size() ? routes.get(i) : null);
+            }
+        }
+
+        return anySucceeded ? merged : null;
+    }
+
+    /**
+     * 구간 묶음 하나를 hub 에 보낸다. 실패하면 null.
+     *
+     * 실패 사유는 종류와 상태 코드만 남긴다. 응답 본문에는 보낸 구간이 그대로
+     * 되돌아오는데, 거기에는 방문지 이름과 좌표가 들어 있어 로그에 남기면
+     * 사용자의 이동 경로가 그대로 기록된다.
+     */
+    private List<Route> fetchOneBatch(String mode, List<LegReq> batch) {
         try {
             BatchResponse res = client.post()
                     .uri("/v1/directions/batch")
-                    .body(new BatchRequest(mode, legs))
+                    .body(new BatchRequest(mode, batch))
                     .retrieve()
                     .body(BatchResponse.class);
             if (res == null || res.routes() == null) {
                 return null;
             }
             return res.routes();
+        } catch (RestClientResponseException e) {
+            log.warn("hub /v1/directions/batch failed mode={} legs={} status={}",
+                    mode, batch.size(), e.getStatusCode().value());
+            return null;
         } catch (RuntimeException e) {
             // hub 다운·타임아웃·역직렬화 실패 등. 경로만 생략하고 진행한다.
-            log.warn("hub /v1/directions/batch failed mode={} legs={} reason={}",
-                    mode, legs.size(), e.getMessage());
+            log.warn("hub /v1/directions/batch failed mode={} legs={} cause={}",
+                    mode, batch.size(), e.getClass().getSimpleName());
             return null;
         }
     }
