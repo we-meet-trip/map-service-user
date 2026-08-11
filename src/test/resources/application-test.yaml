@@ -29,6 +29,14 @@ jwt:
   access-token-expiry-seconds: 1800
   refresh-token-expiry-seconds: 1209600
 
+# 테스터 계정 시더는 테스트에서 돌지 않는다. 환경변수가 설정 파일보다 우선하므로,
+# 셸에 TESTER_SEED_ENABLED 가 켜져 있어도 테스트에는 새지 않도록 여기서 못 박는다.
+# 켜서 검증하는 테스트는 @SpringBootTest(properties=...) 로 인라인 지정한다 —
+# 그 우선순위가 이 파일보다 높다.
+tester:
+  seed:
+    enabled: false
+
 kakao:
   client-id: test-client-id
   client-secret: test-client-secret

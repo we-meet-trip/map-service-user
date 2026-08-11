@@ -20,6 +20,7 @@
 # - jwt                : RS256 서명 키쌍 및 토큰 TTL
 # - kakao              : Kakao OAuth 클라이언트 설정 (KakaoProperties 참조)
 # - cors               : 교차 출처 허용 정책 (CorsProperties 참조)
+# - tester             : 테스터 계정 시더 (TesterAccountSeedRunner 참조)
 #
 # 참고:
 # - ServiceUserApplication 에서 RedisRepositoriesAutoConfiguration 을 제외하므로
@@ -326,3 +327,19 @@ cors:
 # - enforced=true       : 도메인 엔드포인트 인증 필수. 부팅 시 JWT 키/CORS 전제 검증.
 auth:
   enforced: ${AUTH_ENFORCED:false}
+
+# ---- tester : 테스터 계정 시더 ----
+# TesterAccountSeedRunner / TesterAccountSeeder 가 본 섹션을 참조한다.
+# - enabled=false(기본): 아무 것도 하지 않는다(현행 동작 보존).
+# - enabled=true       : 부팅할 때마다 maptester1@admin.map ~ maptester5@admin.map
+#                        5개 계정을 보장한다. 없으면 만들고, 비밀번호가 어긋나 있으면
+#                        되돌린다. 닉네임과 나머지 프로필은 만들 때만 넣고 이후 건드리지
+#                        않는다. 데이터 볼륨을 지워도 다시 띄우면 그대로 되살아난다.
+# - password           : 5개 계정 공통 비밀번호. 기본값을 두지 않는다 — 평문 비밀번호를
+#                        소스에 남기지 않기 위해 환경변수로만 받는다. 비어 있으면
+#                        enabled=true 여도 경고만 남기고 시드를 건너뛴다.
+# 계정 수·이메일·닉네임은 코드 상수다. 팀이 외우고 쓰는 값이라 환경마다 달라지면 안 된다.
+tester:
+  seed:
+    enabled: ${TESTER_SEED_ENABLED:false}
+    password: ${TESTER_SEED_PASSWORD:}

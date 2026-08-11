@@ -143,4 +143,15 @@ public class User {
     public void verifyEmail() {
         this.emailVerified = true;
     }
+
+    /**
+     * 저장된 비밀번호 해시를 주어진 값으로 되돌린다.
+     *
+     * 지금은 테스터 계정 시더만 쓴다 — 표준 비밀번호와 어긋난 해시를 되돌리는 용도다.
+     * 일반 사용자의 비밀번호 변경 경로는 아직 없으며, 생기더라도 이 메서드를 그대로
+     * 재사용하지 말고 현재 비밀번호 확인 같은 자체 규칙을 갖춘 경로를 따로 둔다.
+     */
+    public void resetPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
 }
