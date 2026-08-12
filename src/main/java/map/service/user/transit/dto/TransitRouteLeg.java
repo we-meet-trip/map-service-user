@@ -17,6 +17,8 @@ import java.util.List;
  * stationCount: 지나는 역 수. 걷는 구간에는 없다.
  * geometry: 지도에 그릴 [lat,lng] 좌표열. 좌표가 없는 순수 도보 연결
  *   구간은 빈 리스트다.
+ * stops: 지나는 역/정류장 이름 목록(순서대로). geometry 와 같은 이유로
+ *   비어 있을 수 있다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TransitRouteLeg(
@@ -26,6 +28,7 @@ public record TransitRouteLeg(
         @JsonProperty("end_name") String endName,
         @JsonProperty("section_time_min") int sectionTimeMin,
         @JsonProperty("station_count") Integer stationCount,
-        List<List<Double>> geometry
+        List<List<Double>> geometry,
+        List<String> stops
 ) {
 }
