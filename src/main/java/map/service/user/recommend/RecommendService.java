@@ -170,7 +170,8 @@ public class RecommendService {
                         "reuse cache link skipped (themes merged) hash={} themes={}",
                         hash, merged.size());
             }
-            jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+            jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                    RecommendJobStore.JobOrigin.agent("init"));
             return new RecommendationResult(accepted, false);
         }
 
@@ -186,7 +187,8 @@ public class RecommendService {
         // 기록해야 findDraft 의 PG 폴백(Redis draft TTL 만료 이후)과 admin 콘솔
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
         // schedule_id 를 심고 markFinished 는 기존 행을 갱신하므로 값이 보존된다.
-        jobStore.insertInProgress(jobId, normalized.scheduleId());
+        jobStore.insertInProgress(jobId, normalized.scheduleId(),
+                RecommendJobStore.JobOrigin.cacheHit());
         jobStore.markFinished(jobId, "done", payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
@@ -273,6 +275,10 @@ public class RecommendService {
         try {
             JobAccepted accepted = agentClient.requestRecommend(request);
             reuseCacheStore.linkJob(accepted.jobId(), hash);
+            // 이 경로만 접수 기록을 남기지 않아, 뒤에 오는 완료 이벤트가 출처
+            // 없는 행을 만들었다. 그러면 통계에서 사용자 요청과 구분되지 않는다.
+            jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
+                    RecommendJobStore.JobOrigin.agent("refresh"));
         } catch (RuntimeException e) {
             log.warn("reuse cache background refresh failed hash={} reason={}",
                     hash, e.getMessage());
@@ -369,7 +375,10 @@ public class RecommendService {
         draftStore.delete(jobId);
         JobAccepted accepted = agentClient.requestRecommend(
                 withStage(request, "mode1", exclude));
-        jobStore.insertInProgress(accepted.jobId(), request.scheduleId());
+        // 원본 jobId 를 함께 남긴다. 재탐색은 "앞의 결과를 버렸다" 는 뜻이라,
+        // 무엇을 버리고 무엇을 받았는지가 쌍으로 있어야 신호가 된다.
+        jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
+                RecommendJobStore.JobOrigin.research(jobId));
         return accepted;
     }
 
@@ -531,7 +540,8 @@ public class RecommendService {
         RecommendRequest normalized =
                 withStage(request, "route", List.of(), request.places());
         JobAccepted accepted = agentClient.requestRecommend(normalized);
-        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                RecommendJobStore.JobOrigin.agent("route"));
         return accepted;
     }
 }

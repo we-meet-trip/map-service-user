@@ -146,7 +146,10 @@ class RecommendServiceTest {
         service.createRecommendation(request("init", List.of()));
 
         // 접수 직후 발급된 job_id 와 scheduleId 로 in_progress write-through.
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        // 출처도 함께 남아야 한다 — 캐시로 답한 잡과 구분되지 않으면 나중에
+        // 세는 쪽이 agent 실행 횟수를 부풀려 읽는다.
+        verify(jobStore).insertInProgress("job-2", "sched-1",
+                RecommendJobStore.JobOrigin.agent("init"));
     }
 
     // ---- research(Mode 1) ----
@@ -314,7 +317,9 @@ class RecommendServiceTest {
 
         JobAccepted result = service.createRecommendation(cacheRequest);
 
-        verify(jobStore).insertInProgress(result.jobId(), "sched-9");
+        // 캐시로 답한 잡은 agent 가 돌지 않았다. source 가 그것을 밝혀야 한다.
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit());
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
         verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
@@ -415,7 +420,10 @@ class RecommendServiceTest {
     void routeJobRecordsInProgress() {
         service.createRouteJob(routeRequest("init"));
 
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        // 사용자가 직접 고른 경로다. 후보도 랭킹도 거치지 않으므로 나중에
+        // 학습 자료를 고를 때 다른 경로와 같이 묶이면 안 된다.
+        verify(jobStore).insertInProgress("job-2", "sched-1",
+                RecommendJobStore.JobOrigin.agent("route"));
     }
 
     // ─── 저장된 취향 병합 ────────────────────────────────────────

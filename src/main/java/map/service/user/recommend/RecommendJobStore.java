@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * RecommendJobStore — 추천 작업 상태/결과의 PostgreSQL write-through 저장소
@@ -51,22 +52,70 @@ public class RecommendJobStore {
      * scheduleId: 연관 일정 식별자(nullable).
      */
     public void insertInProgress(String jobId, String scheduleId) {
+        insertInProgress(jobId, scheduleId, null);
+    }
+
+    /**
+     * 접수 기록에 출처(어느 경로가 만든 잡인지)를 함께 남긴다.
+     *
+     * 한 문장(upsert)으로 처리한다. 예전에는 "있으면 넘어가기" 였는데, 그러면
+     * 완료 이벤트가 접수보다 먼저 도착한 잡은 mode·source 가 영영 비어 있게
+     * 된다. 그렇다고 통째로 덮으면 끝난 잡이 진행 중으로 되돌아간다. 그래서
+     * status 는 건드리지 않고 비어 있는 칸만 채운다.
+     *
+     * origin 이 null 이면 출처 없이 접수만 기록한다(옛 호출부 호환).
+     */
+    @Transactional
+    public void insertInProgress(String jobId, String scheduleId, JobOrigin origin) {
         UUID uuid = parseUuid(jobId);
         if (uuid == null) {
             return;
         }
         try {
-            if (repository.existsById(uuid)) {
-                return;
+            if (!repository.existsById(uuid)) {
+                try {
+                    repository.save(new RecommendJobEntity(
+                            uuid, scheduleId, "in_progress", null, null, null));
+                } catch (DataIntegrityViolationException e) {
+                    // 있는지 보고 넣는 사이에 완료 처리가 같은 행을 만들었다.
+                    // 그쪽이 더 나중 상태이므로 넣지 않고, 아래에서 빈 칸만 채운다.
+                    log.debug("recommend job insert lost race job_id={}", jobId);
+                }
             }
-            repository.save(new RecommendJobEntity(
-                    uuid, scheduleId, "in_progress", null, null, null));
-        } catch (DataIntegrityViolationException e) {
-            // 있는지 보고 넣는 사이에 완료 처리가 같은 행을 만들었다. 그쪽이 더
-            // 나중 상태이므로 이쪽은 물러난다.
-            log.debug("recommend job insert lost race job_id={}", jobId);
+            // 넣었든 이미 있었든 여기는 반드시 지난다. 완료가 먼저 도착해 만든
+            // 행에도 출처가 남아야 하기 때문이다 — 예전에는 이 경우 mode·source
+            // 가 영영 비어 있었다.
+            if (origin != null) {
+                repository.fillOriginIfAbsent(
+                        uuid, scheduleId, origin.mode(),
+                        parseUuid(origin.parentJobId()), origin.source());
+            }
         } catch (RuntimeException e) {
             log.warn("recommend job insert failed job_id={} reason={}", jobId, e.getMessage());
+        }
+    }
+
+    /**
+     * 잡의 출처. 어느 경로가 만들었고, 재탐색이면 무엇을 거부한 것인지.
+     *
+     * mode: init | research | route | refresh
+     * parentJobId: 재탐색일 때 원본 잡. 이것이 있어야 "이 결과를 버리고 저것을
+     *              받았다" 가 쌍으로 읽힌다. 그 밖에는 null.
+     * source: agent | cache_hit. 캐시로 답한 잡은 agent 가 돌지 않았는데도
+     *         완료로 기록되므로, 세는 쪽이 갈라 볼 수 있어야 한다.
+     */
+    public record JobOrigin(String mode, String parentJobId, String source) {
+
+        public static JobOrigin agent(String mode) {
+            return new JobOrigin(mode, null, "agent");
+        }
+
+        public static JobOrigin research(String parentJobId) {
+            return new JobOrigin("research", parentJobId, "agent");
+        }
+
+        public static JobOrigin cacheHit() {
+            return new JobOrigin("init", null, "cache_hit");
         }
     }
 

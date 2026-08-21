@@ -58,6 +58,29 @@ public class RecommendJobEntity {
     private OffsetDateTime finishedAt;
 
     /**
+     * 이 잡을 만든 경로. init | research | route | refresh.
+     * 이 마이그레이션 이전 행은 비어 있으며 "미상" 으로 읽는다.
+     */
+    @Column(name = "mode", length = 16)
+    private String mode;
+
+    /** 재탐색일 때 거부된 원본 잡. 논리 참조이며 외래키를 걸지 않는다. */
+    @Column(name = "parent_job_id")
+    private UUID parentJobId;
+
+    /**
+     * 결과를 실제로 만든 주체. agent | cache_hit.
+     * 캐시로 답한 잡은 agent 가 돌지 않았는데도 완료로 기록되므로, 세는 쪽이
+     * 이 값으로 갈라 보지 않으면 LLM 사용량이 부풀어 보인다.
+     */
+    @Column(name = "source", length = 16)
+    private String source;
+
+    /** 함께 보관된 학습 신호의 계약 판. 신호가 없으면 비어 있다. */
+    @Column(name = "schema_version")
+    private Integer schemaVersion;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected RecommendJobEntity() {
@@ -124,6 +147,26 @@ public class RecommendJobEntity {
     /** 완료 기록 시각 반환. nullable. */
     public OffsetDateTime getFinishedAt() {
         return finishedAt;
+    }
+
+    /** 이 잡을 만든 경로 반환. 이전 행은 null(미상). */
+    public String getMode() {
+        return mode;
+    }
+
+    /** 재탐색일 때 거부된 원본 잡 반환. nullable. */
+    public UUID getParentJobId() {
+        return parentJobId;
+    }
+
+    /** 결과를 만든 주체 반환(agent/cache_hit). 이전 행은 null(미상). */
+    public String getSource() {
+        return source;
+    }
+
+    /** 함께 보관된 학습 신호의 계약 판 반환. nullable. */
+    public Integer getSchemaVersion() {
+        return schemaVersion;
     }
 
     /** 상태를 갱신한다(완료 기록 시 사용). */
