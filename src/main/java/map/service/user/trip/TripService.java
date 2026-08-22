@@ -58,7 +58,7 @@ public class TripService {
             TripStopsAssembler stopsAssembler,
             ReviewSummaryService reviewSummaryService,
             ObjectMapper objectMapper,
-            @Value("${trip.poll-timeout-seconds:150}") long pollTimeoutSeconds,
+            @Value("${trip.poll-timeout-seconds:110}") long pollTimeoutSeconds,
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
     ) {
         this.recommendService = recommendService;
