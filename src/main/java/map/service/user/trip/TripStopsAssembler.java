@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import map.service.user.recommend.dto.Leg;
 import map.service.user.recommend.dto.Place;
@@ -253,7 +254,7 @@ public class TripStopsAssembler {
             return null;
         }
 
-        List<Route> fetched = hubDirectionsClient.fetchRoutes(transport, legs);
+        List<Route> fetched = hubDirectionsClient.fetchRoutes(normalizeMode(transport), legs);
         if (fetched == null) {
             return null;
         }
@@ -264,11 +265,25 @@ public class TripStopsAssembler {
         return byLeg;
     }
 
-    /** 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외). */
+    /**
+     * 도로 라우팅 가능한 이동수단인지. walk/bicycle/scooter 만 대상(bus 제외).
+     *
+     * 대소문자를 가리지 않는다. 예전에는 소문자만 받았는데, 대문자로 적어
+     * 보내면 요청이 200 으로 돌아오고 일정도 멀쩡히 나오면서 경로만 조용히
+     * 직선이 됐다. 두 표기가 서로 다른 결과를 내면서 아무 것도 알려 주지
+     * 않는 셈이라, 무엇이 잘못됐는지 화면을 보기 전까지 알 수 없었다.
+     * 캐시 키는 이미 표기를 하나로 맞춰 다루므로 여기만 어긋나 있었다.
+     */
     private static boolean isRoutable(String transport) {
-        return "walk".equals(transport)
-                || "bicycle".equals(transport)
-                || "scooter".equals(transport);
+        String mode = normalizeMode(transport);
+        return "walk".equals(mode)
+                || "bicycle".equals(mode)
+                || "scooter".equals(mode);
+    }
+
+    /** 받는 쪽(hub)은 소문자만 받는다. 넘기기 전에 표기를 맞춘다. */
+    private static String normalizeMode(String transport) {
+        return transport == null ? null : transport.trim().toLowerCase(Locale.ROOT);
     }
 
     /** hub 계약(start_name/goal_name: 1~60자)에 맞게 장소명을 정리한다. */
