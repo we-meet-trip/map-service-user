@@ -31,6 +31,8 @@ public enum ErrorCode {
     // Recommend
     RESEARCH_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "RECOMMEND_001", "재추천 한도(일 3회)를 초과했습니다. KST 자정 이후 다시 시도해주세요."),
     RECOMMEND_NOT_OWNER(HttpStatus.FORBIDDEN, "RECOMMEND_002", "본인이 만든 추천만 수정할 수 있습니다."),
+    RECOMMEND_EDIT_INCONSISTENT(HttpStatus.BAD_REQUEST, "RECOMMEND_003",
+            "방문 순서나 이동 구간이 장소 목록과 맞지 않습니다."),
 
     // Chat — 채팅방 생성·참가·전송 과정의 실패 사유. HTTP 상태는 클라이언트 처리 분기의 계약값이다.
     CHAT_ROOM_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT_001", "채팅방을 찾을 수 없습니다."),

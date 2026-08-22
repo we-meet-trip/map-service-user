@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import map.service.user.recommend.dto.EditRequest;
+import map.service.user.recommend.dto.Place;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import map.service.user.global.exception.CustomException;
@@ -240,6 +242,43 @@ class RecommendServiceTest {
         service.research("job-1", request(null, null));
 
         verify(reuseCacheStore, never()).find(anyString());
+    }
+
+    // ---- 초안 수정: 앞뒤가 맞는지 ----
+
+    /** 순서와 이동 구간은 장소를 자리 번호로 가리키므로, 장소만 줄이면 없는 자리를 가리키게 된다. */
+    @Test
+    void editRejectedWhenVisitOrderPointsPastPlaces() {
+        String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
+                + "\"visit_order\":[0,1],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        // 장소를 하나로 줄이면서 순서를 함께 보내지 않았다.
+        EditRequest edit = new EditRequest(
+                List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
+                        null, null, null, true, null, null, null, null, null, null)), null, null);
+
+        assertThatThrownBy(() -> service.applyEdit("job-1", edit))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
+        verify(draftStore, never()).save(anyString(), anyString());
+    }
+
+    @Test
+    void editAcceptedWhenOrderShrinksTogether() {
+        String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
+                + "\"visit_order\":[0,1],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        EditRequest edit = new EditRequest(
+                List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
+                        null, null, null, true, null, null, null, null, null, null)),
+                List.of(0), List.of());
+
+        assertThat(service.applyEdit("job-1", edit)).isPresent();
+        verify(draftStore).save(eq("job-1"), anyString());
     }
 
     // ---- draft 조회 (Redis → PG 폴백) ----
