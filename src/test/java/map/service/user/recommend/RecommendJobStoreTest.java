@@ -34,6 +34,12 @@ class RecommendJobStoreTest {
     private RecommendJobRepository repository;
 
     @Autowired
+    private RecommendTrainingRepository trainingRepository;
+
+    @Autowired
+    private RecommendEditRepository editRepository;
+
+    @Autowired
     private TestEntityManager entityManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -41,7 +47,7 @@ class RecommendJobStoreTest {
 
     @BeforeEach
     void setUp() {
-        store = new RecommendJobStore(repository, objectMapper);
+        store = new RecommendJobStore(repository, trainingRepository, editRepository, objectMapper);
     }
 
     /** 보류 중인 변경을 DB 로 flush 하고 영속성 컨텍스트를 비워 진짜 DB 재조회를 강제한다. */

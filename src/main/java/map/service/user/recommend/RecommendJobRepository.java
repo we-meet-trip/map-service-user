@@ -49,12 +49,14 @@ public interface RecommendJobRepository extends JpaRepository<RecommendJobEntity
                 schedule_id   = COALESCE(schedule_id,   :scheduleId),
                 mode          = COALESCE(mode,          :mode),
                 parent_job_id = COALESCE(parent_job_id, :parentJobId),
-                source        = COALESCE(source,        :source)
+                source        = COALESCE(source,        :source),
+                owner_user_id = COALESCE(owner_user_id, :ownerUserId)
             WHERE job_id = :jobId
             """, nativeQuery = true)
     int fillOriginIfAbsent(@Param("jobId") UUID jobId,
                            @Param("scheduleId") String scheduleId,
                            @Param("mode") String mode,
                            @Param("parentJobId") UUID parentJobId,
-                           @Param("source") String source);
+                           @Param("source") String source,
+                           @Param("ownerUserId") Long ownerUserId);
 }

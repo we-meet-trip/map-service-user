@@ -48,7 +48,9 @@ class RecommendControllerTest {
     @Test
     @DisplayName("한국 범위 내 좌표 — 200 OK 및 머지 결과 반환")
     void edit_validCoords_returns200() throws Exception {
-        when(service.applyEdit(eq("job-1"), any()))
+        // 소유자 확인과 멱등키가 붙어 인자가 넷이다. 토큰이 없는 요청이라
+        // 사용자와 멱등키는 비어 온다.
+        when(service.applyEdit(eq("job-1"), any(), any(), any()))
                 .thenReturn(Optional.of("{\"ok\":true}"));
 
         mockMvc.perform(post("/api/v1/recommend/job-1/edit")

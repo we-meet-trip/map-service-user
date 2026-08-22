@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -124,13 +125,19 @@ public class RecommendController {
      * jobId: @PathVariable. 수정 대상 추천 작업.
      * edit: @Valid @RequestBody EditRequest. places 가 있으면 각 Place 좌표
      *       범위(33~43 / 124~132)를 검증하며, 위반 시 400.
+     * userId: 토큰이 실려 있고 유효할 때만 채워진다. 잡에 소유자가 적혀 있는데
+     *         이 값이 다르면 403 이다. 적혀 있지 않으면 막지 않는다.
+     * idempotencyKey: 같은 요청의 재시도를 가려내는 선택 헤더. 망이 끊겨 다시
+     *         보낸 것이 두 번의 수정으로 기록되지 않게 한다.
      */
     @PostMapping("/{jobId}/edit")
     public ResponseEntity<String> edit(
             @PathVariable String jobId,
-            @Valid @RequestBody EditRequest edit
+            @Valid @RequestBody EditRequest edit,
+            @AuthenticationPrincipal Long userId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
     ) {
-        Optional<String> updated = service.applyEdit(jobId, edit);
+        Optional<String> updated = service.applyEdit(jobId, edit, userId, idempotencyKey);
         return updated
                 .map(json -> ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_JSON)

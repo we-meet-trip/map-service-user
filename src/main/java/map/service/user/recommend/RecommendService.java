@@ -171,7 +171,7 @@ public class RecommendService {
                         hash, merged.size());
             }
             jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
-                    RecommendJobStore.JobOrigin.agent("init"));
+                    RecommendJobStore.JobOrigin.agent("init").ownedBy(userId));
             return new RecommendationResult(accepted, false);
         }
 
@@ -188,7 +188,7 @@ public class RecommendService {
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
         // schedule_id 를 심고 markFinished 는 기존 행을 갱신하므로 값이 보존된다.
         jobStore.insertInProgress(jobId, normalized.scheduleId(),
-                RecommendJobStore.JobOrigin.cacheHit());
+                RecommendJobStore.JobOrigin.cacheHit().ownedBy(userId));
         jobStore.markFinished(jobId, "done", payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
@@ -317,6 +317,29 @@ public class RecommendService {
      * edit: EditRequest. places / visit_order / legs 부분 수정 데이터.
      */
     public Optional<String> applyEdit(String jobId, EditRequest edit) {
+        return applyEdit(jobId, edit, null, null);
+    }
+
+    /**
+     * 초안을 고친다. 소유자 확인과 기록을 함께 한다.
+     *
+     * 소유자: 잡에 소유자가 적혀 있고 그 사람이 아니면 거절한다. 적혀 있지
+     * 않으면(토큰 없이 만든 잡, 이전 잡) 모르는 것이므로 막지 않는다 —
+     * 모른다는 이유로 잠그면 인증을 켜기도 전에 기능이 멈춘다.
+     *
+     * 기록: 고치기 전후를 남기고 PG 의 완료 결과도 함께 맞춘다. 예전에는
+     * Redis 초안만 바꿔서, 초안이 만료된 뒤 PG 로 물으면 고치기 이전 결과가
+     * 되살아났다 — 사용자가 뺀 장소가 다시 나타난다.
+     *
+     * userId: 인증된 사용자. 토큰이 없으면 null.
+     * idempotencyKey: 같은 요청의 재시도를 가려내는 키. 없으면 매번 새 기록.
+     */
+    public Optional<String> applyEdit(String jobId, EditRequest edit,
+                                      Long userId, String idempotencyKey) {
+        Long owner = jobStore.ownerOf(jobId);
+        if (owner != null && !owner.equals(userId)) {
+            throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
+        }
         Optional<String> current = draftStore.find(jobId);
         if (current.isEmpty()) {
             return Optional.empty();
@@ -337,6 +360,10 @@ public class RecommendService {
                 obj.set("legs", editNode.get("legs"));
             }
             String merged = objectMapper.writeValueAsString(obj);
+            // 기록을 먼저 한다. 여기서 실패하면 초안도 바꾸지 않는다 —
+            // 바꾼 뒤 기록에 실패하면 무엇이 바뀌었는지 알 길이 영영 없다.
+            // PG 의 완료 결과도 이 안에서 함께 맞춘다.
+            jobStore.recordEdit(jobId, userId, idempotencyKey, current.get(), merged);
             draftStore.save(jobId, merged);
             return Optional.of(merged);
         } catch (JsonProcessingException e) {

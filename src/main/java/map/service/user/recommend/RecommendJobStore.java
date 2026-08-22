@@ -1,5 +1,6 @@
 package map.service.user.recommend;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
@@ -34,10 +35,17 @@ public class RecommendJobStore {
     private static final Set<String> TERMINAL_STATUS = Set.of("done", "failed");
 
     private final RecommendJobRepository repository;
+    private final RecommendTrainingRepository trainingRepository;
+    private final RecommendEditRepository editRepository;
     private final ObjectMapper objectMapper;
 
-    public RecommendJobStore(RecommendJobRepository repository, ObjectMapper objectMapper) {
+    public RecommendJobStore(RecommendJobRepository repository,
+                             RecommendTrainingRepository trainingRepository,
+                             RecommendEditRepository editRepository,
+                             ObjectMapper objectMapper) {
         this.repository = repository;
+        this.trainingRepository = trainingRepository;
+        this.editRepository = editRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -88,7 +96,8 @@ public class RecommendJobStore {
             if (origin != null) {
                 repository.fillOriginIfAbsent(
                         uuid, scheduleId, origin.mode(),
-                        parseUuid(origin.parentJobId()), origin.source());
+                        parseUuid(origin.parentJobId()), origin.source(),
+                        origin.ownerUserId());
             }
         } catch (RuntimeException e) {
             log.warn("recommend job insert failed job_id={} reason={}", jobId, e.getMessage());
@@ -104,18 +113,24 @@ public class RecommendJobStore {
      * source: agent | cache_hit. 캐시로 답한 잡은 agent 가 돌지 않았는데도
      *         완료로 기록되므로, 세는 쪽이 갈라 볼 수 있어야 한다.
      */
-    public record JobOrigin(String mode, String parentJobId, String source) {
+    public record JobOrigin(String mode, String parentJobId, String source, Long ownerUserId) {
 
         public static JobOrigin agent(String mode) {
-            return new JobOrigin(mode, null, "agent");
+            return new JobOrigin(mode, null, "agent", null);
         }
 
         public static JobOrigin research(String parentJobId) {
-            return new JobOrigin("research", parentJobId, "agent");
+            return new JobOrigin("research", parentJobId, "agent", null);
         }
 
         public static JobOrigin cacheHit() {
-            return new JobOrigin("init", null, "cache_hit");
+            return new JobOrigin("init", null, "cache_hit", null);
+        }
+
+        /** 소유자를 덧붙인다. 토큰이 없어 모르면 그대로 둔다. */
+        public JobOrigin ownedBy(Long userId) {
+            return userId == null ? this
+                    : new JobOrigin(mode, parentJobId, source, userId);
         }
     }
 
@@ -148,6 +163,137 @@ public class RecommendJobStore {
             }
         } catch (RuntimeException e) {
             log.warn("recommend job finish failed job_id={} reason={}", jobId, e.getMessage());
+        }
+    }
+
+    /**
+     * 완료 상태와 학습 신호를 한 트랜잭션으로 기록한다. **실패하면 예외를 던진다.**
+     *
+     * markFinished 와 갈라 둔 이유가 이것 하나다. markFinished 는 어떤 예외도
+     * 삼키는데, stream 소비 경로가 그것을 쓰면 기록이 실패해도 그대로 ack 되어
+     * 메시지가 사라진다. 사용자는 Redis 초안으로 결과를 이미 받았으므로 아무도
+     * 눈치채지 못한 채 학습 신호만 조용히 없어진다.
+     *
+     * 여기서 던지면 소비자가 ack 하지 않고, 메시지는 PEL 에 남아 회수 대상이
+     * 된다. 재시도가 다 떨어지면 DLQ 로 가므로 본문은 어느 쪽이든 보존된다.
+     *
+     * 신호 저장은 있으면 건너뛴다 — 재처리로 두 번 들어와도 처음 것이 남는다.
+     * 신호가 없거나 형태가 아니면 상태만 기록한다. 신호 때문에 완료 기록 자체를
+     * 막지는 않는다.
+     */
+    @Transactional
+    public void recordCompletion(String jobId, String status,
+                                 String payloadJson, String trainingJson) {
+        UUID uuid = parseUuid(jobId);
+        if (uuid == null) {
+            return;
+        }
+        JsonNode payload = parsePayload(payloadJson);
+        String normalized = normalizeStatus(status);
+        try {
+            writeFinished(uuid, normalized, payload);
+        } catch (DataIntegrityViolationException e) {
+            // 행이 없다고 보고 새로 넣는 사이에 접수 기록이 같은 행을 만들었다.
+            writeFinished(uuid, normalized, payload);
+        }
+        writeTraining(uuid, trainingJson);
+    }
+
+    /**
+     * 잡의 소유자를 돌려준다. 모르면 null — 그때는 막지 않는다.
+     *
+     * 토큰 없이 만든 잡과 이 기능 이전 잡은 소유자가 없다. 모른다는 이유로
+     * 거절하면 인증을 켜기도 전에 기존 사용자가 잠긴다.
+     */
+    public Long ownerOf(String jobId) {
+        UUID uuid = parseUuid(jobId);
+        if (uuid == null) {
+            return null;
+        }
+        try {
+            return repository.findById(uuid)
+                    .map(RecommendJobEntity::getOwnerUserId)
+                    .orElse(null);
+        } catch (RuntimeException e) {
+            log.warn("recommend job owner lookup failed job_id={} reason={}",
+                    jobId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 초안 수정 전후를 남기고, 완료 결과도 고친 값으로 맞춘다.
+     *
+     * 결과를 함께 고치는 이유: 예전에는 Redis 초안만 바꿔서, 초안이 만료된 뒤
+     * PG 로 물으면 고치기 이전 결과가 되살아났다. 사용자가 뺀 장소가 다시
+     * 나타나는 셈이다.
+     *
+     * 같은 요청이 재시도로 두 번 오면 두 번째는 아무 것도 하지 않는다.
+     * 순번이 부딪히면 한 번 다시 잡아 본다 — 동시에 두 수정이 들어온 경우다.
+     *
+     * @return 기록했으면 true, 재시도로 판정해 건너뛰었으면 false.
+     */
+    @Transactional
+    public boolean recordEdit(String jobId, Long actorUserId, String idempotencyKey,
+                              String beforeJson, String afterJson) {
+        UUID uuid = parseUuid(jobId);
+        if (uuid == null) {
+            return false;
+        }
+        if (idempotencyKey != null
+                && editRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
+            log.debug("edit already recorded job_id={} key={}", jobId, idempotencyKey);
+            return false;
+        }
+        JsonNode before = parsePayload(beforeJson);
+        JsonNode after = parsePayload(afterJson);
+        try {
+            saveEdit(uuid, actorUserId, idempotencyKey, before, after);
+        } catch (DataIntegrityViolationException e) {
+            // 순번이 부딪혔다. 다시 읽어 한 번 더 시도한다. 두 번째도 부딪히면
+            // 그대로 올려 보낸다 — 조용히 삼키면 수정 하나가 기록 없이 사라진다.
+            saveEdit(uuid, actorUserId, idempotencyKey, before, after);
+        }
+        writeFinished(uuid, "done", after);
+        return true;
+    }
+
+    private void saveEdit(UUID uuid, Long actorUserId, String idempotencyKey,
+                          JsonNode before, JsonNode after) {
+        editRepository.saveAndFlush(new RecommendEditEntity(
+                uuid, editRepository.nextSeq(uuid), actorUserId,
+                idempotencyKey, before, after));
+    }
+
+    /** 학습 신호를 보관한다. 이미 있으면 두고, 형태가 아니면 건너뛴다. */
+    private void writeTraining(UUID uuid, String trainingJson) {
+        if (trainingJson == null || trainingJson.isBlank()) {
+            return;
+        }
+        JsonNode signal;
+        Integer version;
+        try {
+            signal = objectMapper.readTree(trainingJson);
+            JsonNode v = signal.get("schema_version");
+            version = v != null && v.isInt() ? v.intValue() : null;
+        } catch (JsonProcessingException e) {
+            log.warn("training signal unreadable job_id={} reason={}", uuid, e.getMessage());
+            return;
+        }
+        // 계약이 요구하는 두 칸이 없으면 DB CHECK 에 걸려 완료 기록까지 함께
+        // 되돌아간다. 신호 하나 때문에 상태 기록을 잃지 않도록 여기서 거른다.
+        if (version == null || !signal.has("path")) {
+            log.warn("training signal shape invalid job_id={}", uuid);
+            return;
+        }
+        if (trainingRepository.existsById(uuid)) {
+            return;
+        }
+        try {
+            trainingRepository.save(new RecommendTrainingEntity(uuid, version, signal));
+        } catch (DataIntegrityViolationException e) {
+            // 같은 잡을 두 소비자가 동시에 처리했다. 먼저 넣은 쪽 것을 쓴다.
+            log.debug("training signal already stored job_id={}", uuid);
         }
     }
 

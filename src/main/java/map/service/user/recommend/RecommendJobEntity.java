@@ -81,6 +81,13 @@ public class RecommendJobEntity {
     private Integer schemaVersion;
 
     /**
+     * 이 잡을 만든 사용자. 토큰 없이 들어온 요청과 이전 행은 비어 있다.
+     * 비어 있으면 소유자를 모르는 것이므로 수정을 막지 않는다.
+     */
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected RecommendJobEntity() {
@@ -167,6 +174,11 @@ public class RecommendJobEntity {
     /** 함께 보관된 학습 신호의 계약 판 반환. nullable. */
     public Integer getSchemaVersion() {
         return schemaVersion;
+    }
+
+    /** 이 잡을 만든 사용자 반환. 모르면 null. */
+    public Long getOwnerUserId() {
+        return ownerUserId;
     }
 
     /** 상태를 갱신한다(완료 기록 시 사용). */

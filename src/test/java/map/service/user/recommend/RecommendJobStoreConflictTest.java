@@ -31,6 +31,8 @@ class RecommendJobStoreConflictTest {
     @DisplayName("완료 기록이 키 충돌로 밀리면 갱신으로 다시 시도해 상태를 남긴다")
     void markFinishedRetriesAsUpdateOnConflict() {
         RecommendJobRepository repository = mock(RecommendJobRepository.class);
+        RecommendTrainingRepository trainingRepository = mock(RecommendTrainingRepository.class);
+        RecommendEditRepository editRepository = mock(RecommendEditRepository.class);
         UUID jobId = UUID.randomUUID();
         RecommendJobEntity existing = new RecommendJobEntity(
                 jobId, "sched-1", "in_progress", null, null, null);
@@ -43,7 +45,7 @@ class RecommendJobStoreConflictTest {
                 .thenThrow(new DataIntegrityViolationException("duplicate key"))
                 .thenReturn(existing);
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, trainingRepository, editRepository, objectMapper);
         store.markFinished(jobId.toString(), "failed", "{\"status\":\"failed\"}");
 
         ArgumentCaptor<RecommendJobEntity> saved =
@@ -60,12 +62,14 @@ class RecommendJobStoreConflictTest {
     @DisplayName("재시도까지 실패하면 예외를 밖으로 내보내지 않는다")
     void markFinishedSwallowsRepeatedFailure() {
         RecommendJobRepository repository = mock(RecommendJobRepository.class);
+        RecommendTrainingRepository trainingRepository = mock(RecommendTrainingRepository.class);
+        RecommendEditRepository editRepository = mock(RecommendEditRepository.class);
         UUID jobId = UUID.randomUUID();
         when(repository.findById(jobId)).thenReturn(Optional.empty());
         when(repository.save(any(RecommendJobEntity.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate key"));
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, trainingRepository, editRepository, objectMapper);
         store.markFinished(jobId.toString(), "done", "{}");
 
         verify(repository, times(2)).save(any(RecommendJobEntity.class));
@@ -75,10 +79,12 @@ class RecommendJobStoreConflictTest {
     @DisplayName("이미 있는 작업에는 최초 기록을 다시 쓰지 않는다")
     void insertInProgressSkipsExistingRow() {
         RecommendJobRepository repository = mock(RecommendJobRepository.class);
+        RecommendTrainingRepository trainingRepository = mock(RecommendTrainingRepository.class);
+        RecommendEditRepository editRepository = mock(RecommendEditRepository.class);
         UUID jobId = UUID.randomUUID();
         when(repository.existsById(jobId)).thenReturn(true);
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, trainingRepository, editRepository, objectMapper);
         store.insertInProgress(jobId.toString(), "sched-2");
 
         verify(repository, times(0)).save(any(RecommendJobEntity.class));

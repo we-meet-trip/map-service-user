@@ -48,6 +48,55 @@ class RecommendJobsConsumerTest {
     }
 
     @Test
+    void 영속기록이_실패하면_연결고리를_소비하지_않는다() {
+        // 연결고리는 읽으면서 지운다(GETDEL). 영속 기록보다 먼저 소비해 버리면,
+        // 기록이 실패해 메시지가 재처리될 때 연결고리가 이미 없어 재사용 캐시가
+        // 영영 갱신되지 않는다. 그래서 순서가 기록 → 캐시여야 한다.
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(jobStore).recordCompletion(any(), any(), any(), any());
+
+        consumer.onMessage(record("job-9", "{\"places\":[]}"));
+
+        verify(reuseCacheStore, never()).consumeLink(any());
+        verify(reuseCacheStore, never()).save(any(), any());
+    }
+
+    @Test
+    void 영속기록이_실패해도_초안은_남는다() {
+        // 사용자가 결과를 보는 경로는 초안이다. 기록 실패가 결과 전달까지
+        // 막아서는 안 된다.
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(jobStore).recordCompletion(any(), any(), any(), any());
+
+        consumer.onMessage(record("job-9", "{\"places\":[]}"));
+
+        verify(draftStore).save("job-9", "{\"places\":[]}");
+    }
+
+    @Test
+    void 학습신호가_영속기록으로_함께_넘어간다() {
+        MapRecord<String, String, String> rec = StreamRecords.mapBacked(
+                        Map.of("job_id", "job-t", "payload", "{\"places\":[]}",
+                                "status", "done",
+                                "training", "{\"schema_version\":1,\"path\":\"select\"}"))
+                .withStreamKey("agent:jobs:done")
+                .withId(RecordId.of("1-1"));
+
+        consumer.onMessage(rec);
+
+        verify(jobStore).recordCompletion("job-t", "done", "{\"places\":[]}",
+                "{\"schema_version\":1,\"path\":\"select\"}");
+    }
+
+    @Test
+    void 학습신호가_없어도_처리된다() {
+        // agent 가 옛 판이거나 route·저하 경로면 이 필드가 없다.
+        consumer.onMessage(record("job-n", "{\"places\":[]}"));
+
+        verify(jobStore).recordCompletion("job-n", "done", "{\"places\":[]}", null);
+    }
+
+    @Test
     void savesDraftAndUpdatesCacheWhenLinkPresent() {
         when(reuseCacheStore.consumeLink("job-1")).thenReturn(Optional.of("hash-abc"));
 
