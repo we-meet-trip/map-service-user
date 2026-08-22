@@ -244,6 +244,11 @@ class RecommendServiceTest {
         verify(reuseCacheStore, never()).find(anyString());
     }
 
+    private static Place place(int id) {
+        return new Place(id, 1, "장소" + id, "주소", 37.5, 127.0, "10:00",
+                null, null, null, true, null, null, null, null, null, null);
+    }
+
     // ---- 초안 수정: 앞뒤가 맞는지 ----
 
     /** 순서와 이동 구간은 장소를 자리 번호로 가리키므로, 장소만 줄이면 없는 자리를 가리키게 된다. */
@@ -263,6 +268,22 @@ class RecommendServiceTest {
                 .isInstanceOf(CustomException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
         verify(draftStore, never()).save(anyString(), anyString());
+    }
+
+    /** 자리 번호가 아니라 place_id 로 가리키므로, 남은 번호가 띄엄띄엄해도 맞는 것이다. */
+    @Test
+    void editAcceptedWhenRemainingIdsAreSparse() {
+        String draft = "{\"places\":[{\"place_id\":0},{\"place_id\":1},"
+                + "{\"place_id\":2},{\"place_id\":3}],"
+                + "\"visit_order\":[0,1,2,3],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        // 가운데 둘을 빼고 0 과 3 만 남겼다. 번호가 이어지지 않지만 맞는 것이다.
+        EditRequest edit = new EditRequest(
+                List.of(place(0), place(3)), List.of(0, 3), List.of());
+
+        assertThat(service.applyEdit("job-1", edit)).isPresent();
     }
 
     @Test

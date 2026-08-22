@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -429,34 +430,43 @@ public class RecommendService {
     /**
      * 고친 초안이 스스로 앞뒤가 맞는지 본다. 안 맞으면 저장하지 않는다.
      *
-     * visit_order 와 legs 는 장소를 이름이 아니라 places 배열의 자리 번호로
-     * 가리킨다. 그래서 장소를 빼면 뒤에 있던 것들의 번호가 앞으로 당겨진다 —
-     * 순서를 함께 고쳐 보내지 않으면 남은 번호가 없는 자리를 가리킨다.
+     * visit_order 와 legs 는 장소를 이름이 아니라 place_id 로 가리킨다. 장소를
+     * 빼면서 순서를 함께 고쳐 보내지 않으면, 남은 순서가 이제 없는 장소를
+     * 가리킨다.
      *
      * 그렇게 저장하면 요청은 성공으로 돌아오는데 그 일정을 다시 열 때 방문지가
-     * 하나도 나오지 않는다. 저장한 사람은 지운 것 하나만 빠졌으리라고 믿고
-     * 있으므로, 빈 일정을 보기 전까지는 무엇이 잘못됐는지 알 수 없다.
+     * 하나도 나오지 않는다. 그리는 쪽이 순서에 적힌 장소를 못 찾으면 부분만
+     * 그리지 않고 통째로 포기하기 때문이다. 저장한 사람은 지운 것 하나만
+     * 빠졌으리라 믿고 있으므로, 빈 일정을 보기 전까지 알 수 없다.
      *
-     * 서버가 순서를 대신 고쳐 주지는 않는다. 어떤 자리를 뺐는지는 자리 번호만
-     * 보고는 알 수 없고, 남은 것을 임의로 이어 붙이면 사용자가 원하지 않은
-     * 동선이 된다. 맞지 않으면 거절하고 부르는 쪽이 셋을 함께 보내게 한다.
+     * 서버가 순서를 대신 고쳐 주지는 않는다. 남은 것을 임의로 이어 붙이면
+     * 사용자가 원하지 않은 동선이 된다. 맞지 않으면 거절하고 부르는 쪽이
+     * 셋을 함께 보내게 한다.
+     *
+     * 판정 기준은 그리는 쪽(TripStopsAssembler.orderPlaces)과 같아야 한다.
+     * 다르면 여기서 통과한 것이 거기서 터지거나 그 반대가 된다.
      */
     private void requireConsistent(ObjectNode draft) {
-        int count = draft.path("places").isArray() ? draft.get("places").size() : 0;
-        for (JsonNode idx : draft.path("visit_order")) {
-            if (!idx.isIntegralNumber() || idx.asInt() < 0 || idx.asInt() >= count) {
-                throw new CustomException(ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
+        Set<Integer> known = new HashSet<>();
+        for (JsonNode place : draft.path("places")) {
+            JsonNode id = place.path("place_id");
+            if (id.isIntegralNumber()) {
+                known.add(id.asInt());
             }
         }
+        for (JsonNode id : draft.path("visit_order")) {
+            requireKnown(id, known);
+        }
         for (JsonNode leg : draft.path("legs")) {
-            if (outOfRange(leg.path("from"), count) || outOfRange(leg.path("to"), count)) {
-                throw new CustomException(ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
-            }
+            requireKnown(leg.path("from"), known);
+            requireKnown(leg.path("to"), known);
         }
     }
 
-    private boolean outOfRange(JsonNode node, int count) {
-        return !node.isIntegralNumber() || node.asInt() < 0 || node.asInt() >= count;
+    private void requireKnown(JsonNode node, Set<Integer> known) {
+        if (!node.isIntegralNumber() || !known.contains(node.asInt())) {
+            throw new CustomException(ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
+        }
     }
 
     /**
