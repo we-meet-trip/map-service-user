@@ -140,4 +140,22 @@ class RecommendEditRecordTest {
         // 켜기도 전에 기존 사용자가 막힌다.
         assertThat(store.ownerOf(anonymous)).isNull();
     }
+
+    @Test
+    @DisplayName("행을 새로 만든 직후에도 출처가 남는다")
+    void originPersistsOnFreshRow() {
+        // 캐시로 답하는 경로가 이렇게 동작한다 — 행을 만들고 곧바로 출처를
+        // 채운다. 넣은 것이 아직 DB 에 닿지 않은 채 갱신이 돌면 조용히 0 행이
+        // 되어 출처가 영영 비어 있게 된다.
+        String jobId = UUID.randomUUID().toString();
+
+        store.insertInProgress(jobId, "sched-fresh",
+                RecommendJobStore.JobOrigin.cacheHit().ownedBy(11L));
+        flushAndClear();
+
+        RecommendJobEntity saved = repository.findById(UUID.fromString(jobId)).orElseThrow();
+        assertThat(saved.getSource()).isEqualTo("cache_hit");
+        assertThat(saved.getMode()).isEqualTo("init");
+        assertThat(saved.getOwnerUserId()).isEqualTo(11L);
+    }
 }

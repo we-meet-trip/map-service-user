@@ -43,7 +43,13 @@ public interface RecommendJobRepository extends JpaRepository<RecommendJobEntity
      *
      * @return 갱신된 행 수. 0 이면 그 잡의 행이 아직 없다는 뜻이다.
      */
-    @Modifying
+    // flushAutomatically: 바로 앞에서 넣은 행이 아직 DB 에 닿지 않은 채로 이
+    // 문장이 돌면 갱신 대상이 없어 조용히 0 행이 된다. 그러면 출처가 영영
+    // 비어 있게 된다 — 캐시로 답하는 경로가 정확히 그랬다(행을 새로 만든 직후
+    // 이 문장을 부른다). 먼저 반영하고 실행하게 한다.
+    // clearAutomatically: 이 문장이 바꾼 값을 영속성 컨텍스트가 모르므로,
+    // 같은 트랜잭션에서 다시 읽으면 옛 값이 나온다. 비워서 다시 읽게 한다.
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """
             UPDATE user_service.recommend_jobs SET
                 schedule_id   = COALESCE(schedule_id,   :scheduleId),
