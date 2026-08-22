@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -190,7 +191,11 @@ public class ScheduleService {
      */
     public ScheduleDetailResponse start(Long scheduleId, Long userId) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
-        if (entity.markStarted(OffsetDateTime.now())) {
+        // 마이크로초 아래를 버리고 새긴다. 안 그러면 방금 새긴 값을 담아 준
+        // 응답과, 나중에 저장소에서 읽어 준 응답의 시각이 미세하게 어긋난다 —
+        // 저장소가 그보다 잘게 담지 못해 반올림하기 때문이다. 같은 값을
+        // 두 번 물었는데 다르게 오면 "처음 한 번만 새긴다"는 약속이 깨져 보인다.
+        if (entity.markStarted(OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS))) {
             repository.save(entity);
             log.info("schedule started schedule_id={}", scheduleId);
         }
