@@ -1,8 +1,10 @@
 package map.service.user.recommend;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,4 +27,23 @@ public interface RecommendEditRepository extends JpaRepository<RecommendEditEnti
      */
     @Query("SELECT COALESCE(MAX(e.seq), 0) + 1 FROM RecommendEditEntity e WHERE e.jobId = :jobId")
     int nextSeq(@Param("jobId") UUID jobId);
+
+    /**
+     * 기준 시각보다 오래된 기록을 한 번에 limit 건까지 지운다.
+     *
+     * 전후를 통째로 담아 한 행이 크므로, 신호보다 더 나눠 지울 이유가 있다.
+     *
+     * @return 지운 행 수.
+     */
+    @Modifying
+    @Query(value = """
+            DELETE FROM user_service.recommend_edits
+            WHERE id IN (
+                SELECT id FROM user_service.recommend_edits
+                WHERE created_at < :cutoff
+                ORDER BY created_at
+                LIMIT :limit
+            )
+            """, nativeQuery = true)
+    int deleteOlderThan(@Param("cutoff") OffsetDateTime cutoff, @Param("limit") int limit);
 }
