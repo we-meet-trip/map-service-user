@@ -30,17 +30,29 @@ public class ReuseCacheStore {
     private static final String CACHE_PREFIX = "recommend:cache:";
     private static final String LINK_PREFIX = "recommend:cache-link:";
     private static final String HITS_PREFIX = "recommend:cache-hits:";
+    /** 같은 조건을 지금 누가 만들고 있는지 표시하는 자리. 한 명만 잡는다. */
+    private static final String INFLIGHT_PREFIX = "recommend:inflight:";
+    /** 남이 만드는 것을 기다리는 job 이 어느 조건을 기다리는지. */
+    private static final String WAIT_PREFIX = "recommend:cache-wait:";
 
     private final StringRedisTemplate redis;
     private final Duration cacheTtl;
     private final Duration linkTtl;
+    /**
+     * 만드는 중 표시와 기다림 표시의 수명. 잡 처리 시간(최대 10분)보다 길게
+     * 잡는다. 짧으면 아직 만들고 있는 중에 표시가 사라져 두 번째 요청이 다시
+     * agent 를 불러, 막으려던 중복이 그대로 생긴다.
+     */
+    private final Duration inflightTtl;
 
     public ReuseCacheStore(
             @Qualifier("cacheRedisTemplate") StringRedisTemplate redis,
             @Value("${redis.cache-ttl-seconds:604800}") long cacheTtlSeconds,
-            @Value("${redis.cache-link-ttl-seconds:3600}") long linkTtlSeconds
+            @Value("${redis.cache-link-ttl-seconds:3600}") long linkTtlSeconds,
+            @Value("${redis.inflight-ttl-seconds:600}") long inflightTtlSeconds
     ) {
         this.redis = redis;
+        this.inflightTtl = Duration.ofSeconds(inflightTtlSeconds);
         this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
         this.linkTtl = Duration.ofSeconds(linkTtlSeconds);
     }
@@ -50,6 +62,46 @@ public class ReuseCacheStore {
      */
     public Optional<String> find(String hash) {
         return Optional.ofNullable(redis.opsForValue().get(cacheKey(hash)));
+    }
+
+    /**
+     * 이 조건을 만들 사람으로 나설 수 있으면 true.
+     *
+     * 같은 조건의 요청이 동시에 여러 개 들어오면 지금은 전부 agent 를 부른다.
+     * 한 건이 LLM 을 두 번 쓰므로 열 명이 같은 곳을 동시에 누르면 스무 번이
+     * 나간다. 하루 한도가 정해져 있는 자원이라 그 한 번이 크다.
+     *
+     * SET NX 는 명령 하나로 판정과 표시를 함께 한다. 먼저 잡은 하나만 true 를
+     * 받고 나머지는 false 를 받아 결과를 기다린다.
+     *
+     * 시한을 두는 이유: 표시를 남긴 쪽이 죽으면 아무도 지우지 못한다. 잡
+     * 처리 시간보다 넉넉히 길게 두어, 시한이 먼저 끝나 중복이 나가는 일이
+     * 없게 한다.
+     */
+    public boolean tryBecomeProducer(String hash) {
+        Boolean acquired = redis.opsForValue()
+                .setIfAbsent(inflightKey(hash), "1", inflightTtl);
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    /** 다 만들었으니 표시를 치운다. 못 치워도 시한이 끝나면 사라진다. */
+    public void releaseProducer(String hash) {
+        redis.delete(inflightKey(hash));
+    }
+
+    /** 이 job 이 어느 조건의 결과를 기다리는지 적어 둔다. */
+    public void markWaiting(String jobId, String hash) {
+        redis.opsForValue().set(waitKey(jobId), hash, inflightTtl);
+    }
+
+    /** 이 job 이 기다리는 조건. 기다리는 중이 아니면 empty. */
+    public Optional<String> waitingHash(String jobId) {
+        return Optional.ofNullable(redis.opsForValue().get(waitKey(jobId)));
+    }
+
+    /** 기다림이 끝났다. */
+    public void clearWaiting(String jobId) {
+        redis.delete(waitKey(jobId));
     }
 
     /**
@@ -110,5 +162,13 @@ public class ReuseCacheStore {
 
     private String hitsKey(String hash) {
         return HITS_PREFIX + hash;
+    }
+
+    private String inflightKey(String hash) {
+        return INFLIGHT_PREFIX + hash;
+    }
+
+    private String waitKey(String jobId) {
+        return WAIT_PREFIX + jobId;
     }
 }

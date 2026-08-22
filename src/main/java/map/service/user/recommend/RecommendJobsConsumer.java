@@ -172,6 +172,10 @@ public class RecommendJobsConsumer
         try {
             reuseCacheStore.consumeLink(jobId)
                     .ifPresent(hash -> {
+                        // 만드는 중 표시는 성공이든 실패든 치운다. 실패했는데
+                        // 그대로 두면 시한이 끝날 때까지 같은 조건의 모든 요청이
+                        // 나오지 않을 결과를 기다린다.
+                        reuseCacheStore.releaseProducer(hash);
                         if (!"done".equals(status)) {
                             log.warn("reuse cache skipped for non-done job job_id={} status={}",
                                     jobId, status);

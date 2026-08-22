@@ -25,6 +25,7 @@ import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.Mobility;
 import map.service.user.recommend.dto.RecommendRequest;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -86,6 +87,9 @@ class RecommendServiceTest {
                 immediateExecutor, 3L);
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
+        // 기본은 "이 요청이 만드는 쪽". 같은 조건이 겹치는 상황은 개별
+        // 테스트에서 false 로 바꿔 확인한다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(true);
         // 기본은 한도 이내(허용). 한도 초과 시나리오는 개별 테스트에서 재정의한다.
         when(researchLimitService.tryConsume(anyString())).thenReturn(true);
 
@@ -592,5 +596,73 @@ class RecommendServiceTest {
                 base.date(), base.budget(), theme, base.mobility(),
                 base.province(), base.city(), base.scheduleId(),
                 base.stage(), base.exclude(), base.places());
+    }
+
+    @Test
+    @DisplayName("같은 조건이 겹치면 agent 를 다시 부르지 않는다")
+    void 겹치는_요청은_agent_를_부르지_않는다() {
+        // 한 건이 LLM 을 두 번 쓴다. 같은 조건 열 건이 동시에 들어오면
+        // 스무 번이 나가는데, 하루 한도가 정해진 자원이라 그 낭비가 크다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        RecommendService.RecommendationResult result =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+
+        verify(agentClient, never()).requestRecommend(any());
+        assertThat(result.accepted().jobId()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("붙는 쪽도 자기 job_id 를 갖는다")
+    void 붙는_쪽도_자기_job_id_를_갖는다() {
+        // 앞선 요청의 job 을 그대로 주면, 한 사람이 고친 것이 다른 사람 결과를
+        // 바꾼다. 초안은 고칠 수 있는 값이므로 반드시 따로 가져가야 한다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        RecommendService.RecommendationResult first =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+        RecommendService.RecommendationResult second =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+
+        assertThat(first.accepted().jobId()).isNotEqualTo(second.accepted().jobId());
+        // 앞서 만드는 쪽이 받은 job_id 와도 달라야 한다.
+        assertThat(first.accepted().jobId()).isNotEqualTo("job-2");
+    }
+
+    @Test
+    @DisplayName("취향이 섞인 요청은 겹쳐도 따로 만든다")
+    void 취향이_섞이면_묶지_않는다() {
+        // 해시는 취향을 섞기 전 값으로 만들어져, 취향이 다른 두 사람이 같은
+        // 해시를 만든다. 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된
+        // 결과를 받는다.
+        when(profileThemeProvider.themesFor(any())).thenReturn(List.of("맛집"));
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        service.createRecommendationDetailed(request("init", List.of()), 42L);
+
+        verify(agentClient).requestRecommend(any());
+    }
+
+    @Test
+    @DisplayName("앞선 요청이 끝나면 붙어 있던 job 도 그 결과로 답한다")
+    void 붙어있던_job_이_결과를_받는다() {
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        RecommendService.RecommendationResult joined =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+        String jobId = joined.accepted().jobId();
+
+        // 아직 안 나왔으면 진행 중이다.
+        when(reuseCacheStore.waitingHash(jobId)).thenReturn(Optional.of("hash-x"));
+        when(reuseCacheStore.find("hash-x")).thenReturn(Optional.empty());
+        assertThat(service.findDraft(jobId)).isEmpty();
+
+        // 나오면 자기 job_id 로 바꿔 받는다.
+        when(reuseCacheStore.find("hash-x"))
+                .thenReturn(Optional.of("{\"job_id\":\"job-2\",\"places\":[]}"));
+        Optional<String> resolved = service.findDraft(jobId);
+
+        assertThat(resolved).isPresent();
+        assertThat(readJobId(resolved.get())).isEqualTo(jobId);
+        verify(reuseCacheStore).clearWaiting(jobId);
     }
 }

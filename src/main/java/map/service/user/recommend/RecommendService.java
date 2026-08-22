@@ -160,6 +160,12 @@ public class RecommendService {
 
         if (cached.isEmpty()) {
             List<String> merged = mergeProfileThemes(normalized.theme(), userId);
+            // 취향이 섞이지 않은 요청만 하나로 묶는다. 해시는 취향을 섞기 전
+            // 값으로 만들어지므로, 취향이 다른 두 사람이 같은 해시를 만든다.
+            // 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된 결과를 받는다.
+            if (merged == null && !reuseCacheStore.tryBecomeProducer(hash)) {
+                return followProducer(normalized, userId);
+            }
             RecommendRequest outbound =
                     merged == null ? normalized : withTheme(normalized, merged);
             JobAccepted accepted = agentClient.requestRecommend(outbound);
@@ -301,8 +307,56 @@ public class RecommendService {
             return hit;
         }
         Optional<String> fallback = jobStore.findFinishedPayload(jobId);
-        fallback.ifPresent(payload -> draftStore.save(jobId, payload));
-        return fallback;
+        if (fallback.isPresent()) {
+            fallback.ifPresent(payload -> draftStore.save(jobId, payload));
+            return fallback;
+        }
+        return resolveWaiting(jobId);
+    }
+
+    /**
+     * 같은 조건을 먼저 요청한 쪽에 붙는다. agent 를 부르지 않는다.
+     *
+     * 앞선 요청이 만들어 캐시에 넣으면 이 job 도 그것으로 답한다. 언제
+     * 채워지는지는 조회 시점에 확인하므로(resolveWaiting) 여기서 기다리지
+     * 않는다 — 기다리면 접수 응답이 그만큼 늦어진다.
+     */
+    private RecommendationResult followProducer(RecommendRequest normalized, Long userId) {
+        String jobId = UUID.randomUUID().toString();
+        reuseCacheStore.markWaiting(jobId, cacheKeyBuilder.hash(normalized));
+        jobStore.insertInProgress(jobId, normalized.scheduleId(),
+                RecommendJobStore.JobOrigin.agent("init").ownedBy(userId));
+        log.info("joined in-flight recommendation job_id={}", jobId);
+        return new RecommendationResult(
+                new JobAccepted(jobId, "in_progress", 3), false);
+    }
+
+    /**
+     * 기다리던 결과가 나왔는지 보고, 나왔으면 이 job 의 것으로 만들어 준다.
+     *
+     * 캐시 본문을 그대로 주지 않고 job_id 를 이 job 것으로 바꿔 복사한다.
+     * 같은 본문을 여러 사람이 함께 쓰면, 한 사람이 고친 것이 다른 사람 결과를
+     * 바꾼다. 캐시 적중 경로가 이미 같은 방식으로 복사하고 있다.
+     *
+     * 아직 안 나왔으면 empty 를 돌려준다 — 조회하는 쪽은 진행 중으로 보고
+     * 다시 물어본다. 앞선 요청이 끝내 실패하면 캐시가 채워지지 않아 기다림
+     * 표시의 시한이 끝나고, 조회 쪽 시한도 함께 끝난다.
+     */
+    private Optional<String> resolveWaiting(String jobId) {
+        Optional<String> hash = reuseCacheStore.waitingHash(jobId);
+        if (hash.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> produced = reuseCacheStore.find(hash.get());
+        if (produced.isEmpty()) {
+            return Optional.empty();
+        }
+        String payload = withJobId(produced.get(), jobId);
+        draftStore.save(jobId, payload);
+        jobStore.markFinished(jobId, "done", payload);
+        reuseCacheStore.clearWaiting(jobId);
+        log.info("in-flight join resolved job_id={}", jobId);
+        return Optional.of(payload);
     }
 
     /**
