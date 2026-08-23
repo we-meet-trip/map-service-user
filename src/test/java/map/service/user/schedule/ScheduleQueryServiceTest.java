@@ -16,6 +16,8 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import map.service.user.chat.entity.ChatRoom;
+import map.service.user.chat.repository.ChatRoomRepository;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
@@ -43,15 +45,17 @@ class ScheduleQueryServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ScheduleRepository repository;
     private TripStopsAssembler assembler;
+    private ChatRoomRepository chatRoomRepository;
     private ScheduleService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
+        chatRoomRepository = mock(ChatRoomRepository.class);
         service = new ScheduleService(
                 mock(DraftStore.class), mock(RecommendService.class),
-                repository, objectMapper, assembler);
+                repository, chatRoomRepository, objectMapper, assembler);
     }
 
     private ScheduleEntity entity(
@@ -203,21 +207,56 @@ class ScheduleQueryServiceTest {
                 .isInstanceOf(SavedScheduleNotFoundException.class);
 
         verify(repository, never()).findByScheduleIdAndUserId(any(), any());
-        verify(repository, never()).delete(any());
+        verify(repository, never()).save(any());
     }
 
     // ── 삭제 ──────────────────────────────────────────────
 
     @Test
-    @DisplayName("삭제 — 소유자 일정만 지운다")
-    void deleteOwnSchedule() {
+    @DisplayName("삭제 — 지운 표시만 남기고 행은 두다")
+    void deleteMarksTombstoneInsteadOfRemoving() {
+        // 행을 없애면 "저장했다가 물렀다" 는 판단이 아무 데도 남지 않는다.
+        // 표시된 행은 모든 조회에서 빠지므로 사용자 눈에는 지운 것과 같고,
+        // 기한이 지나면 정리하는 쪽이 진짜로 지운다.
         ScheduleEntity owned = entity(OWNER, "walk", 9, 18);
         when(repository.findByScheduleIdAndUserId(1L, OWNER))
                 .thenReturn(Optional.of(owned));
 
         service.delete(1L, OWNER);
 
-        verify(repository).delete(owned);
+        assertThat(owned.getDeletedAt()).isNotNull();
+        verify(repository).save(owned);
+        verify(repository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("삭제 — 딸린 채팅방은 없애지 않고 읽기 전용으로 돌린다")
+    void deleteClosesChatRoomInsteadOfDroppingIt() {
+        // 방은 지운 사람 혼자만의 것이 아니다. 초대로 들어온 사람들의 대화까지
+        // 한 사람의 삭제로 사라지면 안 된다 — 새 말만 막고 지난 것은 남긴다.
+        ScheduleEntity owned = entity(OWNER, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(Optional.of(owned));
+        ChatRoom room = mock(ChatRoom.class);
+        when(chatRoomRepository.findByScheduleId(1L)).thenReturn(Optional.of(room));
+
+        service.delete(1L, OWNER);
+
+        verify(room).close();
+        verify(chatRoomRepository).save(room);
+    }
+
+    @Test
+    @DisplayName("삭제 — 방이 없어도 그냥 넘어간다")
+    void deleteWorksWhenNoChatRoomExists() {
+        ScheduleEntity owned = entity(OWNER, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(Optional.of(owned));
+        when(chatRoomRepository.findByScheduleId(1L)).thenReturn(Optional.empty());
+
+        service.delete(1L, OWNER);
+
+        assertThat(owned.getDeletedAt()).isNotNull();
     }
 
     @Test
@@ -228,7 +267,7 @@ class ScheduleQueryServiceTest {
 
         assertThatThrownBy(() -> service.delete(1L, OTHER))
                 .isInstanceOf(SavedScheduleNotFoundException.class);
-        verify(repository, never()).delete(any());
+        verify(repository, never()).save(any());
     }
 
     // ── 시작 ──────────────────────────────────────────────

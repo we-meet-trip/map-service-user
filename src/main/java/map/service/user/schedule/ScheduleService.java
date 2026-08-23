@@ -9,6 +9,7 @@ import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import map.service.user.chat.repository.ChatRoomRepository;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.RecommendResponse;
@@ -46,6 +47,7 @@ public class ScheduleService {
     private final DraftStore draftStore;
     private final RecommendService recommendService;
     private final ScheduleRepository repository;
+    private final ChatRoomRepository chatRoomRepository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
 
@@ -53,12 +55,14 @@ public class ScheduleService {
             DraftStore draftStore,
             RecommendService recommendService,
             ScheduleRepository repository,
+            ChatRoomRepository chatRoomRepository,
             ObjectMapper objectMapper,
             TripStopsAssembler stopsAssembler
     ) {
         this.draftStore = draftStore;
         this.recommendService = recommendService;
         this.repository = repository;
+        this.chatRoomRepository = chatRoomRepository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
     }
@@ -259,14 +263,28 @@ public class ScheduleService {
     }
 
     /**
-     * 일정 1건을 삭제한다. 소유자가 아니거나 없으면 404.
+     * 일정 1건을 지운다. 소유자가 아니거나 없으면 404.
      *
-     * 저장된 draft 스냅샷도 함께 사라진다 — 일정 밖에서 그 payload 를
-     * 참조하는 곳은 없다.
+     * 행을 통째로 지우지 않고 지운 표시만 남긴다. "저장했다가 물렀다" 는
+     * 사용자가 남기는 가장 뚜렷한 부정 신호인데, 지워 버리면 그 판단이 아무
+     * 데도 남지 않기 때문이다. 표시된 행은 모든 조회에서 빠지므로 사용자
+     * 눈에는 지운 것과 같고, 기한이 지나면 정리하는 쪽이 진짜로 지운다.
+     *
+     * 딸린 채팅방은 함께 없애지 않고 읽기 전용으로 돌린다. 예전에는 일정을
+     * 지우면 방·참가자·주고받은 말까지 외래키를 타고 통째로 사라졌는데,
+     * 그 방은 지운 사람 혼자만의 것이 아니다 — 초대로 들어온 사람들의
+     * 대화까지 한 사람의 삭제로 없어졌다. 새로 말을 붙이지는 못하게 하되
+     * 지난 것은 남긴다.
      */
     @Transactional
     public void delete(Long scheduleId, Long userId) {
-        repository.delete(findOwned(scheduleId, userId));
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        entity.markDeleted(OffsetDateTime.now());
+        repository.save(entity);
+        chatRoomRepository.findByScheduleId(scheduleId).ifPresent(room -> {
+            room.close();
+            chatRoomRepository.save(room);
+        });
     }
 
     /**

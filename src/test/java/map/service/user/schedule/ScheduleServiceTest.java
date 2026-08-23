@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import map.service.user.chat.repository.ChatRoomRepository;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.trip.TripStopsAssembler;
@@ -41,7 +42,8 @@ class ScheduleServiceTest {
         repository = mock(ScheduleRepository.class);
         recommendService = mock(RecommendService.class);
         service = new ScheduleService(draftStore, recommendService, repository,
-                new ObjectMapper(), mock(TripStopsAssembler.class));
+                mock(ChatRoomRepository.class), new ObjectMapper(),
+                mock(TripStopsAssembler.class));
         // 저장은 조회와 같은 길로 초안을 찾는다(초안이 없으면 완료 기록으로 내려간다).
         when(recommendService.findDraft(JOB_ID))
                 .thenReturn(Optional.of("{\"job_id\":\"" + JOB_ID + "\",\"places\":[]}"));

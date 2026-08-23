@@ -7,6 +7,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.SQLRestriction;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -41,6 +42,11 @@ import org.hibernate.type.SqlTypes;
  */
 @Entity
 @Table(name = "schedules", schema = "user_service")
+// 지운 흔적은 모든 JPA 조회에서 빠진다. 파생 쿼리마다 조건을 붙이는 방식이면
+// findById 같은 기본 조회가 그대로 새는데, 실제로 채팅방을 만드는 쪽이 그것을
+// 쓰고 있어 지운 일정으로 방이 열릴 수 있었다. 한 곳에서 막는다.
+// (학습용 내보내기는 네이티브 SQL 로 직접 읽어 "지웠다" 를 신호로 쓴다.)
+@SQLRestriction("deleted_at is null")
 public class ScheduleEntity {
 
     @Id
@@ -88,6 +94,18 @@ public class ScheduleEntity {
      */
     @Column(name = "started_at")
     private OffsetDateTime startedAt;
+
+    /**
+     * 사용자가 지운 시각. 지운 적 없으면 비어 있다.
+     *
+     * 행을 통째로 지우지 않는 이유: "저장했다가 물렀다" 는 사용자가 남기는
+     * 가장 뚜렷한 부정 신호다. 지워 버리면 그 판단이 아무 데도 남지 않아,
+     * 저장만 정답으로 쓰는 쪽은 "받아들였다" 만 배우게 된다.
+     *
+     * 대신 기한이 지나면 정리하는 쪽에서 진짜로 지운다.
+     */
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
 
     /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
@@ -230,5 +248,22 @@ public class ScheduleEntity {
      */
     public OffsetDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    /** 지운 시각 반환. 살아 있으면 비어 있다. */
+    public OffsetDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    /**
+     * 지운 것으로 표시한다. 이미 지운 것은 그대로 둔다.
+     *
+     * 처음 지운 시각을 지키는 이유: 기한이 지나면 정리하는 쪽이 이 시각을
+     * 기준으로 삼는다. 다시 지울 때마다 시각을 덮으면 정리가 계속 미뤄진다.
+     */
+    public void markDeleted(OffsetDateTime at) {
+        if (deletedAt == null) {
+            deletedAt = at;
+        }
     }
 }
