@@ -1,5 +1,7 @@
 package map.service.user.schedule;
 
+import java.util.Collection;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -17,4 +19,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ScheduleArrivalRepository
         extends JpaRepository<ScheduleArrivalEntity, ScheduleArrivalId> {
+
+    /** 여러 일정의 도착 기록을 한 번에 읽는다(학습 자료 조립용). */
+    List<ScheduleArrivalEntity> findByScheduleIdIn(Collection<Long> scheduleIds);
 }
