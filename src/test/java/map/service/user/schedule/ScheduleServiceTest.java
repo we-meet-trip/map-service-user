@@ -42,7 +42,8 @@ class ScheduleServiceTest {
         repository = mock(ScheduleRepository.class);
         recommendService = mock(RecommendService.class);
         service = new ScheduleService(draftStore, recommendService, repository,
-                mock(ChatRoomRepository.class), new ObjectMapper(),
+                mock(ChatRoomRepository.class), mock(ScheduleArrivalRepository.class),
+                new ObjectMapper(),
                 mock(TripStopsAssembler.class));
         // 저장은 조회와 같은 길로 초안을 찾는다(초안이 없으면 완료 기록으로 내려간다).
         when(recommendService.findDraft(JOB_ID))

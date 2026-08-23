@@ -21,6 +21,7 @@ import map.service.user.trip.TripStopsAssembler;
 import map.service.user.trip.dto.TripStop;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +49,7 @@ public class ScheduleService {
     private final RecommendService recommendService;
     private final ScheduleRepository repository;
     private final ChatRoomRepository chatRoomRepository;
+    private final ScheduleArrivalRepository arrivalRepository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
 
@@ -56,6 +58,7 @@ public class ScheduleService {
             RecommendService recommendService,
             ScheduleRepository repository,
             ChatRoomRepository chatRoomRepository,
+            ScheduleArrivalRepository arrivalRepository,
             ObjectMapper objectMapper,
             TripStopsAssembler stopsAssembler
     ) {
@@ -63,6 +66,7 @@ public class ScheduleService {
         this.recommendService = recommendService;
         this.repository = repository;
         this.chatRoomRepository = chatRoomRepository;
+        this.arrivalRepository = arrivalRepository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
     }
@@ -301,5 +305,43 @@ public class ScheduleService {
         }
         return repository.findByScheduleIdAndUserId(scheduleId, userId)
                 .orElseThrow(() -> new SavedScheduleNotFoundException(scheduleId));
+    }
+
+    /**
+     * 방문지에 닿았다고 기기가 알려 온 것을 남긴다. 소유자가 아니면 404.
+     *
+     * 처음 닿은 것만 남긴다. 기기는 위치가 들어올 때마다 판정하므로 같은 자리를
+     * 여러 번 알려 오는 것이 정상이고, 뒤엣것은 조용히 버린다.
+     *
+     * 좌표는 받지 않는다. 어디였는지는 일정에 이미 적혀 있어 (일차, 순번) 으로
+     * 지목하면 되고, 위치 원점을 서버에 한 벌 더 두면 다루기가 무거워진다.
+     *
+     * 계획 시각이 확실치 않았던 일정인지도 함께 적어 둔다 — 그 경우 계획과
+     * 실제의 시간차를 비교해도 뜻이 없어, 읽는 쪽이 갈라 볼 수 있어야 한다.
+     *
+     * @return 이번에 새로 남겼으면 true, 이미 있었으면 false
+     */
+    @Transactional
+    public boolean recordArrival(Long scheduleId, Long userId,
+                                 int day, int stopOrder, OffsetDateTime arrivedAt) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        String timelineStatus = null;
+        JsonNode payload = entity.getPayload();
+        if (payload != null && payload.hasNonNull("timeline_status")) {
+            timelineStatus = payload.get("timeline_status").asText();
+        }
+        if (arrivalRepository.existsById(
+                new ScheduleArrivalId(scheduleId, day, stopOrder))) {
+            return false;
+        }
+        try {
+            arrivalRepository.save(new ScheduleArrivalEntity(
+                    scheduleId, day, stopOrder, arrivedAt, timelineStatus));
+            return true;
+        } catch (DataIntegrityViolationException e) {
+            // 있는지 보고 넣는 사이에 같은 알림이 한 번 더 들어왔다. 먼저 온
+            // 것이 남으면 되므로 조용히 넘어간다.
+            return false;
+        }
     }
 }

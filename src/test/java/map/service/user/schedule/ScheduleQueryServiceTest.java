@@ -46,6 +46,7 @@ class ScheduleQueryServiceTest {
     private ScheduleRepository repository;
     private TripStopsAssembler assembler;
     private ChatRoomRepository chatRoomRepository;
+    private ScheduleArrivalRepository arrivalRepository;
     private ScheduleService service;
 
     @BeforeEach
@@ -53,9 +54,10 @@ class ScheduleQueryServiceTest {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
         chatRoomRepository = mock(ChatRoomRepository.class);
+        arrivalRepository = mock(ScheduleArrivalRepository.class);
         service = new ScheduleService(
                 mock(DraftStore.class), mock(RecommendService.class),
-                repository, chatRoomRepository, objectMapper, assembler);
+                repository, chatRoomRepository, arrivalRepository, objectMapper, assembler);
     }
 
     private ScheduleEntity entity(
