@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -178,7 +179,8 @@ public class RecommendService {
                         hash, merged.size());
             }
             jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
-                    RecommendJobStore.JobOrigin.agent("init").ownedBy(userId));
+                    RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
+                            .withSegment(segmentOf(userId, merged != null)));
             return new RecommendationResult(accepted, false);
         }
 
@@ -188,6 +190,9 @@ public class RecommendService {
         // 본문을 돌려주어(응답·Redis draft·PG result_payload 전부) 호출 측이
         // 본문 값으로 후속 요청을 만들면 남의 job 에 작용한다. 사본에만 이번
         // job_id 를 덮어쓰고 캐시 본체는 건드리지 않는다.
+        // 덮어쓰기 전에 원본을 꺼내 둔다. 이 값이 사본과, 후보·선택 근거를
+        // 들고 있는 원본 잡을 잇는 유일한 끈이다.
+        String origin = originJobId(cached.get());
         String payload = withJobId(cached.get(), jobId);
         draftStore.save(jobId, payload);
         // 캐시 히트는 agent job 이 없어 완료 이벤트가 영영 오지 않는다. 즉시 완료로
@@ -195,7 +200,8 @@ public class RecommendService {
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
         // schedule_id 를 심고 markFinished 는 기존 행을 갱신하므로 값이 보존된다.
         jobStore.insertInProgress(jobId, normalized.scheduleId(),
-                RecommendJobStore.JobOrigin.cacheHit().ownedBy(userId));
+                RecommendJobStore.JobOrigin.cacheHit(origin).ownedBy(userId)
+                        .withSegment(segmentOf(userId, false)));
         jobStore.markFinished(jobId, "done", payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
@@ -207,6 +213,47 @@ public class RecommendService {
      * 파싱 실패나 루트가 객체가 아닌 경우에는 원문을 그대로 돌려준다. 캐시 히트는
      * 순수 최적화 경로이므로 여기서 예외를 던져 요청을 실패시키지 않는다(무중단 원칙).
      */
+    /**
+     * 물어본 시점의 요청자 성향을 만든다. 모르면 null.
+     *
+     * 잡에 붙여 두는 이유는 나중에 조인으로 읽으면 사람이 프로필을 고친 뒤
+     * 과거 잡의 입력까지 함께 바뀌기 때문이다. 학습은 같은 기록을 여러 번
+     * 읽으므로 그때마다 값이 달라지면 안 된다.
+     *
+     * themeMerged 는 그 요청의 테마에 저장된 취향이 섞였는지다. 섞인 요청은
+     * 입력에 이미 성향이 들어가 있어, 성향을 따로 쓰는 학습에서 같은 것을
+     * 두 번 세게 된다 — 그것을 갈라 보려면 표시가 있어야 한다.
+     */
+    private Map<String, Object> segmentOf(Long userId, boolean themeMerged) {
+        return profileThemeProvider.segmentFor(userId, themeMerged);
+    }
+
+    /**
+     * 캐시 본체가 담고 있는 "이 결과를 처음 만든 잡" 의 식별자를 꺼낸다.
+     *
+     * 이 값이 사본과 원본을 잇는 유일한 끈이다. 사본은 곧바로 job_id 를 자기
+     * 것으로 덮어쓰므로, 덮기 전에 꺼내 두지 않으면 원본을 되짚을 길이 없다.
+     * 원본에는 후보와 선택 근거(학습 신호)가 붙어 있는데, 끈이 없으면 사용자가
+     * 실제로 저장한 일정이 어떤 후보에서 나왔는지 영영 알 수 없게 된다.
+     *
+     * 못 꺼내면 null 이다. 캐시 히트는 순수 최적화 경로라 여기서 실패해도
+     * 요청을 깨뜨리지 않는다 — 계보만 비고 나머지는 그대로 동작한다.
+     */
+    private String originJobId(String payloadJson) {
+        try {
+            JsonNode root = objectMapper.readTree(payloadJson);
+            if (root instanceof ObjectNode obj) {
+                JsonNode id = obj.get("job_id");
+                if (id != null && id.isTextual()) {
+                    return id.asText();
+                }
+            }
+        } catch (JsonProcessingException e) {
+            log.warn("reuse cache payload origin job_id read skipped: {}", e.getMessage());
+        }
+        return null;
+    }
+
     private String withJobId(String payloadJson, String jobId) {
         try {
             JsonNode root = objectMapper.readTree(payloadJson);
@@ -326,7 +373,8 @@ public class RecommendService {
         String jobId = UUID.randomUUID().toString();
         reuseCacheStore.markWaiting(jobId, cacheKeyBuilder.hash(normalized));
         jobStore.insertInProgress(jobId, normalized.scheduleId(),
-                RecommendJobStore.JobOrigin.agent("init").ownedBy(userId));
+                RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
+                        .withSegment(segmentOf(userId, false)));
         log.info("joined in-flight recommendation job_id={}", jobId);
         return new RecommendationResult(
                 new JobAccepted(jobId, "in_progress", 3), false);
@@ -352,8 +400,16 @@ public class RecommendService {
         if (produced.isEmpty()) {
             return Optional.empty();
         }
+        // 접수할 때는 캐시로 답하게 될지 몰라 agent 로 적어 두었다. 이제 어느
+        // 잡이 만든 결과인지 알게 됐으니 계보만 채운다 — 이것이 없으면 이
+        // 잡으로 저장된 일정은 후보를 되짚을 수 없다.
+        String origin = originJobId(produced.get());
         String payload = withJobId(produced.get(), jobId);
         draftStore.save(jobId, payload);
+        if (origin != null) {
+            jobStore.insertInProgress(jobId, null,
+                    RecommendJobStore.JobOrigin.joined(origin));
+        }
         jobStore.markFinished(jobId, "done", payload);
         reuseCacheStore.clearWaiting(jobId);
         log.info("in-flight join resolved job_id={}", jobId);
@@ -490,6 +546,17 @@ public class RecommendService {
      * request: 신규 추천에 사용할 RecommendRequest.
      */
     public JobAccepted research(String jobId, RecommendRequest request) {
+        return research(jobId, request, null);
+    }
+
+    /**
+     * 위와 같되, 누가 다시 짜기를 눌렀는지 함께 남긴다.
+     *
+     * 다시 짜기는 "앞의 결과를 받지 않겠다" 는 뜻이라 사람의 판단이 가장
+     * 뚜렷하게 드러나는 자리다. 누가 그랬는지가 없으면 그 판단을 어떤 성향과
+     * 짝지을 수 없어 신호로 쓰이지 못한다.
+     */
+    public JobAccepted research(String jobId, RecommendRequest request, Long userId) {
         String limitKey = (request.scheduleId() != null && !request.scheduleId().isBlank())
                 ? "sched:" + request.scheduleId()
                 : "job:" + jobId;
@@ -503,7 +570,8 @@ public class RecommendService {
         // 원본 jobId 를 함께 남긴다. 재탐색은 "앞의 결과를 버렸다" 는 뜻이라,
         // 무엇을 버리고 무엇을 받았는지가 쌍으로 있어야 신호가 된다.
         jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
-                RecommendJobStore.JobOrigin.research(jobId));
+                RecommendJobStore.JobOrigin.research(jobId).ownedBy(userId)
+                        .withSegment(segmentOf(userId, false)));
         return accepted;
     }
 
@@ -662,11 +730,23 @@ public class RecommendService {
      * request: 검증 완료된 RecommendRequest. places 는 2~10개.
      */
     public JobAccepted createRouteJob(RecommendRequest request) {
+        return createRouteJob(request, null);
+    }
+
+    /**
+     * 위와 같되, 고른 사람을 함께 남긴다.
+     *
+     * 이 경로는 사용자가 장소를 직접 골라 동선만 다시 만드는 것이라, 고른
+     * 장소 자체가 사람이 남긴 선택이다. 누구의 선택인지가 없으면 성향과
+     * 짝지을 수 없다.
+     */
+    public JobAccepted createRouteJob(RecommendRequest request, Long userId) {
         RecommendRequest normalized =
                 withStage(request, "route", List.of(), request.places());
         JobAccepted accepted = agentClient.requestRecommend(normalized);
         jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
-                RecommendJobStore.JobOrigin.agent("route"));
+                RecommendJobStore.JobOrigin.agent("route").ownedBy(userId)
+                        .withSegment(segmentOf(userId, false)));
         return accepted;
     }
 }

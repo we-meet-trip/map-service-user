@@ -64,8 +64,9 @@ public class TripController {
      */
     @PostMapping("/route")
     public TripGenerateResponse route(
-            @Valid @RequestBody TripRouteRequest request
+            @Valid @RequestBody TripRouteRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        return service.route(request);
+        return service.route(request, userId);
     }
 }

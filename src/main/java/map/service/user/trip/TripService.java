@@ -176,6 +176,11 @@ public class TripService {
      * request: 검증 완료된 TripRouteRequest.
      */
     public TripGenerateResponse route(TripRouteRequest request) {
+        return route(request, null);
+    }
+
+    /** 위와 같되, 장소를 고른 사람을 잡에 남긴다. */
+    public TripGenerateResponse route(TripRouteRequest request, Long userId) {
         String province = TripMapping.normalizeProvince(request.location().province());
         String city = request.location().city();
         Schedule schedule = request.schedule();
@@ -198,7 +203,7 @@ public class TripService {
                 null,
                 request.places());
 
-        JobAccepted accepted = recommendService.createRouteJob(recommendRequest);
+        JobAccepted accepted = recommendService.createRouteJob(recommendRequest, userId);
         String jobId = accepted.jobId();
         log.info("trip route started job_id={} places={}",
                 jobId, request.places().size());

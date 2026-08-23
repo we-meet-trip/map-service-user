@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import map.service.user.recommend.DraftStore;
+import map.service.user.recommend.RecommendService;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
 import map.service.user.trip.TripGenerationException;
@@ -49,7 +50,8 @@ class ScheduleQueryServiceTest {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
         service = new ScheduleService(
-                mock(DraftStore.class), repository, objectMapper, assembler);
+                mock(DraftStore.class), mock(RecommendService.class),
+                repository, objectMapper, assembler);
     }
 
     private ScheduleEntity entity(

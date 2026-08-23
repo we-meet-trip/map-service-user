@@ -390,6 +390,42 @@ class RecommendServiceTest {
     }
 
     @Test
+    void hitLinksBackToTheJobThatFirstProducedIt() {
+        // 캐시 본체는 그 결과를 처음 만든 잡의 식별자를 담고 있다. 사본은 곧바로
+        // 자기 것으로 덮어쓰므로, 덮기 전에 꺼내 두지 않으면 원본을 되짚을 길이
+        // 없다 — 후보와 선택 근거는 원본 잡에만 붙어 있어, 끈이 끊기면 사용자가
+        // 실제로 저장한 일정이 어떤 후보에서 나왔는지 알 수 없게 된다.
+        String origin = "11111111-2222-3333-4444-555555555555";
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash))
+                .thenReturn(Optional.of("{\"job_id\":\"" + origin + "\",\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(1L);
+
+        JobAccepted result = service.createRecommendation(cacheRequest);
+
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit(origin));
+        // 사본이 받은 본문에는 자기 식별자가 들어가야 한다(남의 잡에 작용 방지).
+        ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
+        verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
+        assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
+    }
+
+    @Test
+    void hitWithoutOriginInPayloadStillWorks() {
+        // 계보를 못 읽어도 요청은 그대로 답해야 한다. 캐시는 최적화 경로다.
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.of("{\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(1L);
+
+        JobAccepted result = service.createRecommendation(cacheRequest);
+
+        assertThat(result.jobId()).isNotBlank();
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit());
+    }
+
+    @Test
     void hitAtThresholdStillReturnsImmediatelyAndTriggersBackgroundRefresh() {
         String hash = cacheKeyBuilder.hash(cacheRequest);
         when(reuseCacheStore.find(hash)).thenReturn(Optional.of("{\"places\":[]}"));

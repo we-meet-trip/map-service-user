@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -98,6 +99,10 @@ public class RecommendJobStore {
                         uuid, scheduleId, origin.mode(),
                         parseUuid(origin.parentJobId()), origin.source(),
                         origin.ownerUserId());
+                // 성향은 위 문장에 얹지 않는다. 그쪽은 네이티브 SQL 이고 JSON
+                // 캐스팅 구문이 DB 마다 달라, 시험이 쓰는 DB 에서 통째로 깨진다.
+                // 대신 JPA 가 이미 아는 길로 따로 채운다.
+                fillSegmentIfAbsent(uuid, origin.userSegment());
             }
         } catch (RuntimeException e) {
             log.warn("recommend job insert failed job_id={} reason={}", jobId, e.getMessage());
@@ -105,32 +110,90 @@ public class RecommendJobStore {
     }
 
     /**
+     * 성향 스냅샷을 비어 있을 때만 채운다.
+     *
+     * 여기서 실패해도 접수는 이미 끝나 있다. 성향은 학습에 쓰는 곁가지라,
+     * 못 남겼다고 요청을 깨뜨리지 않는다.
+     */
+    private void fillSegmentIfAbsent(UUID uuid, Map<String, Object> segment) {
+        if (segment == null) {
+            return;
+        }
+        try {
+            JsonNode node = objectMapper.valueToTree(segment);
+            repository.findById(uuid).ifPresent(entity -> {
+                entity.fillUserSegmentIfAbsent(node);
+                repository.save(entity);
+            });
+        } catch (RuntimeException e) {
+            log.warn("user segment record failed job_id={} reason={}",
+                    uuid, e.getMessage());
+        }
+    }
+
+    /**
      * 잡의 출처. 어느 경로가 만들었고, 재탐색이면 무엇을 거부한 것인지.
      *
      * mode: init | research | route | refresh
-     * parentJobId: 재탐색일 때 원본 잡. 이것이 있어야 "이 결과를 버리고 저것을
-     *              받았다" 가 쌍으로 읽힌다. 그 밖에는 null.
+     * parentJobId: 이 잡이 딛고 선 앞의 잡.
+     *              재탐색이면 버린 원본이고("이 결과를 버리고 저것을 받았다"),
+     *              캐시로 답했거나 앞선 요청에 얹혀 간 잡이면 그 결과를 처음
+     *              만든 잡이다. 뒤엣것이 없으면 사용자가 실제로 저장한 일정이
+     *              어떤 후보에서 나왔는지 되짚을 수 없다 — 후보와 선택 근거는
+     *              원본 잡에만 붙어 있기 때문이다.
+     *              어느 쪽인지는 mode·source 로 갈린다.
      * source: agent | cache_hit. 캐시로 답한 잡은 agent 가 돌지 않았는데도
      *         완료로 기록되므로, 세는 쪽이 갈라 볼 수 있어야 한다.
      */
-    public record JobOrigin(String mode, String parentJobId, String source, Long ownerUserId) {
+    public record JobOrigin(String mode, String parentJobId, String source,
+                            Long ownerUserId, Map<String, Object> userSegment) {
 
         public static JobOrigin agent(String mode) {
-            return new JobOrigin(mode, null, "agent", null);
+            return new JobOrigin(mode, null, "agent", null, null);
         }
 
         public static JobOrigin research(String parentJobId) {
-            return new JobOrigin("research", parentJobId, "agent", null);
+            return new JobOrigin("research", parentJobId, "agent", null, null);
         }
 
         public static JobOrigin cacheHit() {
-            return new JobOrigin("init", null, "cache_hit", null);
+            return cacheHit(null);
+        }
+
+        /** 캐시로 답한 잡. 그 결과를 처음 만든 잡을 함께 가리킨다. */
+        public static JobOrigin cacheHit(String originJobId) {
+            return new JobOrigin("init", originJobId, "cache_hit", null, null);
+        }
+
+        /**
+         * 앞선 요청에 얹혀 간 잡에 원본을 뒤늦게 달아 준다.
+         *
+         * 접수할 때는 캐시로 답하게 될지 몰라 agent 로 기록해 두고, 결과가
+         * 나온 뒤에야 어느 잡이 만든 것인지 알게 된다. 그때 계보만 채운다 —
+         * source 를 고쳐 쓰지 않는 이유는 이 잡이 실제로 agent 를 부르려던
+         * 잡이었고, 부르지 않았다는 사실은 원본이 따로 있다는 것으로 이미
+         * 드러나기 때문이다.
+         */
+        public static JobOrigin joined(String originJobId) {
+            return new JobOrigin("init", originJobId, "agent", null, null);
         }
 
         /** 소유자를 덧붙인다. 토큰이 없어 모르면 그대로 둔다. */
         public JobOrigin ownedBy(Long userId) {
             return userId == null ? this
-                    : new JobOrigin(mode, parentJobId, source, userId);
+                    : new JobOrigin(mode, parentJobId, source, userId, userSegment);
+        }
+
+        /**
+         * 물어본 시점의 성향을 덧붙인다. 모르면 그대로 둔다.
+         *
+         * 빈 것도 모르는 것으로 본다. 칸이 하나도 없는 성향을 남기면 읽는
+         * 쪽에서 "성향이 있는 잡" 으로 세는데 실제로는 아무 것도 없어,
+         * 성향별로 갈라 볼 때 빈 묶음이 하나 더 생긴다.
+         */
+        public JobOrigin withSegment(Map<String, Object> segment) {
+            return segment == null || segment.isEmpty() ? this
+                    : new JobOrigin(mode, parentJobId, source, ownerUserId, segment);
         }
     }
 

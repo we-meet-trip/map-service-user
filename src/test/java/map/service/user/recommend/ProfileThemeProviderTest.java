@@ -165,4 +165,90 @@ class ProfileThemeProviderTest {
         assertThat(ProfileThemeProvider.SUPPORTED)
                 .containsAll(ProfileThemeProvider.INTEREST_TO_THEME.values());
     }
+
+    // ---- 성향 스냅샷 ----
+
+    /**
+     * 스냅샷은 학습의 입력이 된다. 원문을 한 벌 더 두지 않으면서도 "누가
+     * 물었는가" 를 남기는 것이 목적이라, 뭉개는 규칙 자체가 계약이다.
+     */
+    private void givenProfile(java.time.LocalDate birth, String gender,
+                              List<String> themes) {
+        // 사용자를 먼저 다 만든 뒤에 저장소를 스텁한다. 스텁 안에서 또 스텁하면
+        // Mockito 가 끝나지 않은 스텁으로 보고 거절한다.
+        User user = mock(User.class);
+        when(user.getBirthDate()).thenReturn(birth);
+        when(user.getGender()).thenReturn(gender);
+        when(user.getThemes()).thenReturn(themes);
+        when(user.getInterests()).thenReturn(null);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+    }
+
+    @Test
+    void segmentBucketsAgeAndCodesGender() {
+        givenProfile(java.time.LocalDate.now().minusYears(27), "남성",
+                List.of("food", "cafe"));
+
+        var segment = provider.segmentFor(1L, false);
+
+        assertThat(segment).containsEntry("age_band", "20s");
+        assertThat(segment).containsEntry("gender", "m");
+        assertThat(segment).containsEntry("themes", List.of("food", "cafe"));
+        assertThat(segment).containsEntry("theme_merged", false);
+    }
+
+    @Test
+    void segmentKeepsUnknownAsAValueNotAMissingKey() {
+        // 빼 버리면 읽는 쪽이 "없음" 과 "안 물어봄" 을 구분하지 못한다.
+        givenProfile(null, null, null);
+
+        var segment = provider.segmentFor(1L, true);
+
+        assertThat(segment).containsEntry("age_band", "unknown");
+        assertThat(segment).containsKey("gender");
+        assertThat(segment.get("gender")).isNull();
+        assertThat(segment).containsEntry("themes", List.of());
+        assertThat(segment).containsEntry("theme_merged", true);
+    }
+
+    @Test
+    void segmentDropsUnsupportedThemes() {
+        // 스냅샷에도 8종 밖의 값이 들어가면 안 된다. 학습에서 갈래가 늘어난다.
+        givenProfile(null, null, Arrays.asList("food", "당일치기 🚗", null));
+
+        assertThat(provider.segmentFor(1L, false))
+                .containsEntry("themes", List.of("food"));
+    }
+
+    @Test
+    void segmentIsNullWhenUserIsUnknownOrLookupFails() {
+        assertThat(provider.segmentFor(null, false)).isNull();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.empty());
+        assertThat(provider.segmentFor(1L, false)).isNull();
+
+        when(userRepository.findById(1L)).thenThrow(new RuntimeException("db down"));
+        assertThat(provider.segmentFor(1L, false)).isNull();
+    }
+
+    @Test
+    void ageBandFoldsExtremesIntoOneBucket() {
+        // 잘못 입력된 생년월일이 한 칸을 혼자 차지하면 그 칸은 사실상 개인이다.
+        assertThat(ProfileThemeProvider.ageBand(
+                java.time.LocalDate.now().minusYears(85))).isEqualTo("70plus");
+        assertThat(ProfileThemeProvider.ageBand(
+                java.time.LocalDate.now().minusYears(200))).isEqualTo("unknown");
+        assertThat(ProfileThemeProvider.ageBand(
+                java.time.LocalDate.now().plusYears(5))).isEqualTo("unknown");
+    }
+
+    @Test
+    void genderCodeAcceptsScreenSpellingsAndRejectsTheRest() {
+        // 화면 표기가 바뀌어도 학습 평면의 값이 갈라지지 않게 여기서 맞춘다.
+        assertThat(ProfileThemeProvider.genderCode("남성")).isEqualTo("m");
+        assertThat(ProfileThemeProvider.genderCode("여성")).isEqualTo("f");
+        assertThat(ProfileThemeProvider.genderCode("Male")).isEqualTo("m");
+        assertThat(ProfileThemeProvider.genderCode("기타")).isNull();
+        assertThat(ProfileThemeProvider.genderCode(null)).isNull();
+    }
 }

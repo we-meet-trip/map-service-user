@@ -10,6 +10,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import map.service.user.recommend.DraftStore;
+import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.RecommendResponse;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
@@ -28,7 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
  * 추천 draft 를 일정(ScheduleEntity)으로 변환하여 저장한다.
  * DraftStore 에서 draft JSON 을 읽어 payload 로 보관하고, 저장 성공 시 draft 를 삭제한다.
  *
- * draftStore: DraftStore. draft JSON 조회/삭제.
+ * draftStore: DraftStore. 저장 성공 후 초안 삭제.
+ * recommendService: RecommendService. 초안 조회(초안이 만료됐으면 완료 기록으로
+ *                   내려간다). 조회 화면과 같은 길로 읽어야 "화면에는 보이는데
+ *                   저장만 안 되는" 상태가 생기지 않는다.
  * repository: ScheduleRepository. ScheduleEntity 영속화.
  * objectMapper: Jackson ObjectMapper. draft JSON → JsonNode 파싱.
  * stopsAssembler: TripStopsAssembler. 저장된 draft 를 상세 조회 응답의
@@ -40,17 +44,20 @@ public class ScheduleService {
     private static final Logger log = LoggerFactory.getLogger(ScheduleService.class);
 
     private final DraftStore draftStore;
+    private final RecommendService recommendService;
     private final ScheduleRepository repository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
 
     public ScheduleService(
             DraftStore draftStore,
+            RecommendService recommendService,
             ScheduleRepository repository,
             ObjectMapper objectMapper,
             TripStopsAssembler stopsAssembler
     ) {
         this.draftStore = draftStore;
+        this.recommendService = recommendService;
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
@@ -78,7 +85,11 @@ public class ScheduleService {
      */
     @Transactional
     public Long persist(ScheduleSaveRequest request, Long userId) {
-        String draftJson = draftStore.find(request.jobId())
+        // 조회와 같은 길로 찾는다. 초안은 한 시간이면 사라지는데 저장만
+        // 그것을 직접 보고 있어, 만들어 둔 일정을 조금 뒤에 저장하려 하면
+        // 화면에는 멀쩡히 보이는 것이 저장에서만 없다고 나왔다.
+        // recommendService.findDraft 는 초안이 없으면 완료 기록으로 내려간다.
+        String draftJson = recommendService.findDraft(request.jobId())
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {

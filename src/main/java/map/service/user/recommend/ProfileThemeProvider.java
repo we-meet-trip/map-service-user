@@ -1,6 +1,7 @@
 package map.service.user.recommend;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -101,6 +102,103 @@ public class ProfileThemeProvider {
         addThemeCodes(out, user.getThemes());
         addInterestCodes(out, user.getInterests());
         return List.copyOf(out);
+    }
+
+    /**
+     * 잡에 붙일 성향 스냅샷을 만든다. 모르면 null.
+     *
+     * <p>학습의 입력에 "누가 물었는가" 를 넣기 위한 값이다. 조인으로 그때그때
+     * 읽지 않고 스냅샷을 두는 이유는, 사람이 프로필을 고치면 과거 잡의 입력까지
+     * 함께 바뀌어 같은 기록이 읽을 때마다 달라지기 때문이다.
+     *
+     * <p>나이는 10년 단위로 뭉개고 성별은 코드로 바꾼다. 원문을 학습 평면에 한
+     * 벌 더 두지 않으려는 것이다. 값을 모르는 칸은 {@code unknown}·null 로 남겨
+     * "모른다" 를 1급으로 다룬다 — 빼 버리면 읽는 쪽이 "없음" 과 "안 물어봄" 을
+     * 구분하지 못한다.
+     *
+     * <p>themeMerged 는 그 요청의 테마에 저장된 취향이 섞였는지다. 섞인 요청은
+     * 입력에 이미 이 사람의 성향이 들어가 있어, 성향을 따로 쓰는 학습에서 같은
+     * 정보를 두 번 세게 된다. 갈라 보려면 표시가 있어야 한다.
+     *
+     * <p>이 클래스의 규약대로 예외를 던지지 않는다. 못 읽으면 null 이고,
+     * 부르는 쪽은 성향 없이 기록한다.
+     *
+     * @return 스냅샷 맵. 사용자를 모르거나 조회에 실패하면 null.
+     */
+    public Map<String, Object> segmentFor(Long userId, boolean themeMerged) {
+        if (userId == null) {
+            return null;
+        }
+        Optional<User> found;
+        try {
+            found = userRepository.findById(userId);
+        } catch (RuntimeException e) {
+            log.warn("profile segment lookup failed userId={} err={}",
+                    userId, e.getClass().getSimpleName());
+            return null;
+        }
+        if (found.isEmpty()) {
+            return null;
+        }
+        User user = found.get();
+        Set<String> themes = new LinkedHashSet<>();
+        addThemeCodes(themes, user.getThemes());
+        addInterestCodes(themes, user.getInterests());
+
+        // 값을 모르는 칸도 키는 남긴다. 빼 버리면 읽는 쪽이 "없음" 과
+        // "안 물어봄" 을 구분하지 못한다.
+        Map<String, Object> segment = new LinkedHashMap<>();
+        segment.put("age_band", ageBand(user.getBirthDate()));
+        segment.put("gender", genderCode(user.getGender()));
+        segment.put("themes", List.copyOf(themes));
+        segment.put("theme_merged", themeMerged);
+        return segment;
+    }
+
+    /**
+     * 생년월일을 10년 단위 묶음으로 바꾼다. 모르면 {@code unknown}.
+     *
+     * <p>상한을 두는 이유: 잘못 입력된 생년월일(1900년 등)이 그대로 통계의
+     * 한 칸을 차지하면 그 칸에 사람이 하나뿐이라 사실상 개인 식별이 된다.
+     * 70대 이상은 한 칸으로 묶는다.
+     */
+    static String ageBand(java.time.LocalDate birthDate) {
+        if (birthDate == null) {
+            return "unknown";
+        }
+        int age = java.time.Period.between(
+                birthDate, java.time.LocalDate.now(
+                        java.time.ZoneId.of("Asia/Seoul"))).getYears();
+        if (age < 0 || age > 120) {
+            return "unknown";
+        }
+        if (age < 10) {
+            return "under10";
+        }
+        if (age >= 70) {
+            return "70plus";
+        }
+        return (age / 10 * 10) + "s";
+    }
+
+    /**
+     * 화면이 보낸 성별 표기를 코드로 바꾼다. 못 알아보면 null.
+     *
+     * <p>DB 에 값 제약이 없어 화면이 보내는 표기가 그대로 담긴다(실측: 남성·여성).
+     * 표기가 바뀌어도 학습 평면의 값이 갈라지지 않도록 여기서 한 번 맞춘다.
+     */
+    static String genderCode(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String v = raw.trim().toLowerCase(Locale.ROOT);
+        if (v.equals("남성") || v.equals("남") || v.equals("m") || v.equals("male")) {
+            return "m";
+        }
+        if (v.equals("여성") || v.equals("여") || v.equals("f") || v.equals("female")) {
+            return "f";
+        }
+        return null;
     }
 
     /** 이미 코드로 저장된 값 — 지원 목록에 있는 것만 통과시킨다. */

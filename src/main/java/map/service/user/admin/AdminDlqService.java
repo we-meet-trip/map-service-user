@@ -96,7 +96,14 @@ public class AdminDlqService {
                     continue;
                 }
                 draftStore.save(jobId, payload);
-                jobStore.markFinished(jobId, status, payload);
+                // 학습 신호는 죽은 편지함에 이미 실려 있는데, 예전에는 그것을
+                // 읽지 않고 결과만 기록한 뒤 편지를 지웠다. 되살린 잡만 남고
+                // 무엇을 보고 골랐는지는 그 자리에서 사라졌다.
+                //
+                // 기록에 실패하면 예외가 올라와 아래 지우기를 건너뛴다. 편지가
+                // 남으므로 다시 시도할 수 있다 — 예전에는 실패해도 지워 버려
+                // 되돌릴 방법이 없었다.
+                jobStore.recordCompletion(jobId, status, payload, str(v.get("training")));
                 streamsTemplate.opsForStream().delete(dlqStream, id);
                 succeeded++;
             } catch (RuntimeException e) {

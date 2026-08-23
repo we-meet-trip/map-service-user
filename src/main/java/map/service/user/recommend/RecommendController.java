@@ -84,13 +84,14 @@ public class RecommendController {
      */
     @PostMapping("/route")
     public ResponseEntity<JobAccepted> route(
-            @Valid @RequestBody RecommendRequest request
+            @Valid @RequestBody RecommendRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
         if (request.places() == null || request.places().size() < 2) {
             throw new IllegalArgumentException(
                     "places must contain 2 to 10 selected places");
         }
-        return ResponseEntity.accepted().body(service.createRouteJob(request));
+        return ResponseEntity.accepted().body(service.createRouteJob(request, userId));
     }
 
     /**
@@ -157,9 +158,10 @@ public class RecommendController {
     @PostMapping("/{jobId}/research")
     public ResponseEntity<JobAccepted> research(
             @PathVariable String jobId,
-            @Valid @RequestBody RecommendRequest request
+            @Valid @RequestBody RecommendRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        JobAccepted accepted = service.research(jobId, request);
+        JobAccepted accepted = service.research(jobId, request, userId);
         return ResponseEntity.accepted().body(accepted);
     }
 }

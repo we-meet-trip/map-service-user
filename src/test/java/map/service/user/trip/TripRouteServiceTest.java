@@ -56,7 +56,7 @@ class TripRouteServiceTest {
         service = new TripService(
                 recommendService, hubWeatherClient, stopsAssembler,
                 reviewSummaryService, new ObjectMapper(), 1L, 10L);
-        when(recommendService.createRouteJob(any()))
+        when(recommendService.createRouteJob(any(), any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
     }
 
@@ -99,7 +99,7 @@ class TripRouteServiceTest {
 
         ArgumentCaptor<RecommendRequest> captor =
                 ArgumentCaptor.forClass(RecommendRequest.class);
-        verify(recommendService).createRouteJob(captor.capture());
+        verify(recommendService).createRouteJob(captor.capture(), any());
         RecommendRequest sent = captor.getValue();
         assertThat(sent.places()).hasSize(2);
         assertThat(sent.places().get(0).name()).isEqualTo("속초해변");

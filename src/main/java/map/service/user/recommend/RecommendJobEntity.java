@@ -88,6 +88,19 @@ public class RecommendJobEntity {
     private Long ownerUserId;
 
     /**
+     * 잡을 만든 시점의 요청자 성향(연령대·성별·테마·취향병합여부).
+     *
+     * 스냅샷인 이유: 사람이 나중에 프로필을 고치면 조인으로 읽는 값은 함께
+     * 바뀌어, 같은 기록을 두 번 읽을 때 다른 입력이 나온다. 물어본 그때의
+     * 값을 붙여 두어야 학습과 재현이 어긋나지 않는다.
+     *
+     * 원문(생년월일 등)은 담지 않는다 — 학습에 필요한 만큼만 옮긴다.
+     */
+    @Column(name = "user_segment", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode userSegment;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected RecommendJobEntity() {
@@ -119,6 +132,24 @@ public class RecommendJobEntity {
         this.resultPayload = resultPayload;
         this.error = error;
         this.finishedAt = finishedAt;
+    }
+
+    /** 요청자 성향 스냅샷 반환. nullable(모르면 비어 있다). */
+    public JsonNode getUserSegment() {
+        return userSegment;
+    }
+
+    /**
+     * 성향 스냅샷을 처음 한 번만 새긴다.
+     *
+     * 이미 있으면 두지 않는다. 같은 잡에 접수 기록이 두 번 들어와도 처음
+     * 물어본 시점의 값이 남아야 하기 때문이다 — 나중 값으로 덮으면 스냅샷을
+     * 두는 뜻이 사라진다.
+     */
+    public void fillUserSegmentIfAbsent(JsonNode segment) {
+        if (userSegment == null && segment != null) {
+            userSegment = segment;
+        }
     }
 
     /** 작업 UUID 반환. */
