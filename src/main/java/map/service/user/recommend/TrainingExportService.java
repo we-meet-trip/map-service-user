@@ -20,6 +20,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import map.service.user.domain.user.repository.UserRepository;
+import map.service.user.nearby.NearbyImpressionEntity;
+import map.service.user.nearby.NearbyImpressionRepository;
 import map.service.user.recommend.dto.TrainingExportRow;
 import map.service.user.schedule.ScheduleArrivalEntity;
 import map.service.user.schedule.ScheduleArrivalRepository;
@@ -70,6 +72,7 @@ public class TrainingExportService {
 
     private final ScheduleExportRepository scheduleExportRepository;
     private final ScheduleArrivalRepository arrivalRepository;
+    private final NearbyImpressionRepository impressionRepository;
     private final RecommendJobRepository jobRepository;
     private final RecommendTrainingRepository trainingRepository;
     private final UserRepository userRepository;
@@ -80,6 +83,7 @@ public class TrainingExportService {
     public TrainingExportService(
             ScheduleExportRepository scheduleExportRepository,
             ScheduleArrivalRepository arrivalRepository,
+            NearbyImpressionRepository impressionRepository,
             RecommendJobRepository jobRepository,
             RecommendTrainingRepository trainingRepository,
             UserRepository userRepository,
@@ -88,6 +92,7 @@ public class TrainingExportService {
             @Value("${training.export.batch-size:500}") int batchSize) {
         this.scheduleExportRepository = scheduleExportRepository;
         this.arrivalRepository = arrivalRepository;
+        this.impressionRepository = impressionRepository;
         this.jobRepository = jobRepository;
         this.trainingRepository = trainingRepository;
         this.userRepository = userRepository;
@@ -149,8 +154,9 @@ public class TrainingExportService {
         String exportedAt = OffsetDateTime.now().toString();
         List<TrainingExportRow> rows = new ArrayList<>(kept.size());
         Map<Long, List<ScheduleArrivalEntity>> arrivals = readArrivals(kept);
+        Map<Long, List<NearbyImpressionEntity>> impressions = readImpressions(kept);
         for (Group g : kept) {
-            rows.add(toRow(g, arrivals, exportedAt, salt));
+            rows.add(toRow(g, arrivals, impressions, exportedAt, salt));
         }
 
         // 나누기 기준이 조용히 잡 단위로 떨어지면, 같은 조건의 세션이 배우는 쪽과
@@ -292,8 +298,26 @@ public class TrainingExportService {
         return out;
     }
 
+    private Map<Long, List<NearbyImpressionEntity>> readImpressions(List<Group> groups) {
+        Set<Long> ids = new HashSet<>();
+        for (Group g : groups) {
+            for (Session s : g.members()) {
+                ids.add(s.schedule().getScheduleId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<NearbyImpressionEntity>> out = new HashMap<>();
+        for (NearbyImpressionEntity e : impressionRepository.findByScheduleIdIn(ids)) {
+            out.computeIfAbsent(e.getScheduleId(), k -> new ArrayList<>()).add(e);
+        }
+        return out;
+    }
+
     private TrainingExportRow toRow(Group group,
                                     Map<Long, List<ScheduleArrivalEntity>> arrivalsBySchedule,
+                                    Map<Long, List<NearbyImpressionEntity>> impressionsBySchedule,
                                     String exportedAt, String salt) {
         Session head = group.head();
         ScheduleEntity schedule = head.schedule();
@@ -339,6 +363,20 @@ public class TrainingExportService {
         boolean anyDeleted = group.members().stream()
                 .anyMatch(s -> s.schedule().getDeletedAt() != null);
 
+        // 묶인 사본 전체의 주변 기록을 합친다. 같은 세트를 저장한 것들이라
+        // 어느 벌에서 봤든 그 세션에서 본 것이다.
+        List<TrainingExportRow.NearbyImpression> nearby = new ArrayList<>();
+        for (Session s : group.members()) {
+            for (NearbyImpressionEntity e : impressionsBySchedule.getOrDefault(
+                    s.schedule().getScheduleId(), List.of())) {
+                nearby.add(new TrainingExportRow.NearbyImpression(
+                        e.getDay(), e.getStopOrder(), e.getCategory(),
+                        e.getContentId(), e.getRank(), e.getClickedAt() != null));
+            }
+        }
+        int nearbyClicked = (int) nearby.stream()
+                .filter(TrainingExportRow.NearbyImpression::clicked).count();
+
         String exclusion = l1ExclusionReason(head, candidates, savedSet);
         SplitKey split = splitKey(payload, head.originJobId());
 
@@ -376,8 +414,10 @@ public class TrainingExportService {
                         saved, chosen,
                         rejectedContentIds(head), rejectedSource(head),
                         List.copyOf(arrived), allDeleted),
+                nearby,
                 new TrainingExportRow.Counts(
-                        candidates.size(), savedSet.size(), chosenSet.size(), arrived.size()),
+                        candidates.size(), savedSet.size(), chosenSet.size(), arrived.size(),
+                        nearby.size(), nearbyClicked),
                 exclusion == null,
                 exclusion);
     }

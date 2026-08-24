@@ -65,6 +65,8 @@ public record TrainingExportRow(
         @JsonProperty("schedule") Schedule schedule,
         @JsonProperty("candidates") List<Candidate> candidates,
         @JsonProperty("labels") Labels labels,
+        /** 일정 주변에서 보여 준 장소와 그중 눌린 것. 없으면 빈 목록. */
+        @JsonProperty("nearby") List<NearbyImpression> nearby,
         @JsonProperty("counts") Counts counts,
 
         /** 후보 랭킹 학습에 쓸 수 있는 세션인지. */
@@ -123,11 +125,30 @@ public record TrainingExportRow(
     ) {
     }
 
+    /**
+     * 주변 장소를 한 건 보여 준 것과 그것이 눌렸는지.
+     *
+     * <p>보여 준 것을 함께 싣는 이유: 눌린 것만 있으면 "안 눌렀다" 가
+     * "안 보였다" 인지 "보고 안 골랐다" 인지 구분되지 않아 반례로 못 쓴다.
+     */
+    public record NearbyImpression(
+            @JsonProperty("day") Integer day,
+            @JsonProperty("stop_order") Integer stopOrder,
+            @JsonProperty("category") String category,
+            @JsonProperty("content_id") String contentId,
+            /** 목록에서 몇 번째로 보였는지. 노출 편향 보정용. */
+            @JsonProperty("rank") Integer rank,
+            @JsonProperty("clicked") boolean clicked
+    ) {
+    }
+
     public record Counts(
             @JsonProperty("candidates") int candidates,
             @JsonProperty("saved") int saved,
             @JsonProperty("chosen") int chosen,
-            @JsonProperty("arrived") int arrived
+            @JsonProperty("arrived") int arrived,
+            @JsonProperty("nearby_shown") int nearbyShown,
+            @JsonProperty("nearby_clicked") int nearbyClicked
     ) {
     }
 }

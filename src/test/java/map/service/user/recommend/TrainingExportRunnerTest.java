@@ -59,7 +59,8 @@ class TrainingExportRunnerTest {
                         10, 18, null, null, 1, false),
                 List.of(), new TrainingExportRow.Labels(
                         List.of(), List.of(), List.of(), "unavailable", List.of(), false),
-                new TrainingExportRow.Counts(0, 0, 0, 0), true, null);
+                List.of(),
+                new TrainingExportRow.Counts(0, 0, 0, 0, 0, 0), true, null);
     }
 
     private Stream<Path> files(Path dir) throws IOException {

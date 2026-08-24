@@ -294,9 +294,16 @@ public class ScheduleService {
     /**
      * 소유자 조건을 붙여 일정을 찾는다. 없으면 404 예외.
      *
+     * <p>바깥에 열어 둔 이유: 일정에 딸린 다른 기능(주변 장소 등)도 같은
+     * 규칙으로 주인을 가려야 한다. 규칙을 옮겨 적으면 한쪽만 고쳐져 갈라진다.
+     *
      * 토큰이 없으면 조회 자체를 하지 않는다 — 소유자 없는 행은 누가 저장한
      * 것인지 구분할 수 없어서 열어 주는 순간 전원 공용이 된다.
      */
+    public ScheduleEntity requireOwned(Long scheduleId, Long userId) {
+        return findOwned(scheduleId, userId);
+    }
+
     private ScheduleEntity findOwned(Long scheduleId, Long userId) {
         if (userId == null) {
             // 소유자 없는 행을 토큰 없이 열어 주면 식별자만 바꿔 가며 남의

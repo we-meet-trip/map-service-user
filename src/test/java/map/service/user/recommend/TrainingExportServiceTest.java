@@ -13,6 +13,8 @@ import java.util.UUID;
 import map.service.user.domain.user.entity.AuthProvider;
 import map.service.user.domain.user.entity.User;
 import map.service.user.domain.user.repository.UserRepository;
+import map.service.user.nearby.NearbyImpressionEntity;
+import map.service.user.nearby.NearbyImpressionRepository;
 import map.service.user.recommend.dto.TrainingExportRow;
 import map.service.user.schedule.ScheduleArrivalEntity;
 import map.service.user.schedule.ScheduleArrivalRepository;
@@ -57,6 +59,8 @@ class TrainingExportServiceTest {
     @Autowired
     private ScheduleArrivalRepository arrivalRepository;
     @Autowired
+    private NearbyImpressionRepository impressionRepository;
+    @Autowired
     private RecommendJobRepository jobRepository;
     @Autowired
     private RecommendTrainingRepository trainingRepository;
@@ -74,7 +78,8 @@ class TrainingExportServiceTest {
     @BeforeEach
     void setUp() {
         service = new TrainingExportService(
-                scheduleExportRepository, arrivalRepository, jobRepository,
+                scheduleExportRepository, arrivalRepository, impressionRepository,
+                jobRepository,
                 trainingRepository, userRepository,
                 new RecommendCacheKey(50000, 60), objectMapper, 500);
     }
@@ -429,6 +434,37 @@ class TrainingExportServiceTest {
 
         assertThat(r.l1Eligible()).isFalse();
         assertThat(r.l1ExclusionReason()).isEqualTo("route_session");
+    }
+
+    @Test
+    @DisplayName("주변에서 보여 준 것과 눌린 것이 함께 실린다")
+    void nearbyImpressionsRideAlong() {
+        // 눌린 것만 실으면 "안 눌렀다" 가 "안 보였다" 인지 "보고 안 골랐다" 인지
+        // 구분되지 않아 반례로 쓸 수 없다.
+        UUID origin = job("refresh", "agent", null, null);
+        signal(origin, true);
+        UUID copy = job("init", "cache_hit", origin, null);
+        ScheduleEntity sch = schedule(user("real@gmail.com"), copy, "kakao:0");
+
+        NearbyImpressionEntity shown = new NearbyImpressionEntity(
+                sch.getScheduleId(), 1, 1, "cafe", "kakao:cafe-1", 0, OffsetDateTime.now());
+        NearbyImpressionEntity clicked = new NearbyImpressionEntity(
+                sch.getScheduleId(), 1, 1, "cafe", "kakao:cafe-2", 1, OffsetDateTime.now());
+        clicked.markClicked(OffsetDateTime.now());
+        impressionRepository.saveAndFlush(shown);
+        impressionRepository.saveAndFlush(clicked);
+
+        TrainingExportRow r = run(true).get(0);
+
+        assertThat(r.nearby()).hasSize(2);
+        assertThat(r.counts().nearbyShown()).isEqualTo(2);
+        assertThat(r.counts().nearbyClicked()).isEqualTo(1);
+        assertThat(r.nearby()).filteredOn(TrainingExportRow.NearbyImpression::clicked)
+                .extracting(TrainingExportRow.NearbyImpression::contentId)
+                .containsExactly("kakao:cafe-2");
+        // 몇 번째로 보였는지가 남아야 노출 편향을 보정할 수 있다.
+        assertThat(r.nearby()).extracting(TrainingExportRow.NearbyImpression::rank)
+                .containsExactlyInAnyOrder(0, 1);
     }
 
     @Test

@@ -333,6 +333,14 @@ cors:
 auth:
   enforced: ${AUTH_ENFORCED:false}
 
+# ---- nearby : 일정 방문지 주변 장소 ----
+# NearbyService 가 본 섹션을 참조한다.
+# - radius-meters : 방문지에서 몇 미터까지 볼지. 걸어서 닿는 거리로 잡았다.
+# - size          : 한 번에 보여 줄 최대 개수. 늘리면 발급처 호출량이 함께 는다.
+nearby:
+  radius-meters: ${NEARBY_RADIUS_METERS:1000}
+  size: ${NEARBY_SIZE:10}
+
 # ---- training.export : 학습 자료 내보내기 (사람이 필요할 때 켜서 한 번 돌린다) ----
 # TrainingExportRunner / TrainingExportService 가 본 섹션을 참조한다.
 # - enabled=false(기본)  : 아무 것도 하지 않는다. 평소 기동에 영향이 없다.

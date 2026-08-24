@@ -1,6 +1,7 @@
 package map.service.user.recommend;
 
 import java.time.OffsetDateTime;
+import map.service.user.nearby.NearbyImpressionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,7 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * TrainingSignalSweeper — 오래된 학습 신호와 편집 기록을 지우는 주기 작업
+ * TrainingSignalSweeper — 오래된 학습 신호·편집·노출 기록을 지우는 주기 작업
  *
  * 두 표는 요청이 들어올 때마다 늘어나기만 하고 줄어들 일이 없다. 하루 2,000건을
  * 받으면 신호만 연 1GB 대로 불어나고, 편집 기록은 전후를 통째로 담아 더 크다.
@@ -37,16 +38,19 @@ public class TrainingSignalSweeper {
 
     private final RecommendTrainingRepository trainingRepository;
     private final RecommendEditRepository editRepository;
+    private final NearbyImpressionRepository impressionRepository;
     private final int retentionDays;
     private final int batchSize;
 
     public TrainingSignalSweeper(
             RecommendTrainingRepository trainingRepository,
             RecommendEditRepository editRepository,
+            NearbyImpressionRepository impressionRepository,
             @Value("${recommend.retention-days:180}") int retentionDays,
             @Value("${recommend.retention-batch:1000}") int batchSize) {
         this.trainingRepository = trainingRepository;
         this.editRepository = editRepository;
+        this.impressionRepository = impressionRepository;
         this.retentionDays = retentionDays;
         this.batchSize = batchSize;
     }
@@ -60,9 +64,12 @@ public class TrainingSignalSweeper {
         try {
             int signals = trainingRepository.deleteOlderThan(cutoff, batchSize);
             int edits = editRepository.deleteOlderThan(cutoff, batchSize);
-            if (signals > 0 || edits > 0) {
-                log.info("training retention swept signals={} edits={} cutoff={}",
-                        signals, edits, cutoff);
+            // 보여 준 것까지 남기므로 다른 표보다 빨리 불어난다. 같은 기한으로 정리한다.
+            int impressions = impressionRepository.deleteOlderThan(cutoff, batchSize);
+            if (signals > 0 || edits > 0 || impressions > 0) {
+                log.info("training retention swept signals={} edits={} impressions={}"
+                                + " cutoff={}",
+                        signals, edits, impressions, cutoff);
             }
         } catch (RuntimeException e) {
             // 정리에 실패해도 서비스는 계속 돌아야 한다. 다음 주기가 다시 한다.
