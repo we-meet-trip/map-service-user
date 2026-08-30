@@ -108,4 +108,30 @@ class ScheduleControllerTest {
 
         verify(service, never()).persist(any(), any());
     }
+
+    @Test
+    @DisplayName("재추천 — 새 추천 작업을 띄우고 202 로 job_id 를 준다")
+    void replan_returnsAcceptedJob() throws Exception {
+        when(service.replan(7L, 42L)).thenReturn(
+                new map.service.user.recommend.dto.JobAccepted(
+                        "job-9", "in_progress", 3));
+
+        mockMvc.perform(post("/api/v1/schedules/7/replan").with(owner(42L)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.job_id").value("job-9"))
+                .andExpect(jsonPath("$.status").value("in_progress"));
+
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("재추천 — 토큰이 없으면 시도하지 않고 401")
+    void replan_withoutOwner_returns401() throws Exception {
+        SecurityContextHolder.clearContext();
+
+        mockMvc.perform(post("/api/v1/schedules/7/replan"))
+                .andExpect(status().isUnauthorized());
+
+        verify(service, never()).replan(any(), any());
+    }
 }

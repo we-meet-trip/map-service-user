@@ -4,12 +4,21 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import map.service.user.recommend.DraftStore;
+import map.service.user.recommend.RecommendJobStore;
+import map.service.user.recommend.RecommendService;
+import map.service.user.recommend.dto.DateRange;
+import map.service.user.recommend.dto.JobAccepted;
+import map.service.user.recommend.dto.Mobility;
+import map.service.user.recommend.dto.RecommendRequest;
 import map.service.user.recommend.dto.RecommendResponse;
+import map.service.user.weather.ScheduleWeatherService;
+import map.service.user.weather.dto.WeatherSnapshotItem;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
 import map.service.user.schedule.dto.ScheduleSummary;
@@ -42,17 +51,26 @@ public class ScheduleService {
     private final ScheduleRepository repository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
+    private final RecommendJobStore jobStore;
+    private final ScheduleWeatherService weatherService;
+    private final RecommendService recommendService;
 
     public ScheduleService(
             DraftStore draftStore,
             ScheduleRepository repository,
             ObjectMapper objectMapper,
-            TripStopsAssembler stopsAssembler
+            TripStopsAssembler stopsAssembler,
+            RecommendJobStore jobStore,
+            ScheduleWeatherService weatherService,
+            RecommendService recommendService
     ) {
+        this.recommendService = recommendService;
         this.draftStore = draftStore;
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
+        this.jobStore = jobStore;
+        this.weatherService = weatherService;
     }
 
     /**
@@ -115,6 +133,7 @@ public class ScheduleService {
                 request.activeStartHour(),
                 request.activeEndHour()
         );
+        applyWeatherBaseline(entity, request.jobId(), start, end);
         repository.save(entity);
         draftStore.delete(request.jobId());
         return entity.getScheduleId();
@@ -144,10 +163,103 @@ public class ScheduleService {
                         e.getTitle(),
                         e.getDateStart(),
                         e.getDateEnd(),
-                        e.getCreatedAt()))
+                        e.getCreatedAt(),
+                        weatherService.readAlert(e).orElse(null)))
                 .toList();
         return new ScheduleListResponse(summaries);
     }
+
+    /**
+     * 일정에 지역을 새기고 그 시점 예보를 기준선으로 굳힌다.
+     *
+     * 지역은 추천 요청에만 실려 있고 draft payload 에는 남지 않으므로, 그 요청을
+     * 만든 추천 작업에서 되찾아 온다. 지역을 모르는(지역 보존 이전에 만들어진)
+     * 작업이면 아무것도 하지 않는다 — 좌표로 지역을 추측해 채우면 엉뚱한 동네
+     * 날씨로 "비 온다"고 알리게 된다.
+     *
+     * 날씨 조회는 best-effort 다. 실패하면 기준선 없이 저장되고, 그 일정은 날씨
+     * 감시에서 빠질 뿐 저장 자체는 성공한다.
+     */
+    private void applyWeatherBaseline(
+            ScheduleEntity entity, String jobId, LocalDate start, LocalDate end
+    ) {
+        jobStore.findRegion(jobId).ifPresent(region -> {
+            entity.setRegion(region.province(), region.city());
+            List<WeatherSnapshotItem> baseline = weatherService.buildBaseline(
+                    region.province(), region.city(), start, end);
+            entity.setWeatherBaseline(weatherService.toJson(baseline));
+        });
+    }
+
+    /**
+     * 날씨가 바뀐 일정을 저장된 조건 그대로 다시 추천한다(1클릭 재추천).
+     *
+     * 저장해 둔 지역·기간·이동수단·활동 시간대를 그대로 써서 새 추천 작업을
+     * 띄운다. 사용자가 조건을 다시 입력하지 않아도 되는 것이 이 기능의 요점이다.
+     *
+     * 일반 추천 경로(createRecommendation)를 그대로 탄다. 재탐색(mode1)이
+     * 아니므로 1일 3회 재탐색 한도를 깎지 않는다 — 날씨가 나빠진 것은 사용자의
+     * 변심이 아니라 외부 변수이고, 한도를 깎으면 "비가 와서 다시 짜야 하는데
+     * 한도가 없다"는 상황이 생긴다.
+     *
+     * 걸려 있던 알림은 지운다. 새 코스는 지금 예보를 이미 반영하므로 같은 배너를
+     * 계속 띄울 이유가 없다. 새 결과를 저장하면 그때 기준선도 새로 굳는다.
+     *
+     * 지역을 모르는 일정이면 ScheduleReplanUnavailableException.
+     * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404).
+     */
+    @Transactional
+    public JobAccepted replan(Long scheduleId, Long userId) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        if (entity.getProvince() == null || entity.getCity() == null) {
+            throw new ScheduleReplanUnavailableException(scheduleId);
+        }
+
+        int startHour = entity.getActiveStartHour() != null
+                ? entity.getActiveStartHour()
+                : TripStopsAssembler.DEFAULT_START_HOUR;
+        int endHour = entity.getActiveEndHour() != null
+                ? entity.getActiveEndHour()
+                : TripStopsAssembler.DEFAULT_END_HOUR;
+
+        RecommendRequest request = new RecommendRequest(
+                new DateRange(
+                        entity.getDateStart(), entity.getDateEnd(),
+                        LocalTime.of(startHour % 24, 0),
+                        LocalTime.of(endHour % 24, 0)),
+                null,
+                null,
+                toMobility(entity.getTransport()),
+                entity.getProvince(),
+                entity.getCity(),
+                String.valueOf(scheduleId),
+                "init",
+                List.of(),
+                null);
+
+        JobAccepted accepted = recommendService.createRecommendation(request);
+        weatherService.clearAlert(entity);
+        return accepted;
+    }
+
+    /**
+     * 저장된 이동수단 문자열을 추천 요청의 이동수단으로 옮긴다.
+     *
+     * 값이 없거나 아는 어휘가 아니면 null 이다 — 임의로 도보라고 정하면
+     * 자전거로 짜 둔 일정이 다시 짤 때 도보 반경으로 좁아진다.
+     */
+    private static Mobility toMobility(String transport) {
+        if (transport == null) {
+            return null;
+        }
+        for (Mobility m : Mobility.values()) {
+            if (m.value().equals(transport)) {
+                return m;
+            }
+        }
+        return null;
+    }
+
 
     /**
      * 일정 1건을 client 결과 화면과 같은 형태로 조립해 반환한다.
@@ -239,7 +351,8 @@ public class ScheduleService {
                 entity.getCreatedAt(),
                 entity.getStartedAt(),
                 warnings,
-                timelineStatus);
+                timelineStatus,
+                weatherService.readAlert(entity).orElse(null));
     }
 
     /**

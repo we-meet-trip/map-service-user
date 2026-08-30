@@ -409,6 +409,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    /**
+     * 다시 짤 수 없는 일정에 재추천을 요청했을 때 409 로 반환한다.
+     *
+     * 요청 형식은 옳고(400 아님) 일정도 존재하지만(404 아님), 지역을 모르는
+     * 일정이라 지금 상태로는 수행할 수 없다는 뜻이다. 클라이언트는 이 응답을
+     * 받으면 재추천 버튼 대신 "새로 추천받기"로 안내하면 된다.
+     */
+    @ExceptionHandler(map.service.user.schedule.ScheduleReplanUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleScheduleReplanUnavailable(
+            map.service.user.schedule.ScheduleReplanUnavailableException ex) {
+        log.warn("schedule replan unavailable: {}", ex.getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "replan_unavailable");
+        body.put("message", "이 일정은 다시 추천할 수 없습니다. 새로 추천을 만들어 주세요.");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
     // ── 최종 폴백 ──────────────────────────────────────────────────────────────
 
     /** 위에서 처리되지 않은 모든 예외를 500 으로 변환한다. */

@@ -58,6 +58,17 @@ public class RecommendJobEntity {
     private OffsetDateTime finishedAt;
 
     /**
+     * 요청에 실려 온 광역시도/시군구. 추천 결과 payload 에는 지역이 남지 않아
+     * 여기서만 보존된다. 이 작업으로 저장되는 일정이 날씨를 다시 물으려면
+     * 지역이 필요하다(hub 날씨는 좌표가 아니라 지역명으로 묻는다).
+     */
+    @Column(name = "province", length = 20)
+    private String province;
+
+    @Column(name = "city", length = 20)
+    private String city;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected RecommendJobEntity() {
@@ -124,6 +135,27 @@ public class RecommendJobEntity {
     /** 완료 기록 시각 반환. nullable. */
     public OffsetDateTime getFinishedAt() {
         return finishedAt;
+    }
+
+    /** 요청 광역시도 반환. 지역 없이 만들어진 작업이면 null. */
+    public String getProvince() {
+        return province;
+    }
+
+    /** 요청 시군구 반환. 지역 없이 만들어진 작업이면 null. */
+    public String getCity() {
+        return city;
+    }
+
+    /**
+     * 요청 지역을 새긴다. 둘 중 하나라도 비면 둘 다 비운다 — 반쪽 지역으로는
+     * hub 에 날씨를 물을 수 없다.
+     */
+    public void setRegion(String province, String city) {
+        boolean usable = province != null && !province.isBlank()
+                && city != null && !city.isBlank();
+        this.province = usable ? province : null;
+        this.city = usable ? city : null;
     }
 
     /** 상태를 갱신한다(완료 기록 시 사용). */

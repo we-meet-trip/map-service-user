@@ -176,6 +176,18 @@ recommend:
   cache-refresh-every-hits: ${RECOMMEND_CACHE_REFRESH_EVERY_HITS:3}
   cache-refresh-queue-capacity: ${RECOMMEND_CACHE_REFRESH_QUEUE_CAPACITY:100}
 
+# ---- weather-watch : 저장된 일정의 날씨 변화 감시 ----
+# ScheduleWeatherWatcher 가 본 섹션을 참조한다.
+# 아직 끝나지 않은 일정의 예보를 주기적으로 다시 받아, 저장 시점 예보와 견줘
+# 실내/야외 판단이 뒤집히면 일정에 알림을 걸어 둔다(앱은 배너 + 1클릭 재추천).
+# - enabled          : 감시 사용 여부. 끄면 빈이 아예 만들어지지 않는다
+# - interval-ms      : 순회 주기(ms). 발급처 호출량이 걱정되면 늘린다
+# - initial-delay-ms : 기동 후 첫 순회까지 대기(ms). 기동 직후 부하와 겹치지 않게 둔다
+weather-watch:
+  enabled: ${WEATHER_WATCH_ENABLED:true}
+  interval-ms: ${WEATHER_WATCH_INTERVAL_MS:1800000}
+  initial-delay-ms: ${WEATHER_WATCH_INITIAL_DELAY_MS:60000}
+
 # ---- streams : Redis Streams 컨슈머 설정 ----
 # StreamsConsumerConfig / RecommendJobsConsumer 가 본 섹션을 참조한다.
 # - recommend-stream     : 소비할 Stream 키
