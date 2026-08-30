@@ -1,8 +1,10 @@
 package map.service.user.schedule.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import map.service.user.weather.dto.WeatherAlert;
 
 /**
  * ScheduleSummary — 일정 목록의 한 줄
@@ -18,11 +20,13 @@ import java.time.OffsetDateTime;
  * createdAt: 저장 시각. JSON key "created_at". 목록 정렬 근거를 client 가
  *            함께 보여줄 수 있게 내려준다.
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ScheduleSummary(
         @JsonProperty("schedule_id") Long scheduleId,
         String title,
         @JsonProperty("date_start") LocalDate dateStart,
         @JsonProperty("date_end") LocalDate dateEnd,
-        @JsonProperty("created_at") OffsetDateTime createdAt
+        @JsonProperty("created_at") OffsetDateTime createdAt,
+        @JsonProperty("weather_alert") WeatherAlert weatherAlert
 ) {
 }

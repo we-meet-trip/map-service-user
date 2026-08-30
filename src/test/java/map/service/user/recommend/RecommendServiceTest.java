@@ -145,8 +145,11 @@ class RecommendServiceTest {
     void createWritesInProgressJobRecord() {
         service.createRecommendation(request("init", List.of()));
 
-        // 접수 직후 발급된 job_id 와 scheduleId 로 in_progress write-through.
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        // 접수 직후 발급된 job_id·scheduleId 와 요청 지역으로 in_progress
+        // write-through. 지역은 나중에 이 작업으로 저장될 일정이 날씨를 다시
+        // 물을 때 쓰인다 — 여기서 남기지 않으면 되찾을 곳이 없다.
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
     }
 
     // ---- research(Mode 1) ----
@@ -314,7 +317,8 @@ class RecommendServiceTest {
 
         JobAccepted result = service.createRecommendation(cacheRequest);
 
-        verify(jobStore).insertInProgress(result.jobId(), "sched-9");
+        verify(jobStore).insertInProgress(
+                result.jobId(), "sched-9", "서울특별시", "동작구");
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
         verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
@@ -415,7 +419,8 @@ class RecommendServiceTest {
     void routeJobRecordsInProgress() {
         service.createRouteJob(routeRequest("init"));
 
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
     }
 
     // ─── 저장된 취향 병합 ────────────────────────────────────────

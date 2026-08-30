@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import map.service.user.trip.dto.TripStop;
+import map.service.user.weather.dto.WeatherAlert;
 
 /**
  * ScheduleDetailResponse — 저장된 일정 상세 응답 본문
@@ -45,6 +46,7 @@ public record ScheduleDetailResponse(
         @JsonProperty("created_at") OffsetDateTime createdAt,
         @JsonProperty("started_at") OffsetDateTime startedAt,
         List<String> warnings,
-        @JsonProperty("timeline_status") String timelineStatus
+        @JsonProperty("timeline_status") String timelineStatus,
+        @JsonProperty("weather_alert") WeatherAlert weatherAlert
 ) {
 }

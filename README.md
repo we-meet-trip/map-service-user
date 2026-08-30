@@ -12,6 +12,11 @@ MAP 서비스의 BFF(Backend For Frontend). Spring Boot 3.4.2 + JDK 17. 클라�
   - Mode 1 (동일 장소 금지 재생성): agent에 제외 장소 전달 + Redis 카운터로 일정당 3회 + KST 익일 자정까지 제한(EXPIREAT). 키 형태 `recommend:research:sched:{id}`(또는 scheduleId 부재 시 `job:{jobId}`), 초과 시 409 `RECOMMEND_001`. 카운터 장애 시 fail-open.
   - Mode 2 (부분 편집): 경로 재계산을 hub에 위임, LLM 호출 없음
   - Mode 3 (전체 수동 입력): 경로 산출을 hub에 위임, LLM 호출 없음
+- 날씨 변화 감지 → 1클릭 재추천:
+  - 일정을 저장할 때 그 시점 예보를 `schedules.weather_baseline`(V011)에 기준선으로 굳힌다. 지역(광역시도·시군구)은 추천 요청에만 실려 있어 `recommend_jobs`(V011)에 먼저 남기고 저장 시 일정으로 옮긴다.
+  - `ScheduleWeatherWatcher` 가 주기적으로(기본 30분, `WEATHER_WATCH_INTERVAL_MS`) 끝나지 않은 일정의 예보를 다시 받아 기준선과 견준다. 강수확률 50% 경계를 넘나들거나 하늘 상태가 비·눈으로 바뀌면 `schedules.weather_alert` 에 알림을 건다(`rain_appeared` / `rain_cleared`). 감시 자체는 `WEATHER_WATCH_ENABLED=false` 로 끌 수 있다.
+  - 걸린 알림은 일정 목록·상세 응답의 `weather_alert` 로 나간다(없으면 필드 자체가 없음).
+  - `POST /api/v1/schedules/{id}/replan` — 저장된 지역·기간·이동수단으로 새 추천 작업을 띄우고 202 + `job_id`. 결과는 기존 `GET /api/v1/recommend/{jobId}` 로 받는다. 일반 추천 경로라 **재탐색 1일 3회 한도를 깎지 않는다**(날씨 악화는 사용자 변심이 아니라 외부 변수). 지역을 모르는 옛 일정은 409 `replan_unavailable`.
 - 클라이언트용 Long-poll 엔드포인트: `GET /api/v1/recommend/{jobId}` — 준비 전 202 + `Retry-After: 3`, 완료 시 200 + JSON
 - 추천 작업 내구성 영속화: 완료 결과를 PostgreSQL `recommend_jobs`(V005)에 write-through 하여, 휘발성 Redis draft 만료/유실 시 폴백 조회한다(응답 형식 불변).
 - 리뷰 검색 프록시: `GET /api/v1/reviews?query=&display=` → hub `/v1/reviews` 위임(상류 오류 502 `review_search_upstream_error`).

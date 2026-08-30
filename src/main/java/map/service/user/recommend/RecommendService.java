@@ -170,7 +170,8 @@ public class RecommendService {
                         "reuse cache link skipped (themes merged) hash={} themes={}",
                         hash, merged.size());
             }
-            jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+            jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                    normalized.province(), normalized.city());
             return new RecommendationResult(accepted, false);
         }
 
@@ -186,7 +187,8 @@ public class RecommendService {
         // 기록해야 findDraft 의 PG 폴백(Redis draft TTL 만료 이후)과 admin 콘솔
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
         // schedule_id 를 심고 markFinished 는 기존 행을 갱신하므로 값이 보존된다.
-        jobStore.insertInProgress(jobId, normalized.scheduleId());
+        jobStore.insertInProgress(jobId, normalized.scheduleId(),
+                normalized.province(), normalized.city());
         jobStore.markFinished(jobId, "done", payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
@@ -369,7 +371,8 @@ public class RecommendService {
         draftStore.delete(jobId);
         JobAccepted accepted = agentClient.requestRecommend(
                 withStage(request, "mode1", exclude));
-        jobStore.insertInProgress(accepted.jobId(), request.scheduleId());
+        jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
+                request.province(), request.city());
         return accepted;
     }
 
@@ -531,7 +534,8 @@ public class RecommendService {
         RecommendRequest normalized =
                 withStage(request, "route", List.of(), request.places());
         JobAccepted accepted = agentClient.requestRecommend(normalized);
-        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId());
+        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                normalized.province(), normalized.city());
         return accepted;
     }
 }

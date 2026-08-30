@@ -44,14 +44,20 @@ class ScheduleQueryServiceTest {
     private ScheduleRepository repository;
     private TripStopsAssembler assembler;
     private ScheduleService service;
+    private map.service.user.weather.ScheduleWeatherService weatherService;
 
     @BeforeEach
     void setUp() {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
+        weatherService = mock(map.service.user.weather.ScheduleWeatherService.class);
+        when(weatherService.readAlert(any())).thenReturn(java.util.Optional.empty());
         service = new ScheduleService(
                 mock(DraftStore.class), repository, objectMapper, assembler,
-                TestPayloadCiphers.enabled());
+                TestPayloadCiphers.enabled(),
+                mock(map.service.user.recommend.RecommendJobStore.class),
+                weatherService,
+                mock(map.service.user.recommend.RecommendService.class));
     }
 
     private ScheduleEntity entity(
@@ -64,6 +70,38 @@ class ScheduleQueryServiceTest {
                 userId, UUID.randomUUID(), "속초 당일치기",
                 LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 6),
                 payload, transport, startHour, endHour);
+    }
+
+    @Test
+    @DisplayName("목록 — 걸려 있는 날씨 알림을 함께 내려준다")
+    void listCarriesWeatherAlert() {
+        ScheduleEntity e = entity(OWNER, "walk", 9, 18);
+        when(repository.findByUserIdOrderByDateStartAsc(OWNER))
+                .thenReturn(List.of(e));
+        map.service.user.weather.dto.WeatherAlert alert =
+                new map.service.user.weather.dto.WeatherAlert(
+                        "rain_appeared", LocalDate.of(2026, 7, 6),
+                        20, 80, "sunny", "rainy", null);
+        when(weatherService.readAlert(e)).thenReturn(java.util.Optional.of(alert));
+
+        ScheduleListResponse out = service.list(OWNER);
+
+        assertThat(out.schedules().get(0).weatherAlert()).isEqualTo(alert);
+    }
+
+    @Test
+    @DisplayName("상세 — 걸려 있는 날씨 알림을 함께 내려준다")
+    void detailCarriesWeatherAlert() {
+        ScheduleEntity e = entity(OWNER, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(java.util.Optional.of(e));
+        map.service.user.weather.dto.WeatherAlert alert =
+                new map.service.user.weather.dto.WeatherAlert(
+                        "rain_cleared", LocalDate.of(2026, 7, 6),
+                        80, 10, "rainy", "sunny", null);
+        when(weatherService.readAlert(e)).thenReturn(java.util.Optional.of(alert));
+
+        assertThat(service.detail(1L, OWNER).weatherAlert()).isEqualTo(alert);
     }
 
     private static TripStop stop(int order, Integer durationMinutes) {
