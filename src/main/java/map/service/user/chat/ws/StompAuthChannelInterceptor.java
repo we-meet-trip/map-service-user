@@ -12,6 +12,7 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
@@ -35,6 +36,9 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String ROOM_TOPIC_PREFIX = "/topic/rooms/";
+
+    /** 브로커가 구독 매칭에 쓰는 것과 같은 대조기. 판정이 갈리지 않게 맞춘다. */
+    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     private final JwtService jwtService;
     private final ChatRoomAccessService access;
@@ -90,8 +94,12 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         if (destination == null) {
             return;
         }
-        // 와일드카드 구독은 타 방 토픽 도청 위험이 있어 전면 거부한다.
-        if (destination.indexOf('*') >= 0 || destination.indexOf('?') >= 0) {
+        // 패턴 구독은 전면 거부한다. 브로커가 구독 목적지를 경로 패턴으로 보고
+        // 실제 방 토픽에 맞춰 보기 때문에, 패턴 하나로 남의 방 대화를 함께 받는다.
+        // 별표와 물음표만 막으면 '/topic/{a}/{b}' 같은 중괄호 형태가 남는다 —
+        // 그 목적지는 방 토픽 접두어로 시작하지 않아 아래 인가 검사도 건너뛴다.
+        // 판정을 브로커와 같은 대조기에 맡겨, 새 패턴 문법이 생겨도 함께 막히게 한다.
+        if (PATH_MATCHER.isPattern(destination)) {
             throw new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT);
         }
         if (!destination.startsWith(ROOM_TOPIC_PREFIX)) {
