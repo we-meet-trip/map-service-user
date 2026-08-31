@@ -28,6 +28,7 @@ public record TransitRouteLeg(
         @JsonProperty("end_name") String endName,
         @JsonProperty("section_time_min") int sectionTimeMin,
         @JsonProperty("station_count") Integer stationCount,
+        @JsonProperty("distance_m") int distanceM,
         List<List<Double>> geometry,
         List<String> stops
 ) {

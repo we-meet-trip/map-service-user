@@ -32,18 +32,22 @@ public class TransitRouteClient {
      * hub GET /v1/transit/routes 호출.
      *
      * startLat / startLng: 출발 좌표. endLat / endLng: 도착 좌표.
+     * mode: 화면이 고른 이동수단(all·subway·bus). 거르는 규칙은 hub 가 정한다 —
+     *       여기서 다시 거르면 규칙이 두 곳에 흩어져 한쪽만 고치는 일이 생긴다.
      *
      * 외부 조회 실패는 예외가 아니라 응답의 status 로 온다. 그대로 흘려보내
      * 화면이 "경로 없음"과 "조회 불가"를 구분해 보여줄 수 있게 한다.
      */
     public TransitRouteOptionsResponse fetch(
-            double startLat, double startLng, double endLat, double endLng) {
+            double startLat, double startLng, double endLat, double endLng,
+            String mode) {
         return client.get()
                 .uri(uri -> uri.path("/v1/transit/routes")
                         .queryParam("start_lat", startLat)
                         .queryParam("start_lng", startLng)
                         .queryParam("end_lat", endLat)
                         .queryParam("end_lng", endLng)
+                        .queryParam("mode", mode)
                         .build())
                 .retrieve()
                 .onStatus(

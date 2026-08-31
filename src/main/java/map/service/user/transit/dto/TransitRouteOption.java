@@ -19,6 +19,9 @@ public record TransitRouteOption(
         int fare,
         @JsonProperty("transfer_count") int transferCount,
         @JsonProperty("total_walk_m") int totalWalkM,
+        @JsonProperty("subway_distance_m") int subwayDistanceM,
+        @JsonProperty("bus_distance_m") int busDistanceM,
+        @JsonProperty("bus_distance_ratio") double busDistanceRatio,
         List<String> modes,
         List<TransitRouteLeg> legs
 ) {

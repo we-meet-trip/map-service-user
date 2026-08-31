@@ -72,7 +72,7 @@ class TransitRouteClientTest {
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
         TransitRouteOptionsResponse response =
-                client.fetch(37.4979, 127.0276, 37.5663, 126.9779);
+                client.fetch(37.4979, 127.0276, 37.5663, 126.9779, "all");
 
         assertThat(response.status()).isEqualTo("ok");
         assertThat(response.routes()).hasSize(2);
@@ -95,7 +95,7 @@ class TransitRouteClientTest {
                         MediaType.APPLICATION_JSON));
 
         TransitRouteOptionsResponse response =
-                client.fetch(37.4979, 127.0276, 33.5, 126.5);
+                client.fetch(37.4979, 127.0276, 33.5, 126.5, "all");
 
         assertThat(response.status()).isEqualTo("not_found");
         assertThat(response.routes()).isEmpty();
@@ -110,7 +110,7 @@ class TransitRouteClientTest {
                         MediaType.APPLICATION_JSON));
 
         TransitRouteOptionsResponse response =
-                client.fetch(37.4979, 127.0276, 37.5663, 126.9779);
+                client.fetch(37.4979, 127.0276, 37.5663, 126.9779, "all");
 
         assertThat(response.status()).isEqualTo("unavailable");
         assertThat(response.status()).isNotEqualTo("not_found");
@@ -123,7 +123,7 @@ class TransitRouteClientTest {
                 .andRespond(withServerError().body("hub down"));
 
         assertThatThrownBy(
-                () -> client.fetch(37.4979, 127.0276, 37.5663, 126.9779))
+                () -> client.fetch(37.4979, 127.0276, 37.5663, 126.9779, "all"))
                 .isInstanceOf(TransitRouteException.class)
                 .satisfies(e -> assertThat(
                         ((TransitRouteException) e).statusCode()).isEqualTo(500));

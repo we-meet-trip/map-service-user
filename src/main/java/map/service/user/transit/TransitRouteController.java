@@ -2,6 +2,7 @@ package map.service.user.transit;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Pattern;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,6 +47,9 @@ public class TransitRouteController {
      *
      * startLat / endLat: 위도(필수). 국내 범위 33.0~43.0.
      * startLng / endLng: 경도(필수). 국내 범위 124.0~132.0.
+     * mode: 화면이 고른 이동수단. all(기본)·subway·bus 셋만 받는다.
+     *       무엇을 어떻게 거를지는 hub 가 정하고 여기서는 넘기기만 한다 —
+     *       규칙이 두 곳에 흩어지면 한쪽만 고치는 일이 생긴다.
      */
     @GetMapping("/routes")
     public TransitRouteOptionsResponse routes(
@@ -56,8 +60,11 @@ public class TransitRouteController {
             @RequestParam @DecimalMin("33.0") @DecimalMax("43.0")
             double endLat,
             @RequestParam @DecimalMin("124.0") @DecimalMax("132.0")
-            double endLng
+            double endLng,
+            @RequestParam(defaultValue = "all")
+            @Pattern(regexp = "all|subway|bus", message = "mode must be all, subway or bus")
+            String mode
     ) {
-        return client.fetch(startLat, startLng, endLat, endLng);
+        return client.fetch(startLat, startLng, endLat, endLng, mode);
     }
 }

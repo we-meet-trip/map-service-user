@@ -1,6 +1,8 @@
 package map.service.user.transit;
 
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,6 +18,8 @@ import map.service.user.transit.dto.TransitRouteOption;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -50,20 +54,20 @@ class TransitRouteControllerTest {
         TransitRouteOptionsResponse response = new TransitRouteOptionsResponse(
                 "ok",
                 List.of(
-                        new TransitRouteOption(28, 1650, 2, 903,
+                        new TransitRouteOption(28, 1650, 2, 903, 1200, 0, 0.0,
                                 List.of("subway"),
                                 List.of(new TransitRouteLeg(
                                         "subway", "수도권 9호선", "언주", "신논현",
-                                        2, 1,
+                                        2, 1, 1200,
                                         List.of(List.of(37.507323, 127.033909)),
                                         List.of("언주", "신논현")))),
-                        new TransitRouteOption(44, 1750, 2, 314,
+                        new TransitRouteOption(44, 1750, 2, 314, 1200, 8300, 0.874,
                                 List.of("subway", "bus"),
                                 List.of(new TransitRouteLeg(
                                         "bus", null, "신림동별빛거리입구", "여의도역3번출구",
-                                        20, 11,
+                                        20, 11, 8300,
                                         List.of(), List.of())))));
-        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
                 .thenReturn(response);
 
         mockMvc.perform(get("/api/v1/transit/routes")
@@ -84,7 +88,7 @@ class TransitRouteControllerTest {
     @Test
     @DisplayName("경로 없음 — 200 OK 이며 status 로 구분된다")
     void routes_notFound_returns200() throws Exception {
-        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
                 .thenReturn(new TransitRouteOptionsResponse("not_found", List.of()));
 
         mockMvc.perform(get("/api/v1/transit/routes")
@@ -99,7 +103,7 @@ class TransitRouteControllerTest {
     @Test
     @DisplayName("조회 불가 — 경로 없음과 다른 값이라 화면이 문구를 가를 수 있다")
     void routes_unavailable_isDistinctFromNotFound() throws Exception {
-        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
                 .thenReturn(new TransitRouteOptionsResponse("unavailable", List.of()));
 
         mockMvc.perform(get("/api/v1/transit/routes")
@@ -121,7 +125,7 @@ class TransitRouteControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(client, never())
-                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble());
+                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString());
     }
 
     @Test
@@ -135,7 +139,7 @@ class TransitRouteControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(client, never())
-                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble());
+                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString());
     }
 
     @Test
@@ -149,6 +153,55 @@ class TransitRouteControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(client, never())
-                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble());
+                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString());
+    }
+
+    @Test
+    @DisplayName("mode 를 안 주면 all 로 hub 에 넘긴다")
+    void routes_defaultMode_isAll() throws Exception {
+        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
+                .thenReturn(new TransitRouteOptionsResponse("not_found", List.of()));
+
+        mockMvc.perform(get("/api/v1/transit/routes")
+                        .param("startLat", START_LAT)
+                        .param("startLng", START_LNG)
+                        .param("endLat", END_LAT)
+                        .param("endLng", END_LNG))
+                .andExpect(status().isOk());
+
+        verify(client).fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), eq("all"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"all", "subway", "bus"})
+    @DisplayName("mode 는 받은 값을 그대로 hub 로 넘긴다 — 거르는 규칙은 hub 가 정한다")
+    void routes_passesModeThrough(String mode) throws Exception {
+        when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
+                .thenReturn(new TransitRouteOptionsResponse("not_found", List.of()));
+
+        mockMvc.perform(get("/api/v1/transit/routes")
+                        .param("startLat", START_LAT)
+                        .param("startLng", START_LNG)
+                        .param("endLat", END_LAT)
+                        .param("endLng", END_LNG)
+                        .param("mode", mode))
+                .andExpect(status().isOk());
+
+        verify(client).fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), eq(mode));
+    }
+
+    @Test
+    @DisplayName("모르는 mode — 400 이며 hub 를 부르지 않는다")
+    void routes_unknownMode_returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/transit/routes")
+                        .param("startLat", START_LAT)
+                        .param("startLng", START_LNG)
+                        .param("endLat", END_LAT)
+                        .param("endLng", END_LNG)
+                        .param("mode", "taxi"))
+                .andExpect(status().isBadRequest());
+
+        verify(client, never())
+                .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString());
     }
 }
