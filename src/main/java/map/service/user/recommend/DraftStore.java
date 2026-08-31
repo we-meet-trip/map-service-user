@@ -2,6 +2,7 @@ package map.service.user.recommend;
 
 import java.time.Duration;
 import java.util.Optional;
+import map.service.user.global.crypto.PayloadCipher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,6 +28,7 @@ public class DraftStore {
 
     private final StringRedisTemplate redis;
     private final Duration ttl;
+    private final PayloadCipher payloadCipher;
 
     /**
      * 의존성 주입 생성자.
@@ -36,10 +38,20 @@ public class DraftStore {
      */
     public DraftStore(
             @Qualifier("draftsRedisTemplate") StringRedisTemplate redis,
-            @Value("${redis.draft-ttl-seconds:3600}") long ttlSeconds
+            @Value("${redis.draft-ttl-seconds:3600}") long ttlSeconds,
+            PayloadCipher payloadCipher
     ) {
         this.redis = redis;
         this.ttl = Duration.ofSeconds(ttlSeconds);
+        this.payloadCipher = payloadCipher;
+    }
+
+    /**
+     * 초안 본문을 묶어 둘 자리 이름. 작업 식별자를 함께 묶어, 한 작업의 초안을
+     * 다른 작업 키에 옮겨 넣어도 열리지 않게 한다.
+     */
+    private static String aadFor(String jobId) {
+        return PayloadCipher.aad("redis", KEY_PREFIX, jobId);
     }
 
     /**
@@ -51,7 +63,8 @@ public class DraftStore {
      * payloadJson: draft JSON 문자열.
      */
     public void save(String jobId, String payloadJson) {
-        redis.opsForValue().set(key(jobId), payloadJson, ttl);
+        redis.opsForValue().set(
+                key(jobId), payloadCipher.encrypt(payloadJson, aadFor(jobId)), ttl);
     }
 
     /**
@@ -62,7 +75,8 @@ public class DraftStore {
      * jobId: 작업 식별자.
      */
     public Optional<String> find(String jobId) {
-        return Optional.ofNullable(redis.opsForValue().get(key(jobId)));
+        return Optional.ofNullable(redis.opsForValue().get(key(jobId)))
+                .map(value -> payloadCipher.decrypt(value, aadFor(jobId)));
     }
 
     /**

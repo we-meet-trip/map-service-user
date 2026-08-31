@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import map.service.user.global.crypto.PayloadCipher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
@@ -58,6 +59,7 @@ public class RecommendJobsConsumer
     private final String stream;
     private final String group;
     private final String consumer;
+    private final PayloadCipher payloadCipher;
     private final String dlqStream;
     private final int maxRetry;
     private final long dlqMaxlen;
@@ -85,8 +87,10 @@ public class RecommendJobsConsumer
             @Value("${streams.recommend-max-retry:3}") int maxRetry,
             @Value("${streams.recommend-dlq-maxlen:2000}") long dlqMaxlen,
             @Value("${streams.recommend-min-idle-ms:60000}") long minIdleMs,
-            @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch
+            @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch,
+            PayloadCipher payloadCipher
     ) {
+        this.payloadCipher = payloadCipher;
         this.draftStore = draftStore;
         this.jobStore = jobStore;
         this.reuseCacheStore = reuseCacheStore;
@@ -259,6 +263,14 @@ public class RecommendJobsConsumer
      * dlqMaxlen > 0 이면 XTRIM ~MAXLEN(approximate=true) 로 길이를 제한한다.
      * trim/publish 자체의 예외는 로그만 남기고 삼킨다.
      */
+    /**
+     * 실패한 본문을 묶어 둘 자리 이름. 이 스트림은 최근 2000건을 계속 들고
+     * 있으므로, 감싸지 않으면 실패한 요청의 본문이 그만큼 쌓여 남는다.
+     */
+    private static String dlqAad(String jobId) {
+        return PayloadCipher.aad("redis", "agent:jobs:done:dlq", jobId);
+    }
+
     private void routeToDlq(
             MapRecord<String, String, String> message,
             String jobId,
@@ -271,7 +283,8 @@ public class RecommendJobsConsumer
             Map<String, String> dlqEntry = Map.of(
                     "job_id", jobId != null ? jobId : "unknown",
                     "status", status != null ? status : "unknown",
-                    "payload", payloadJson != null ? payloadJson : "",
+                    "payload", payloadJson != null
+                            ? payloadCipher.encrypt(payloadJson, dlqAad(jobId)) : "",
                     "original_id", message.getId().getValue(),
                     "delivery_count", String.valueOf(deliveryCount),
                     "error", error

@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import map.service.user.global.crypto.PayloadCipher;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.dto.RecommendResponse;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
@@ -42,17 +43,30 @@ public class ScheduleService {
     private final ScheduleRepository repository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
+    private final PayloadCipher payloadCipher;
 
     public ScheduleService(
             DraftStore draftStore,
             ScheduleRepository repository,
             ObjectMapper objectMapper,
-            TripStopsAssembler stopsAssembler
+            TripStopsAssembler stopsAssembler,
+            PayloadCipher payloadCipher
     ) {
         this.draftStore = draftStore;
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
+        this.payloadCipher = payloadCipher;
+    }
+
+    /**
+     * 일정 본문을 묶어 둘 자리 이름. 소유자를 함께 묶어, 한 사람의 본문을
+     * 다른 사람의 행에 옮겨 넣어도 열리지 않게 한다. 소유자는 행이 사는 동안
+     * 바뀌지 않으므로 묶는 값으로 안전하다.
+     */
+    private static String payloadAad(Long userId) {
+        return PayloadCipher.aad("schedules", "payload",
+                userId == null ? null : userId.toString());
     }
 
     /**
@@ -110,7 +124,7 @@ public class ScheduleService {
                 request.title(),
                 start,
                 end,
-                payload,
+                payloadCipher.encryptNode(payload, payloadAad(userId)),
                 request.transport(),
                 request.activeStartHour(),
                 request.activeEndHour()
@@ -214,7 +228,9 @@ public class ScheduleService {
         String timelineStatus = null;
         try {
             RecommendResponse draft = objectMapper.treeToValue(
-                    entity.getPayload(), RecommendResponse.class);
+                    payloadCipher.decryptNode(
+                            entity.getPayload(), payloadAad(entity.getUserId())),
+                    RecommendResponse.class);
             stops = stopsAssembler.assemble(
                     draft, entity.getTransport(), startHour, endHour);
             // 조립에 성공한 경우에만 싣는다 — 그릴 것이 없는 빈 화면에
