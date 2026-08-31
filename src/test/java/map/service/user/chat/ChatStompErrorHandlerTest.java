@@ -3,6 +3,9 @@ package map.service.user.chat;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.mockito.Mockito.mock;
+import org.mockito.ArgumentCaptor;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 
 import java.lang.reflect.Method;
@@ -24,6 +27,8 @@ import org.springframework.messaging.handler.annotation.MessageExceptionHandler;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.messaging.simp.config.SimpleBrokerRegistration;
 import org.springframework.messaging.support.MessageBuilder;
 
 /**
@@ -125,6 +130,10 @@ class ChatStompErrorHandlerTest {
     @DisplayName("브로커가 개인 큐 접두어를 함께 다룬다")
     void brokerCoversPrivateQueuePrefix() {
         MessageBrokerRegistry registry = mock(MessageBrokerRegistry.class);
+        SimpleBrokerRegistration broker = mock(SimpleBrokerRegistration.class);
+        when(registry.enableSimpleBroker("/topic", "/queue")).thenReturn(broker);
+        when(broker.setHeartbeatValue(any())).thenReturn(broker);
+
         new ChatWebSocketConfig(new ChatProperties(), new CorsProperties(), null)
                 .configureMessageBroker(registry);
 
@@ -133,6 +142,14 @@ class ChatStompErrorHandlerTest {
         verify(registry).enableSimpleBroker("/topic", "/queue");
         verify(registry).setUserDestinationPrefix("/user");
         verify(registry).setApplicationDestinationPrefixes("/app");
+
+        // 하트비트 값과 일꾼이 둘 다 있어야 브로커가 주기 프레임을 내보낸다.
+        // 일꾼이 없으면 값이 있어도 접속 응답에 0,0 이 실려 나가 양쪽 모두
+        // 무효가 되고, 오가는 것이 없는 소켓이 조용히 끊긴다.
+        ArgumentCaptor<long[]> beat = ArgumentCaptor.forClass(long[].class);
+        verify(broker).setHeartbeatValue(beat.capture());
+        assertThat(beat.getValue()).containsExactly(10_000L, 10_000L);
+        verify(broker).setTaskScheduler(any(TaskScheduler.class));
     }
 
     private Method findHandler(String name) {
