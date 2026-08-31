@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
  * - GET    /api/v1/schedules/{id}        → detail (방문지까지 조립된 상세)
  * - POST   /api/v1/schedules/{id}/start  → start  (시작 기록 + 상세)
  * - POST   /api/v1/schedules/{id}/replan → replan (날씨 변화 뒤 1클릭 재추천)
+ * - POST   /api/v1/schedules/{id}/weather-alert/dismiss → 알림 무시(이대로 유지)
  * - DELETE /api/v1/schedules/{id}        → delete
  *
  * 조회·삭제는 소유자 범위로 제한된다. 남의 일정이나 없는 일정은 똑같이
@@ -148,6 +149,27 @@ public class ScheduleController {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
         return ResponseEntity.accepted().body(service.replan(scheduleId, userId));
+    }
+
+    /**
+     * 날씨 알림을 받아들이지 않고 지운다("이대로 갈래"). 성공 시 본문 없이 204.
+     *
+     * 알림만 지우면 다음 감시 순회에서 같은 변화가 다시 잡혀 또 붙는다. 그래서
+     * 서비스가 기준선을 지금 예보로 옮겨, 사용자가 알고도 그대로 가기로 한
+     * 지점을 기억한다. 이후 예보가 또 달라지면 새 기준선 대비로 다시 알린다.
+     *
+     * 소유자가 아니거나 없는 일정이면 404.
+     */
+    @PostMapping("/{scheduleId}/weather-alert/dismiss")
+    public ResponseEntity<Void> dismissWeatherAlert(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        service.dismissWeatherAlert(scheduleId, userId);
+        return ResponseEntity.noContent().build();
     }
 
     /**

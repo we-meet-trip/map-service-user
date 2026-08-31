@@ -590,4 +590,38 @@ class RecommendServiceTest {
                 base.province(), base.city(), base.scheduleId(),
                 base.stage(), base.exclude(), base.places());
     }
+
+    // ---- 날씨 변화 재추천(캐시 우회) ----
+
+    @Test
+    void freshRecommendationSkipsReuseCacheEntirely() {
+        // 캐시에 같은 조건의 결과가 있어도 그것을 쓰면 안 된다. 날씨가 바뀌어
+        // 다시 짜는 요청인데 캐시가 맞으면 agent 가 아예 돌지 않고, 그러면
+        // 비 오기 전에 만든 그 야외 코스가 그대로 돌아온다.
+        when(reuseCacheStore.find(anyString()))
+                .thenReturn(Optional.of("{\"job_id\":\"old\",\"places\":[]}"));
+
+        JobAccepted accepted =
+                service.createFreshRecommendation(request("init", List.of()));
+
+        assertThat(accepted.jobId()).isEqualTo("job-2");
+        verify(agentClient).requestRecommend(any());
+        verify(reuseCacheStore, never()).find(anyString());
+        // 등록도 하지 않는다 — 비 오는 날 만든 코스가 맑은 날 요청의 캐시로
+        // 재사용되면 반대 방향으로 같은 사고가 난다.
+        verify(reuseCacheStore, never()).linkJob(anyString(), anyString());
+    }
+
+    @Test
+    void freshRecommendationForcesInitStageAndRecordsRegion() {
+        service.createFreshRecommendation(request("mode1", List.of("cheat")));
+
+        ArgumentCaptor<RecommendRequest> captor =
+                ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(agentClient).requestRecommend(captor.capture());
+        assertThat(captor.getValue().stage()).isEqualTo("init");
+        assertThat(captor.getValue().exclude()).isEmpty();
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
+    }
 }

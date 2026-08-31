@@ -125,16 +125,16 @@ class ScheduleServiceTest {
     }
 
     @Test
-    @DisplayName("replan — 저장된 조건으로 새 추천을 띄우고 걸린 알림을 지운다")
+    @DisplayName("replan — 저장된 조건으로 캐시 없이 새 추천을 띄우고 걸린 알림을 지운다")
     void replanStartsNewRecommendationAndClearsAlert() {
+        LocalDate soon = LocalDate.now().plusDays(3);
         ScheduleEntity entity = new ScheduleEntity(
                 42L, java.util.UUID.randomUUID(), "제주 여행",
-                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
-                null, "bicycle", 9, 18);
+                soon, soon.plusDays(1), null, "bicycle", 9, 18);
         entity.setRegion("서울특별시", "중구");
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(recommendService.createRecommendation(any()))
+        when(recommendService.createFreshRecommendation(any()))
                 .thenReturn(new JobAccepted("job-9", "in_progress", 3));
 
         JobAccepted accepted = service.replan(5L, 42L);
@@ -142,11 +142,11 @@ class ScheduleServiceTest {
         assertThat(accepted.jobId()).isEqualTo("job-9");
         ArgumentCaptor<RecommendRequest> captor =
                 ArgumentCaptor.forClass(RecommendRequest.class);
-        verify(recommendService).createRecommendation(captor.capture());
+        verify(recommendService).createFreshRecommendation(captor.capture());
         RecommendRequest sent = captor.getValue();
         assertThat(sent.province()).isEqualTo("서울특별시");
         assertThat(sent.city()).isEqualTo("중구");
-        assertThat(sent.date().dateStart()).isEqualTo(LocalDate.of(2026, 7, 6));
+        assertThat(sent.date().dateStart()).isEqualTo(soon);
         assertThat(sent.mobility()).isEqualTo(Mobility.BICYCLE);
         assertThat(sent.scheduleId()).isEqualTo("5");
         verify(weatherService).clearAlert(entity);
@@ -175,5 +175,75 @@ class ScheduleServiceTest {
         ArgumentCaptor<ScheduleEntity> captor = ArgumentCaptor.forClass(ScheduleEntity.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getUserId()).isNull();
+    }
+
+    @Test
+    @DisplayName("replan — 이미 지나간 일정은 다시 짤 수 없다")
+    void replanRejectsPastSchedule() {
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "지난 여행",
+                LocalDate.of(2020, 1, 1), LocalDate.of(2020, 1, 2),
+                null, "walk", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+
+        assertThatThrownBy(() -> service.replan(5L, 42L))
+                .isInstanceOf(ScheduleReplanUnavailableException.class);
+        verify(recommendService, never()).createFreshRecommendation(any());
+    }
+
+    @Test
+    @DisplayName("dismiss — 알림을 지우고 기준선을 지금 예보로 옮긴다")
+    void dismissClearsAlertAndMovesBaseline() {
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "제주 여행",
+                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7),
+                null, "walk", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+        List<WeatherSnapshotItem> now = List.of(
+                new WeatherSnapshotItem(LocalDate.of(2099, 7, 6), 80, "rainy"));
+        when(weatherService.buildBaseline(
+                "서울특별시", "중구",
+                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7)))
+                .thenReturn(now);
+        ObjectMapper jsonWithDates = new ObjectMapper()
+                .registerModule(new JavaTimeModule());
+        when(weatherService.toJson(now)).thenReturn(jsonWithDates.valueToTree(now));
+
+        service.dismissWeatherAlert(5L, 42L);
+
+        // 기준선이 지금 예보로 옮겨져야 같은 변화가 다시 알림으로 뜨지 않는다.
+        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
+                .isEqualTo(80);
+        assertThat(entity.getWeatherAlert()).isNull();
+        verify(repository).save(entity);
+    }
+
+    @Test
+    @DisplayName("dismiss — 지금 예보를 못 받으면 기준선을 건드리지 않고 알림만 지운다")
+    void dismissKeepsBaselineWhenForecastUnavailable() {
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "제주 여행",
+                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7),
+                null, "walk", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        ObjectMapper jsonWithDates = new ObjectMapper()
+                .registerModule(new JavaTimeModule());
+        entity.setWeatherBaseline(jsonWithDates.valueToTree(List.of(
+                new WeatherSnapshotItem(LocalDate.of(2099, 7, 6), 20, "sunny"))));
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+        when(weatherService.buildBaseline(any(), any(), any(), any()))
+                .thenReturn(List.of());
+
+        service.dismissWeatherAlert(5L, 42L);
+
+        // 기준선을 비우면 그 일정이 감시 대상에서 영영 빠진다.
+        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
+                .isEqualTo(20);
+        assertThat(entity.getWeatherAlert()).isNull();
     }
 }

@@ -164,7 +164,7 @@ public class ScheduleService {
                         e.getDateStart(),
                         e.getDateEnd(),
                         e.getCreatedAt(),
-                        weatherService.readAlert(e).orElse(null)))
+                        visibleAlert(e)))
                 .toList();
         return new ScheduleListResponse(summaries);
     }
@@ -197,10 +197,13 @@ public class ScheduleService {
      * 저장해 둔 지역·기간·이동수단·활동 시간대를 그대로 써서 새 추천 작업을
      * 띄운다. 사용자가 조건을 다시 입력하지 않아도 되는 것이 이 기능의 요점이다.
      *
-     * 일반 추천 경로(createRecommendation)를 그대로 탄다. 재탐색(mode1)이
-     * 아니므로 1일 3회 재탐색 한도를 깎지 않는다 — 날씨가 나빠진 것은 사용자의
-     * 변심이 아니라 외부 변수이고, 한도를 깎으면 "비가 와서 다시 짜야 하는데
-     * 한도가 없다"는 상황이 생긴다.
+     * 재탐색(mode1)이 아니므로 1일 3회 재탐색 한도를 깎지 않는다 — 날씨가
+     * 나빠진 것은 사용자의 변심이 아니라 외부 변수이고, 한도를 깎으면 "비가
+     * 와서 다시 짜야 하는데 한도가 없다"는 상황이 생긴다.
+     *
+     * 재사용 캐시는 타지 않는다(createFreshRecommendation). 캐시 키에 날씨가
+     * 없어서 조건이 그대로인 이 요청은 반드시 캐시에 맞고, 맞으면 agent 가 아예
+     * 돌지 않아 fetch_weather 도 돌지 않는다 — 비 오기 전 코스가 그대로 돌아온다.
      *
      * 걸려 있던 알림은 지운다. 새 코스는 지금 예보를 이미 반영하므로 같은 배너를
      * 계속 띄울 이유가 없다. 새 결과를 저장하면 그때 기준선도 새로 굳는다.
@@ -212,7 +215,14 @@ public class ScheduleService {
     public JobAccepted replan(Long scheduleId, Long userId) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
         if (entity.getProvince() == null || entity.getCity() == null) {
-            throw new ScheduleReplanUnavailableException(scheduleId);
+            throw new ScheduleReplanUnavailableException(
+                    scheduleId, "지역 정보가 없는 일정");
+        }
+        if (isPast(entity)) {
+            // 이미 다녀왔거나 가지 않기로 한 여행이다. 다시 짜 봐야 쓸 데가
+            // 없고, 지나간 기록을 새 코스로 덮는 편이 더 나쁘다.
+            throw new ScheduleReplanUnavailableException(
+                    scheduleId, "이미 지나간 일정");
         }
 
         int startHour = entity.getActiveStartHour() != null
@@ -237,9 +247,60 @@ public class ScheduleService {
                 List.of(),
                 null);
 
-        JobAccepted accepted = recommendService.createRecommendation(request);
+        JobAccepted accepted = recommendService.createFreshRecommendation(request);
         weatherService.clearAlert(entity);
         return accepted;
+    }
+
+
+    /**
+     * 걸린 날씨 알림을 사용자가 받아들이지 않고 지운다("이대로 갈래").
+     *
+     * 알림을 지우는 것으로 끝내면 다음 순회에서 같은 변화를 다시 감지해 또
+     * 알림이 붙는다. 그래서 기준선을 지금 예보로 옮긴다 — 사용자가 "이 날씨는
+     * 알고 있고 그래도 그대로 간다"고 정한 지점을 기준선이 기억하는 셈이다.
+     * 이후 예보가 <b>또</b> 달라지면(비가 그치거나 다른 날이 나빠지면) 새 기준선
+     * 대비로 정상 감지된다.
+     *
+     * 지금 예보를 받지 못하면 기준선은 그대로 두고 알림만 지운다. 기준선을
+     * 비우면 그 일정이 감시 대상에서 영영 빠진다(감시 조건이 기준선 보유다).
+     * 이 경우 같은 알림이 다시 뜰 수 있지만, 영영 안 뜨는 쪽보다 낫다.
+     *
+     * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404).
+     */
+    @Transactional
+    public void dismissWeatherAlert(Long scheduleId, Long userId) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        if (entity.getProvince() != null && entity.getCity() != null) {
+            JsonNode moved = weatherService.toJson(weatherService.buildBaseline(
+                    entity.getProvince(), entity.getCity(),
+                    entity.getDateStart(), entity.getDateEnd()));
+            if (moved != null) {
+                entity.setWeatherBaseline(moved);
+            }
+        }
+        entity.setWeatherAlert(null);
+        repository.save(entity);
+    }
+
+    /**
+     * 종료일이 지난 일정인지. 지난 일정은 감시도 재추천도 하지 않고, 걸려 있던
+     * 알림도 내보내지 않는다 — 다녀온 여행에 "비 예보로 바뀌었어요"가 남아 있으면
+     * 사용자가 무엇을 해야 하는지 알 수 없다.
+     */
+    private static boolean isPast(ScheduleEntity entity) {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        return entity.getDateEnd() != null && entity.getDateEnd().isBefore(today);
+    }
+
+    /** 응답에 실을 알림. 지난 일정이면 걸려 있어도 싣지 않는다(데이터는 남긴다). */
+    private map.service.user.weather.dto.WeatherAlert visibleAlert(
+            ScheduleEntity entity
+    ) {
+        if (isPast(entity)) {
+            return null;
+        }
+        return weatherService.readAlert(entity).orElse(null);
     }
 
     /**
@@ -352,7 +413,7 @@ public class ScheduleService {
                 entity.getStartedAt(),
                 warnings,
                 timelineStatus,
-                weatherService.readAlert(entity).orElse(null));
+                visibleAlert(entity));
     }
 
     /**
