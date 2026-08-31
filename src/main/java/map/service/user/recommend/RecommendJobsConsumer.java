@@ -132,7 +132,15 @@ public class RecommendJobsConsumer
         String payloadJson = openIfSealed(value.get("payload"), jobId);
 
         if (jobId == null || payloadJson == null) {
-            log.warn("Stream message missing job_id or payload id={}", recordId);
+            // 그룹을 만들려면 스트림이 있어야 해서, 없을 때 자리표시 한 건을
+            // 넣어 두고 만든다(StreamsConsumerConfig). 그 한 건이 여기로 온다.
+            // 정상 동작이므로 경고로 남기지 않는다 — 새로 띄울 때마다 경고가
+            // 뜨면 진짜 경고를 함께 흘려 보게 된다.
+            if (value.containsKey("_init")) {
+                log.info("stream placeholder discarded id={}", recordId);
+            } else {
+                log.warn("Stream message missing job_id or payload id={}", recordId);
+            }
             ack(recordId);
             return;
         }
