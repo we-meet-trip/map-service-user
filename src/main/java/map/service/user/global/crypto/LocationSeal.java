@@ -1,5 +1,6 @@
 package map.service.user.global.crypto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
@@ -92,6 +93,40 @@ public class LocationSeal {
     /** 좌표를 감싸 보낼지 여부. 꺼 두면 예전처럼 값을 그대로 보낸다. */
     public boolean isEnabled() {
         return properties.isEnabled();
+    }
+
+    /** 봉투 모양인지만 본다. 열어 보지는 않는다. */
+    public boolean isSealed(String value) {
+        return value != null && value.startsWith(VERSION + ".")
+                && value.chars().filter(c -> c == '.').count() == 2;
+    }
+
+    /**
+     * 다른 서비스가 감싼 값을 연다.
+     *
+     * 열쇠가 다르거나 내용이 손대어졌으면 열리지 않는다. 그 셋을 구분해
+     * 알리지 않는 이유는, 어느 단계에서 막혔는지 알려 주면 그것만으로
+     * 무엇을 바꿔 가며 시도할지가 정해지기 때문이다.
+     *
+     * 만든 시각은 여기서 보지 않는다. 이 길로 오는 것은 스트림에 쌓여 있다가
+     * 뒤늦게 처리되는 값이라, 만든 지 오래됐다는 이유로 버리면 밀린 작업이
+     * 통째로 사라진다.
+     */
+    public JsonNode open(String token) {
+        if (!isSealed(token)) {
+            throw new IllegalStateException("not a sealed value");
+        }
+        String[] parts = token.split("\\.", 3);
+        try {
+            Base64.Decoder decoder = Base64.getUrlDecoder();
+            Cipher cipher = Cipher.getInstance(TRANSFORM);
+            cipher.init(Cipher.DECRYPT_MODE, key,
+                    new GCMParameterSpec(TAG_BITS, decoder.decode(parts[1])));
+            cipher.updateAAD(AAD);
+            return objectMapper.readTree(cipher.doFinal(decoder.decode(parts[2])));
+        } catch (Exception e) {
+            throw new IllegalStateException("cannot open sealed value", e);
+        }
     }
 
     /** 위도·경도 한 쌍을 감싼다. */

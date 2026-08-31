@@ -80,6 +80,31 @@ class LocationSealTest {
     }
 
     @Test
+    @DisplayName("파이썬 쪽에서 감싼 봉투를 그대로 연다")
+    void opensTokenSealedByPython() {
+        // agent 는 파이썬이라 같은 검사 틀 안에서 감쌀 수 없다. 그쪽 코드로
+        // 만든 값을 그대로 적어 두고 연다 — 형식이 어긋나면 배포한 뒤
+        // 추천 결과가 통째로 버려지는데, 화면에는 사유 없는 실패로만 보인다.
+        String fromPython = "v1.ZY_2texCti0TBsTN.kd_O9djLyHAEflRzyFv49iLe3dJyjUWU2RMEdC"
+                + "KJqhAGErzTEz9o0B2ftCuveF0lrJI6TC_ECTqU4z_Tv3MWt5x4qXX2WHoK_iT2DVlYNFt"
+                + "m7j8O8EkmdFI5SVsssP08JGRCXQzv2QFTPoyacsMq9YpX67SUBQ";
+
+        var opened = seal(true, KEY).open(fromPython);
+
+        assertThat(opened.get("payload").asText()).contains("129.1604");
+    }
+
+    @Test
+    @DisplayName("손댄 봉투는 열리지 않는다")
+    void refusesTamperedToken() {
+        LocationSeal s = seal(true, KEY);
+        String token = s.seal(35.1587, 129.1604);
+
+        assertThatThrownBy(() -> s.open(token.substring(0, token.length() - 4) + "AAAA"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     @DisplayName("다른 언어 쪽에서 열어 보도록 봉투 하나를 남긴다")
     void writesTokenForCrossLanguageCheck() throws Exception {
         // 받는 쪽은 파이썬으로 되어 있어 같은 검사 틀 안에서 열어 볼 수 없다.

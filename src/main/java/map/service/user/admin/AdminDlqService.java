@@ -2,6 +2,7 @@ package map.service.user.admin;
 
 import map.service.user.admin.dto.DlqActionResult;
 import map.service.user.admin.dto.DlqEntry;
+import map.service.user.global.crypto.LocationSeal;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendJobStore;
 import org.slf4j.Logger;
@@ -40,16 +41,19 @@ public class AdminDlqService {
     private final DraftStore draftStore;
     private final RecommendJobStore jobStore;
     private final String dlqStream;
+    private final LocationSeal seal;
 
     public AdminDlqService(
             @Qualifier("streamsConnectionFactory") RedisConnectionFactory streamsFactory,
             DraftStore draftStore,
             RecommendJobStore jobStore,
-            @Value("${streams.recommend-dlq-stream:agent:jobs:done:dlq}") String dlqStream) {
+            @Value("${streams.recommend-dlq-stream:agent:jobs:done:dlq}") String dlqStream,
+            LocationSeal seal) {
         this.streamsTemplate = new StringRedisTemplate(streamsFactory);
         this.draftStore = draftStore;
         this.jobStore = jobStore;
         this.dlqStream = dlqStream;
+        this.seal = seal;
     }
 
     /** DLQ 최근 항목을 limit 개까지(최신순) 조회한다. */
@@ -89,7 +93,12 @@ public class AdminDlqService {
                     continue;
                 }
                 String jobId = str(v.get("job_id"));
-                String payload = str(v.get("payload"));
+                // 실패 대기열에는 감싼 채로 쌓인다. 되살릴 때 열어야 화면이
+                // 읽을 수 있는 값이 된다.
+                String raw = str(v.get("payload"));
+                String payload = raw != null && seal.isSealed(raw)
+                        ? textOf(seal.open(raw))
+                        : raw;
                 String status = str(v.get("status"));
                 if (jobId == null || payload == null || payload.isBlank()) {
                     failed.add(id);
@@ -139,6 +148,12 @@ public class AdminDlqService {
 
     private static String str(Object o) {
         return o == null ? null : o.toString();
+    }
+
+    /** 봉투 안에 담긴 본문 문자열을 꺼낸다. 없으면 null. */
+    private static String textOf(com.fasterxml.jackson.databind.JsonNode opened) {
+        var body = opened.get("payload");
+        return body == null ? null : body.asText();
     }
 
     private static String preview(String payload) {
