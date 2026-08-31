@@ -6,6 +6,9 @@ import map.service.user.global.config.ChatProperties;
 import map.service.user.global.config.CorsProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
@@ -41,6 +44,21 @@ public class ChatWebSocketConfig implements WebSocketMessageBrokerConfigurer {
         this.authChannelInterceptor = authChannelInterceptor;
     }
 
+    /** 하트비트 주기. 통신사 장비가 유휴 연결을 걷어가기 전에 오가도록 짧게 둔다. */
+    private static final long HEARTBEAT_MS = 10_000L;
+
+    /**
+     * 하트비트 전용 일꾼. 브로커가 주기적으로 프레임을 내보내려면 스케줄러가
+     * 필요한데, 기본 설정은 그것을 브로커에 넣어 주지 않는다.
+     */
+    @Bean
+    public TaskScheduler chatHeartbeatScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("chat-heartbeat-");
+        return scheduler;
+    }
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // WebSocket 은 자격증명 여부와 무관하게 allowedOriginPatterns 로 출처를 지정한다.
@@ -54,7 +72,14 @@ public class ChatWebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // /topic 은 방 브로드캐스트, /queue 는 보낸 사람 한 명에게만 가는 통지에 쓴다.
         // /queue 를 빼면 사용자 전용 목적지(/user/queue/**)가 브로커에 등록되지 않아
         // 구독도 전달도 조용히 무시된다 — 실패 통지가 사라지는 형태로 드러난다.
-        registry.enableSimpleBroker("/topic", "/queue");
+        // 하트비트를 돌릴 일꾼을 함께 준다. 주지 않으면 브로커가 하트비트 값을
+        // 정하지 못해 접속 응답에 0,0 을 실어 보내고, 그러면 클라이언트가 요청한
+        // 주기까지 양쪽 모두 무효가 된다. 그 상태에서는 오가는 것이 없는 소켓을
+        // 통신사 장비가 조용히 끊어도 양쪽 다 끊긴 줄 모른다 — 보내는 쪽은
+        // 연결됐다고 믿고 소켓으로 보내므로 REST 로 되돌아가지도 않는다.
+        registry.enableSimpleBroker("/topic", "/queue")
+                .setHeartbeatValue(new long[] {HEARTBEAT_MS, HEARTBEAT_MS})
+                .setTaskScheduler(chatHeartbeatScheduler());
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
     }
