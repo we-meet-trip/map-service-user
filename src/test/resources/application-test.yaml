@@ -29,6 +29,14 @@ jwt:
   access-token-expiry-seconds: 1800
   refresh-token-expiry-seconds: 1209600
 
+# 서비스 사이로 나가는 좌표를 감싸는 열쇠. 검사에서만 쓰는 고정값이며
+# 프로세스와 함께 사라진다. 실행 환경의 변수가 설정 파일보다 우선하므로
+# 셸에 다른 값이 있어도 검사는 이 값으로 고정된다.
+location:
+  wire:
+    enabled: true
+    key: bWFwLXdpcmUtdGVzdC1rZXktMDAwMDAwMDAwMDAwMCE=
+
 # 테스터 계정 시더는 테스트에서 돌지 않는다. 환경변수가 설정 파일보다 우선하므로,
 # 셸에 TESTER_SEED_ENABLED 가 켜져 있어도 테스트에는 새지 않도록 여기서 못 박는다.
 # 켜서 검증하는 테스트는 @SpringBootTest(properties=...) 로 인라인 지정한다 —

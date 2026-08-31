@@ -328,6 +328,19 @@ cors:
 auth:
   enforced: ${AUTH_ENFORCED:false}
 
+# ---- location.wire : 서비스 사이로 나가는 좌표 감싸기 ----
+# LocationSeal 이 본 섹션을 참조한다. 좌표는 그동안 요청 줄에 그대로 실려
+# 나갔다. 컨테이너 사이라 바깥에서는 못 보지만 같은 망의 다른 컨테이너와
+# 중간 기록에는 그대로 드러난다.
+# - key 는 좌표를 받아 실제로 쓰는 서비스(hub·agent)와 나눠 가진다. 저장에
+#   쓰는 열쇠와 반드시 다른 값으로 둔다 — 하나로 합치면 그 서비스들 중
+#   하나가 뚫렸을 때 저장된 것까지 함께 열린다.
+# - enabled=false 는 상대가 아직 봉투를 열 줄 모르는 동안의 임시 스위치다.
+location:
+  wire:
+    enabled: ${LOCATION_WIRE_ENABLED:true}
+    key: ${LOCATION_WIRE_KEY:}
+
 # ---- tester : 테스터 계정 시더 ----
 # TesterAccountSeedRunner / TesterAccountSeeder 가 본 섹션을 참조한다.
 # - enabled=false(기본): 아무 것도 하지 않는다(현행 동작 보존).
