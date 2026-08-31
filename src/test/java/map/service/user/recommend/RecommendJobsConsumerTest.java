@@ -1,5 +1,6 @@
 package map.service.user.recommend;
 
+import map.service.user.global.crypto.TestPayloadCiphers;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -32,7 +33,8 @@ class RecommendJobsConsumerTest {
         consumer = new RecommendJobsConsumer(
                 draftStore, jobStore, reuseCacheStore, streamsFactory,
                 "agent:jobs:done", "bff-result", "user-1",
-                "agent:jobs:done:dlq", 3, 2000L, 60000L, 64L);
+                "agent:jobs:done:dlq", 3, 2000L, 60000L, 64L,
+                TestPayloadCiphers.enabled());
     }
 
     private MapRecord<String, String, String> record(String jobId, String payload) {

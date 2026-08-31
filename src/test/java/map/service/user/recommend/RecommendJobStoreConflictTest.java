@@ -1,5 +1,6 @@
 package map.service.user.recommend;
 
+import map.service.user.global.crypto.TestPayloadCiphers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -43,7 +44,7 @@ class RecommendJobStoreConflictTest {
                 .thenThrow(new DataIntegrityViolationException("duplicate key"))
                 .thenReturn(existing);
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, objectMapper, TestPayloadCiphers.enabled());
         store.markFinished(jobId.toString(), "failed", "{\"status\":\"failed\"}");
 
         ArgumentCaptor<RecommendJobEntity> saved =
@@ -65,7 +66,7 @@ class RecommendJobStoreConflictTest {
         when(repository.save(any(RecommendJobEntity.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate key"));
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, objectMapper, TestPayloadCiphers.enabled());
         store.markFinished(jobId.toString(), "done", "{}");
 
         verify(repository, times(2)).save(any(RecommendJobEntity.class));
@@ -78,7 +79,7 @@ class RecommendJobStoreConflictTest {
         UUID jobId = UUID.randomUUID();
         when(repository.existsById(jobId)).thenReturn(true);
 
-        RecommendJobStore store = new RecommendJobStore(repository, objectMapper);
+        RecommendJobStore store = new RecommendJobStore(repository, objectMapper, TestPayloadCiphers.enabled());
         store.insertInProgress(jobId.toString(), "sched-2");
 
         verify(repository, times(0)).save(any(RecommendJobEntity.class));

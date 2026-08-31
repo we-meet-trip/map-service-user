@@ -1,5 +1,6 @@
 package map.service.user.schedule;
 
+import map.service.user.global.crypto.TestPayloadCiphers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,7 +50,8 @@ class ScheduleQueryServiceTest {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
         service = new ScheduleService(
-                mock(DraftStore.class), repository, objectMapper, assembler);
+                mock(DraftStore.class), repository, objectMapper, assembler,
+                TestPayloadCiphers.enabled());
     }
 
     private ScheduleEntity entity(
