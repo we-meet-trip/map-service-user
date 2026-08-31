@@ -134,4 +134,26 @@ class ScheduleControllerTest {
 
         verify(service, never()).replan(any(), any());
     }
+
+    @Test
+    @DisplayName("알림 무시 — 204 로 답하고 서비스에 위임한다")
+    void dismissWeatherAlert_returnsNoContent() throws Exception {
+        mockMvc.perform(post("/api/v1/schedules/7/weather-alert/dismiss")
+                        .with(owner(42L)))
+                .andExpect(status().isNoContent());
+
+        verify(service).dismissWeatherAlert(7L, 42L);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("알림 무시 — 토큰이 없으면 시도하지 않고 401")
+    void dismissWeatherAlert_withoutOwner_returns401() throws Exception {
+        SecurityContextHolder.clearContext();
+
+        mockMvc.perform(post("/api/v1/schedules/7/weather-alert/dismiss"))
+                .andExpect(status().isUnauthorized());
+
+        verify(service, never()).dismissWeatherAlert(any(), any());
+    }
 }

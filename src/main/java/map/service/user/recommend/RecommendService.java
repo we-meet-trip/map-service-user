@@ -530,6 +530,33 @@ public class RecommendService {
      *
      * request: 검증 완료된 RecommendRequest. places 는 2~10개.
      */
+    /**
+     * 재사용 캐시를 건너뛰고 반드시 agent 를 돌리는 추천(날씨 변화 재추천용).
+     *
+     * 캐시를 조회하지 않는다. 캐시 키는 지역·기간·테마 같은 검색 조건으로만
+     * 만들어지고 날씨는 들어가지 않는다. 그런데 날씨 재추천은 조건이 그대로인
+     * 채 결과만 달라져야 하는 요청이라, 캐시를 태우면 반드시 히트해서 agent 가
+     * 아예 돌지 않는다. agent 가 돌지 않으면 fetch_weather 도 돌지 않으니
+     * 비 오기 전에 만든 그 야외 코스가 그대로 돌아온다 — 기능이 무력화된다.
+     *
+     * 결과를 캐시에 등록하지도 않는다. 비 오는 날 만든 실내 위주 코스가 맑은
+     * 날 같은 조건 요청의 캐시로 재사용되면 반대 방향으로 같은 사고가 난다.
+     *
+     * 날씨 자체는 요청에 싣지 않는다. agent 의 fetch_weather 노드가 지역·기간으로
+     * hub 에 직접 물으므로, 추천이 실제로 도는 시점의 예보가 반영된다. BFF 가
+     * 본 값을 실어 보내면 그 사이 예보가 또 바뀌었을 때 오히려 어긋난다.
+     *
+     * stage 는 "init" 으로 강제하고 exclude 는 비운다 — 장소를 걸러내려는 게
+     * 아니라 바뀐 날씨로 처음부터 다시 짜는 것이다.
+     */
+    public JobAccepted createFreshRecommendation(RecommendRequest request) {
+        RecommendRequest normalized = withStage(request, "init", List.of());
+        JobAccepted accepted = agentClient.requestRecommend(normalized);
+        jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                normalized.province(), normalized.city());
+        return accepted;
+    }
+
     public JobAccepted createRouteJob(RecommendRequest request) {
         RecommendRequest normalized =
                 withStage(request, "route", List.of(), request.places());
