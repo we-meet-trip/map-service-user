@@ -1,5 +1,6 @@
 package map.service.user.places;
 
+import map.service.user.global.crypto.TestLocationSeals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.startsWith;
@@ -36,7 +37,7 @@ class PlacePhotosClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://hub:8000");
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new PlacePhotosClient(builder.build());
+        client = new PlacePhotosClient(builder.build(), TestLocationSeals.enabled());
     }
 
     @Test
@@ -57,8 +58,7 @@ class PlacePhotosClientTest {
         server.expect(requestTo(startsWith("http://hub:8000/v1/places/photos")))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(queryParam("query", encodedName))
-                .andExpect(queryParam("lat", "37.5663"))
-                .andExpect(queryParam("lng", "126.9779"))
+                .andExpect(TestLocationSeals.coordinatesAreSealed())
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
         PlacePhotosResponse response = client.fetch("경복궁", 37.5663, 126.9779);

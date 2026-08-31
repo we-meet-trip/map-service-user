@@ -1,6 +1,7 @@
 package map.service.user.recommend;
 
 import map.service.user.global.crypto.TestPayloadCiphers;
+import map.service.user.global.crypto.TestLocationSeals;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -34,7 +35,7 @@ class RecommendJobsConsumerTest {
                 draftStore, jobStore, reuseCacheStore, streamsFactory,
                 "agent:jobs:done", "bff-result", "user-1",
                 "agent:jobs:done:dlq", 3, 2000L, 60000L, 64L,
-                TestPayloadCiphers.enabled());
+                TestPayloadCiphers.enabled(), TestLocationSeals.enabled());
     }
 
     private MapRecord<String, String, String> record(String jobId, String payload) {

@@ -32,11 +32,17 @@ jwt:
 # 저장 본문 암호화 키. 값이 소스에 있어도 되는 이유는 테스트가 메모리 데이터베이스만
 # 쓰고 그 내용이 프로세스와 함께 사라지기 때문이다. 실행 환경의 변수가 설정 파일보다
 # 우선하므로, 셸에 다른 키가 있어도 테스트는 이 값으로 고정된다.
+# 서비스 사이로 나가는 좌표를 감싸는 열쇠. 검사에서만 쓰는 고정값이며
+# 프로세스와 함께 사라진다. 실행 환경의 변수가 설정 파일보다 우선하므로
+# 셸에 다른 값이 있어도 검사는 이 값으로 고정된다.
 location:
   crypto:
     enabled: true
     active-kid: test
     keys: test:bWFwLXNlcnZpY2UtdXNlci10ZXN0LWtleS0wMDAwMDA=
+  wire:
+    enabled: true
+    key: bWFwLXdpcmUtdGVzdC1rZXktMDAwMDAwMDAwMDAwMCE=
 
 # 테스터 계정 시더는 테스트에서 돌지 않는다. 환경변수가 설정 파일보다 우선하므로,
 # 셸에 TESTER_SEED_ENABLED 가 켜져 있어도 테스트에는 새지 않도록 여기서 못 박는다.

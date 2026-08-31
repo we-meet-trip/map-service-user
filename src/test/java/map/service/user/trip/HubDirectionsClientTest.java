@@ -1,5 +1,6 @@
 package map.service.user.trip;
 
+import map.service.user.global.crypto.TestLocationSeals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -43,7 +44,7 @@ class HubDirectionsClientTest {
         server = MockRestServiceServer.bindTo(builder)
                 .ignoreExpectOrder(false)
                 .build();
-        client = new HubDirectionsClient(builder.build());
+        client = new HubDirectionsClient(builder.build(), TestLocationSeals.enabled());
     }
 
     private static List<LegReq> twoLegs() {
@@ -94,6 +95,14 @@ class HubDirectionsClientTest {
                 ]}""";
         server.expect(requestTo(startsWith("http://hub:8000/v1/directions/batch")))
                 .andExpect(method(HttpMethod.POST))
+                // 본문에 좌표와 방문지 이름이 값 그대로 실리면 안 된다.
+                // 감싸기가 이 호출부에서 빠져도 응답은 똑같이 오므로
+                // 화면으로는 알 수 없다.
+                .andExpect(request -> assertThat(
+                        new String(((org.springframework.mock.http.client.MockClientHttpRequest) request)
+                                .getBodyAsBytes(), java.nio.charset.StandardCharsets.UTF_8))
+                        .contains("\"loc\":\"v1.")
+                        .doesNotContain("\"lat\"", "\"lng\""))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
         List<Route> routes = client.fetchRoutes("walk", twoLegs());

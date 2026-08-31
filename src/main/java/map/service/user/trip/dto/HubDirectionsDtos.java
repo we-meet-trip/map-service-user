@@ -18,7 +18,15 @@ public final class HubDirectionsDtos {
     }
 
     /** 요청 본문: 이동수단(mode) + 구간 목록(legs). */
-    public record BatchRequest(String mode, List<LegReq> legs) {
+    /**
+     * 구간 묶음 요청.
+     *
+     * loc 에 구간 전체를 감싸 담는다. 구간에는 좌표뿐 아니라 방문지 이름도
+     * 들어가는데, 이름만으로도 어디를 다니는지가 드러나므로 함께 감싼다.
+     * legs 는 감싸지 않던 예전 형태이며, 감쌀 때는 비워 보낸다 — 두 곳에
+     * 같은 값을 실으면 감싼 의미가 없다.
+     */
+    public record BatchRequest(String mode, String loc, List<LegReq> legs) {
     }
 
     /** 한 구간 요청: 출발/도착 좌표 + 표시용 명칭. */
