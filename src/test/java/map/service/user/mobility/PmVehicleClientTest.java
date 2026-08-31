@@ -1,5 +1,6 @@
 package map.service.user.mobility;
 
+import map.service.user.global.crypto.TestLocationSeals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.not;
@@ -36,7 +37,7 @@ class PmVehicleClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://hub:8000");
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new PmVehicleClient(builder.build());
+        client = new PmVehicleClient(builder.build(), TestLocationSeals.enabled());
     }
 
     @Test
@@ -50,8 +51,7 @@ class PmVehicleClientTest {
         server.expect(requestTo(
                         startsWith("http://hub:8000/v1/mobility/pm-vehicles")))
                 .andExpect(method(HttpMethod.GET))
-                .andExpect(queryParam("lat", "37.5665"))
-                .andExpect(queryParam("lng", "126.978"))
+                .andExpect(TestLocationSeals.coordinatesAreSealed())
                 .andExpect(queryParam("radius_m", "1000"))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
@@ -69,7 +69,6 @@ class PmVehicleClientTest {
     @DisplayName("지역 미지정 — 쿼리에 city 가 실리지 않는다")
     void fetchOmitsCityWhenAbsent() {
         server.expect(requestTo(not(startsWith("x"))))
-                .andExpect(queryParam("lat", "37.5665"))
                 .andRespond(withSuccess(
                         "{\"status\":\"ok\",\"vehicles\":[],\"count\":0}",
                         MediaType.APPLICATION_JSON));

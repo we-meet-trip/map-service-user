@@ -2,6 +2,7 @@ package map.service.user.places;
 
 import java.nio.charset.StandardCharsets;
 import map.service.user.places.dto.PlacePhotosResponse;
+import map.service.user.global.crypto.LocationSeal;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
@@ -27,7 +28,11 @@ public class PlacePhotosClient {
     /** 오류 응답 본문을 메모리에 읽을 최대 바이트(과대 응답 OOM 방지). */
     private static final int ERROR_BODY_MAX = 4096;
 
-    public PlacePhotosClient(@Qualifier("hubRestClient") RestClient client) {
+    private final LocationSeal seal;
+
+    public PlacePhotosClient(@Qualifier("hubRestClient") RestClient client,
+                             LocationSeal seal) {
+        this.seal = seal;
         this.client = client;
     }
 
@@ -42,8 +47,7 @@ public class PlacePhotosClient {
         return client.get()
                 .uri(uri -> uri.path("/v1/places/photos")
                         .queryParam("query", query)
-                        .queryParam("lat", lat)
-                        .queryParam("lng", lng)
+                        .queryParam("loc", seal.seal(lat, lng))
                         .build())
                 .retrieve()
                 .onStatus(
