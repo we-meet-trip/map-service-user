@@ -232,4 +232,66 @@ class ScheduleServiceTest {
 
         verify(weatherService).acceptCurrentForecast(entity);
     }
+
+    @Test
+    @DisplayName("replanSpec — 저장된 조건을 다시 짜기용 사양으로 돌려준다")
+    void replanSpecReturnsStoredConditions() {
+        LocalDate soon = LocalDate.now().plusDays(3);
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "제주 여행",
+                soon, soon.plusDays(1), null, "bicycle", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+
+        ScheduleReplanSpec spec = service.replanSpec(5L, 42L);
+
+        assertThat(spec.scheduleId()).isEqualTo(5L);
+        assertThat(spec.province()).isEqualTo("서울특별시");
+        assertThat(spec.city()).isEqualTo("중구");
+        assertThat(spec.dateStart()).isEqualTo(soon);
+        assertThat(spec.dateEnd()).isEqualTo(soon.plusDays(1));
+        assertThat(spec.transport()).isEqualTo("bicycle");
+        assertThat(spec.activeStartHour()).isEqualTo(9);
+        assertThat(spec.activeEndHour()).isEqualTo(18);
+    }
+
+    @Test
+    @DisplayName("replanSpec — 지역을 모르거나 지나간 일정은 거절한다")
+    void replanSpecRejectsUnusableSchedules() {
+        LocalDate soon = LocalDate.now().plusDays(3);
+        ScheduleEntity noRegion = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "옛 일정",
+                soon, soon, null, "walk", 9, 18);
+        ScheduleEntity past = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "지난 여행",
+                LocalDate.of(2020, 1, 1), LocalDate.of(2020, 1, 2),
+                null, "walk", 9, 18);
+        past.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(noRegion));
+        when(repository.findByScheduleIdAndUserId(6L, 42L))
+                .thenReturn(Optional.of(past));
+
+        assertThatThrownBy(() -> service.replanSpec(5L, 42L))
+                .isInstanceOf(ScheduleReplanUnavailableException.class);
+        assertThatThrownBy(() -> service.replanSpec(6L, 42L))
+                .isInstanceOf(ScheduleReplanUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("markReplanned — 기준선을 지금 예보로 옮기고 알림을 지운다")
+    void markReplannedMovesBaseline() {
+        LocalDate soon = LocalDate.now().plusDays(3);
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.randomUUID(), "제주 여행",
+                soon, soon, null, "walk", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+
+        service.markReplanned(5L, 42L);
+
+        verify(weatherService).acceptCurrentForecast(entity);
+    }
 }
