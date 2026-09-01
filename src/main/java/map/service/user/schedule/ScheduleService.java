@@ -295,6 +295,54 @@ public class ScheduleService {
     }
 
     /**
+     * 저장된 일정을 다시 짜기 위한 조건을 꺼낸다(동기 재추천 진입점).
+     *
+     * 검증은 여기서 끝낸다 — 소유자 확인, 지역 보유, 아직 지나지 않은 일정.
+     * trip 도메인은 통과한 사양만 받아 추천을 돌린다.
+     *
+     * 지역을 모르면 어느 동네로 짜야 할지 알 수 없고(좌표로 추측하면 엉뚱한
+     * 동네가 나온다), 지나간 일정은 다시 짤 이유가 없다. 둘 다
+     * ScheduleReplanUnavailableException(409).
+     *
+     * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404).
+     */
+    @Transactional(readOnly = true)
+    public ScheduleReplanSpec replanSpec(Long scheduleId, Long userId) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        if (entity.getProvince() == null || entity.getCity() == null) {
+            throw new ScheduleReplanUnavailableException(
+                    scheduleId, "지역 정보가 없는 일정");
+        }
+        if (isPast(entity)) {
+            throw new ScheduleReplanUnavailableException(
+                    scheduleId, "이미 지나간 일정");
+        }
+        // 식별자는 인자 쪽을 쓴다 — 엔티티의 값은 DB 가 채우는 것이라
+        // 영속 전 인스턴스에서는 비어 있다.
+        return new ScheduleReplanSpec(
+                scheduleId,
+                entity.getProvince(),
+                entity.getCity(),
+                entity.getDateStart(),
+                entity.getDateEnd(),
+                entity.getTransport(),
+                entity.getActiveStartHour(),
+                entity.getActiveEndHour());
+    }
+
+    /**
+     * 다시 짜기가 끝났음을 일정에 반영한다 — 기준선을 지금 예보로 옮기고
+     * 걸려 있던 알림을 지운다.
+     *
+     * 추천이 성공한 뒤에만 부른다. 실패한 재추천으로 알림을 지우면 사용자는
+     * 바뀐 날씨를 모른 채 옛 코스를 그대로 들고 가게 된다.
+     */
+    @Transactional
+    public void markReplanned(Long scheduleId, Long userId) {
+        weatherService.acceptCurrentForecast(findOwned(scheduleId, userId));
+    }
+
+    /**
      * 저장된 이동수단 문자열을 추천 요청의 이동수단으로 옮긴다.
      *
      * 값이 없거나 아는 어휘가 아니면 null 이다 — 임의로 도보라고 정하면
