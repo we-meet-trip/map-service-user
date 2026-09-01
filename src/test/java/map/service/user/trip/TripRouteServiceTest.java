@@ -58,7 +58,8 @@ class TripRouteServiceTest {
         reviewSummaryService = mock(ReviewSummaryService.class);
         service = new TripService(
                 recommendService, draftStore, hubWeatherClient, stopsAssembler,
-                reviewSummaryService, new ObjectMapper(), 1L, 10L);
+                reviewSummaryService, new ObjectMapper(),
+                mock(map.service.user.schedule.ScheduleService.class), 1L, 10L);
         when(recommendService.createRouteJob(any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
     }

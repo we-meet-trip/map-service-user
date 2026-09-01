@@ -3,6 +3,9 @@ package map.service.user.trip;
 import jakarta.validation.Valid;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
+import map.service.user.trip.dto.TripReplanRequest;
 import map.service.user.trip.dto.TripRouteRequest;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 엔드포인트:
  * - POST /api/v1/trip/generate → 200 TripGenerateResponse (조건으로 일정 생성)
  * - POST /api/v1/trip/route    → 200 TripGenerateResponse (고른 장소로 동선 생성)
+ * - POST /api/v1/trip/replan   → 200 TripGenerateResponse (저장된 일정 재추천)
  *
  * 두 응답 타입이 같은 이유는 결과 화면이 하나이기 때문이다 — 어느 쪽으로
  * 만들었든 client 는 같은 코드로 방문지와 동선을 그린다.
@@ -67,5 +71,27 @@ public class TripController {
             @Valid @RequestBody TripRouteRequest request
     ) {
         return service.route(request);
+    }
+
+    /**
+     * 저장된 일정을 지금 날씨로 다시 짜서 완성된 일정을 돌려준다(날씨 배너의
+     * "다시 추천받기").
+     *
+     * 응답이 generate 와 같은 형태라 결과 화면을 그대로 재사용한다. 조건은
+     * 저장된 일정에서 가져오므로 본문에는 식별자만 싣는다.
+     *
+     * 재탐색(mode1)이 아니라 일반 추천 경로라 1일 3회 한도를 깎지 않는다.
+     * 지역을 모르는 옛 일정과 이미 지나간 일정은 409, 남의 일정은 404,
+     * 추천 실패는 502, 시간초과는 504(전역 핸들러).
+     */
+    @PostMapping("/replan")
+    public TripGenerateResponse replan(
+            @Valid @RequestBody TripReplanRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        return service.replan(request.scheduleId(), userId);
     }
 }
