@@ -43,3 +43,12 @@ jobs:
           name: test-report
           path: build/reports/tests/test
           retention-days: 7
+
+      # 만드는 이미지의 판과 래퍼의 판이 갈라지면, 손에서 통과한 것이 이미지
+      # 안에서 다른 도구로 만들어진다. 어긋난 순간 여기서 멈춘다.
+      - name: 만드는 판이 래퍼와 같은가
+        run: |
+          set -euo pipefail
+          w=$(sed -n 's/.*gradle-\(.*\)-bin\.zip/\1/p' gradle/wrapper/gradle-wrapper.properties)
+          d=$(sed -n 's/^FROM gradle:\([^-]*\)-.*/\1/p' Dockerfile)
+          [ "$w" = "$d" ] || { echo "래퍼 $w · 이미지 $d 로 갈라져 있다"; exit 1; }

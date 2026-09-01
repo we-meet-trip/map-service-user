@@ -17,9 +17,13 @@
 
 # ---- builder : 소스 → bootJar ----
 # - gradle 이미지 위에서 워크스페이스를 복사하고 bootJar 만 빌드한다.
-# - 테스트는 -x test 로 스킵 (테스트는 CI 단계에서 별도로 수행).
+# - 테스트는 여기서 건너뛴다. 만드는 시간을 줄이려는 것이고, 대신 이미지를
+#   만드는 실행이 만들기 전에 검사를 돌린다. 그 자리가 없으면 아무 데서도
+#   안 도는 상태가 되므로 둘은 한 벌이다.
 # - --no-daemon : 데몬 잔여 프로세스 회피.
-FROM gradle:8.12-jdk17 AS builder
+# 래퍼가 정한 판과 같은 것을 쓴다. 갈라지면 손에서 통과한 것이 이미지 안에서
+# 다른 도구로 만들어지고, 그 차이는 만든 결과에서만 드러난다.
+FROM gradle:8.12.1-jdk17 AS builder
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
 RUN gradle clean bootJar -x test --no-daemon
