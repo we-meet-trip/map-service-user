@@ -149,7 +149,9 @@ class ScheduleServiceTest {
         assertThat(sent.date().dateStart()).isEqualTo(soon);
         assertThat(sent.mobility()).isEqualTo(Mobility.BICYCLE);
         assertThat(sent.scheduleId()).isEqualTo("5");
-        verify(weatherService).clearAlert(entity);
+        // 재추천도 무시와 똑같이 기준선을 지금 예보로 옮긴다 — 옮기지 않으면
+        // 다음 순회가 같은 변화를 또 잡아 배너가 30분마다 되살아난다.
+        verify(weatherService).acceptCurrentForecast(entity);
     }
 
     @Test
@@ -194,56 +196,18 @@ class ScheduleServiceTest {
     }
 
     @Test
-    @DisplayName("dismiss — 알림을 지우고 기준선을 지금 예보로 옮긴다")
-    void dismissClearsAlertAndMovesBaseline() {
+    @DisplayName("dismiss — 소유자 확인 뒤 기준선 이동을 감지 서비스에 맡긴다")
+    void dismissDelegatesToWeatherService() {
         ScheduleEntity entity = new ScheduleEntity(
                 42L, java.util.UUID.randomUUID(), "제주 여행",
-                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7),
+                LocalDate.now().plusDays(3), LocalDate.now().plusDays(3),
                 null, "walk", 9, 18);
         entity.setRegion("서울특별시", "중구");
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        List<WeatherSnapshotItem> now = List.of(
-                new WeatherSnapshotItem(LocalDate.of(2099, 7, 6), 80, "rainy"));
-        when(weatherService.buildBaseline(
-                "서울특별시", "중구",
-                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7)))
-                .thenReturn(now);
-        ObjectMapper jsonWithDates = new ObjectMapper()
-                .registerModule(new JavaTimeModule());
-        when(weatherService.toJson(now)).thenReturn(jsonWithDates.valueToTree(now));
 
         service.dismissWeatherAlert(5L, 42L);
 
-        // 기준선이 지금 예보로 옮겨져야 같은 변화가 다시 알림으로 뜨지 않는다.
-        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
-                .isEqualTo(80);
-        assertThat(entity.getWeatherAlert()).isNull();
-        verify(repository).save(entity);
-    }
-
-    @Test
-    @DisplayName("dismiss — 지금 예보를 못 받으면 기준선을 건드리지 않고 알림만 지운다")
-    void dismissKeepsBaselineWhenForecastUnavailable() {
-        ScheduleEntity entity = new ScheduleEntity(
-                42L, java.util.UUID.randomUUID(), "제주 여행",
-                LocalDate.of(2099, 7, 6), LocalDate.of(2099, 7, 7),
-                null, "walk", 9, 18);
-        entity.setRegion("서울특별시", "중구");
-        ObjectMapper jsonWithDates = new ObjectMapper()
-                .registerModule(new JavaTimeModule());
-        entity.setWeatherBaseline(jsonWithDates.valueToTree(List.of(
-                new WeatherSnapshotItem(LocalDate.of(2099, 7, 6), 20, "sunny"))));
-        when(repository.findByScheduleIdAndUserId(5L, 42L))
-                .thenReturn(Optional.of(entity));
-        when(weatherService.buildBaseline(any(), any(), any(), any()))
-                .thenReturn(List.of());
-
-        service.dismissWeatherAlert(5L, 42L);
-
-        // 기준선을 비우면 그 일정이 감시 대상에서 영영 빠진다.
-        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
-                .isEqualTo(20);
-        assertThat(entity.getWeatherAlert()).isNull();
+        verify(weatherService).acceptCurrentForecast(entity);
     }
 }

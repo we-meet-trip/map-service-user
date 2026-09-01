@@ -205,8 +205,9 @@ public class ScheduleService {
      * 없어서 조건이 그대로인 이 요청은 반드시 캐시에 맞고, 맞으면 agent 가 아예
      * 돌지 않아 fetch_weather 도 돌지 않는다 — 비 오기 전 코스가 그대로 돌아온다.
      *
-     * 걸려 있던 알림은 지운다. 새 코스는 지금 예보를 이미 반영하므로 같은 배너를
-     * 계속 띄울 이유가 없다. 새 결과를 저장하면 그때 기준선도 새로 굳는다.
+     * 걸려 있던 알림을 지우면서 기준선도 지금 예보로 옮긴다. 알림만 지우면
+     * 다음 순회가 같은 차이를 또 발견해 30분마다 배너가 되살아난다 — 사용자가
+     * 재추천을 눌렀는데도 같은 알림이 반복된다(통합 검증에서 실제로 확인).
      *
      * 지역을 모르는 일정이면 ScheduleReplanUnavailableException.
      * 소유자가 아니거나 없는 일정이면 ScheduleNotFoundException(404).
@@ -248,7 +249,7 @@ public class ScheduleService {
                 null);
 
         JobAccepted accepted = recommendService.createFreshRecommendation(request);
-        weatherService.clearAlert(entity);
+        weatherService.acceptCurrentForecast(entity);
         return accepted;
     }
 
@@ -270,17 +271,7 @@ public class ScheduleService {
      */
     @Transactional
     public void dismissWeatherAlert(Long scheduleId, Long userId) {
-        ScheduleEntity entity = findOwned(scheduleId, userId);
-        if (entity.getProvince() != null && entity.getCity() != null) {
-            JsonNode moved = weatherService.toJson(weatherService.buildBaseline(
-                    entity.getProvince(), entity.getCity(),
-                    entity.getDateStart(), entity.getDateEnd()));
-            if (moved != null) {
-                entity.setWeatherBaseline(moved);
-            }
-        }
-        entity.setWeatherAlert(null);
-        repository.save(entity);
+        weatherService.acceptCurrentForecast(findOwned(scheduleId, userId));
     }
 
     /**

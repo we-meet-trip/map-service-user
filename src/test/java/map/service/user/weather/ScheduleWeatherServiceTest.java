@@ -158,4 +158,59 @@ class ScheduleWeatherServiceTest {
         assertThat(service.check(entity)).isTrue();
         assertThat(service.check(entity)).isFalse();
     }
+
+    @Test
+    @DisplayName("변화를 처리했으면 기준선을 지금 예보로 옮기고 알림을 지운다")
+    void acceptCurrentForecastMovesBaseline() {
+        ScheduleEntity entity = schedule();
+        entity.setWeatherBaseline(mapper.valueToTree(
+                List.of(new WeatherSnapshotItem(D1, 20, "sunny"))));
+        entity.setWeatherAlert(mapper.valueToTree(new WeatherAlert(
+                WeatherAlert.RAIN_APPEARED, D1, 20, 80, "sunny", "rainy", null)));
+        when(hub.fetchWeather(any(), any(), any(), any()))
+                .thenReturn(hubDay(80, "비"));
+
+        service().acceptCurrentForecast(entity);
+
+        // 기준선이 지금 예보로 옮겨져야 같은 변화가 다시 알림으로 뜨지 않는다.
+        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
+                .isEqualTo(80);
+        assertThat(entity.getWeatherAlert()).isNull();
+        verify(repository).save(entity);
+    }
+
+    @Test
+    @DisplayName("지금 예보를 못 받으면 기준선은 그대로 두고 알림만 지운다")
+    void acceptCurrentForecastKeepsBaselineWhenHubSilent() {
+        ScheduleEntity entity = schedule();
+        entity.setWeatherBaseline(mapper.valueToTree(
+                List.of(new WeatherSnapshotItem(D1, 20, "sunny"))));
+        entity.setWeatherAlert(mapper.valueToTree(new WeatherAlert(
+                WeatherAlert.RAIN_APPEARED, D1, 20, 80, "sunny", "rainy", null)));
+        when(hub.fetchWeather(any(), any(), any(), any()))
+                .thenReturn(new HubWeatherResponse(
+                        "서울특별시", "중구", List.of(), List.of()));
+
+        service().acceptCurrentForecast(entity);
+
+        // 기준선을 비우면 그 일정이 감시 대상에서 영영 빠진다.
+        assertThat(entity.getWeatherBaseline().get(0).get("pop").asInt())
+                .isEqualTo(20);
+        assertThat(entity.getWeatherAlert()).isNull();
+    }
+
+    @Test
+    @DisplayName("지역을 모르는 일정도 알림은 지운다")
+    void acceptCurrentForecastClearsAlertWithoutRegion() {
+        ScheduleEntity entity = new ScheduleEntity(
+                7L, java.util.UUID.randomUUID(), "옛 일정",
+                D1, D1, null, "walk", 10, 18);
+        entity.setWeatherAlert(mapper.valueToTree(new WeatherAlert(
+                WeatherAlert.RAIN_APPEARED, D1, 20, 80, "sunny", "rainy", null)));
+
+        service().acceptCurrentForecast(entity);
+
+        assertThat(entity.getWeatherAlert()).isNull();
+        verify(hub, never()).fetchWeather(any(), any(), any(), any());
+    }
 }

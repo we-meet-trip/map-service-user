@@ -145,8 +145,30 @@ public class ScheduleWeatherService {
         }
     }
 
-    /** 걸려 있는 알림을 지운다. 재추천을 시작할 때 쓴다. */
-    public void clearAlert(ScheduleEntity schedule) {
+    /**
+     * 사용자가 그 변화를 처리했다고 보고, 기준선을 지금 예보로 옮기며 알림을 지운다.
+     *
+     * 재추천을 눌렀든("다시 짜 줘") 무시했든("이대로 갈래") 사용자는 이미 그
+     * 변화를 알고 행동한 것이다. 그러니 같은 변화로 다시 알릴 이유가 없다.
+     * 알림만 지우면 다음 순회가 같은 차이를 또 발견해 30분마다 배너가 되살아난다
+     * — 실제로 그렇게 동작하는 것을 통합 검증에서 확인했다.
+     *
+     * 기준선을 옮겨 두면 이후 예보가 <b>또</b> 달라졌을 때만(비가 그치거나 다른
+     * 날이 나빠졌을 때) 새 기준선 대비로 알린다.
+     *
+     * 지금 예보를 받지 못하면 기준선은 건드리지 않고 알림만 지운다. 기준선을
+     * 비우면 그 일정이 감시 대상에서 영영 빠진다(감시 조건이 기준선 보유다).
+     * 그 경우 같은 알림이 다시 뜰 수 있지만, 영영 안 뜨는 쪽보다 낫다.
+     */
+    public void acceptCurrentForecast(ScheduleEntity schedule) {
+        if (schedule.getProvince() != null && schedule.getCity() != null) {
+            JsonNode moved = toJson(buildBaseline(
+                    schedule.getProvince(), schedule.getCity(),
+                    schedule.getDateStart(), schedule.getDateEnd()));
+            if (moved != null) {
+                schedule.setWeatherBaseline(moved);
+            }
+        }
         schedule.setWeatherAlert(null);
         repository.save(schedule);
     }
