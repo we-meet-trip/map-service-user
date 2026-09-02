@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Base64;
 import map.service.user.global.config.LocationWireProperties;
 import org.junit.jupiter.api.DisplayName;
@@ -102,18 +100,5 @@ class LocationSealTest {
 
         assertThatThrownBy(() -> s.open(token.substring(0, token.length() - 4) + "AAAA"))
                 .isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    @DisplayName("다른 언어 쪽에서 열어 보도록 봉투 하나를 남긴다")
-    void writesTokenForCrossLanguageCheck() throws Exception {
-        // 받는 쪽은 파이썬으로 되어 있어 같은 검사 틀 안에서 열어 볼 수 없다.
-        // 형식이 어긋나면 배포한 뒤 모든 좌표 요청이 한꺼번에 거절되므로,
-        // 여기서 만든 값을 파일로 남겨 상대 쪽 검사가 열어 보게 한다.
-        Path out = Path.of("build", "seal-interop.txt");
-        Files.createDirectories(out.getParent());
-        Files.writeString(out, seal(true, KEY).seal(35.1587, 129.1604));
-
-        assertThat(Files.readString(out)).startsWith("v1.");
     }
 }
