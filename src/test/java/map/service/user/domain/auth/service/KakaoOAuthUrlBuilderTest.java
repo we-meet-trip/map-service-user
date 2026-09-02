@@ -1,6 +1,8 @@
 package map.service.user.domain.auth.service;
 
 import map.service.user.global.config.KakaoProperties;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,6 +11,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * KakaoOAuthService 의 URL 조립 로직(authorize URL / 앱 콜백 바운스 Location) 단위 테스트.
@@ -31,6 +34,24 @@ class KakaoOAuthUrlBuilderTest {
         props.setAuthorizeUri("https://kauth.kakao.com/oauth/authorize");
         props.setAppCallbackScheme("mapauth://kakao");
         service = new KakaoOAuthService(props, null, null, null, null, null);
+    }
+
+    @Test
+    @DisplayName("authorize URL — 발급 식별자가 비어 있으면 주소를 만들지 않고 끊는다")
+    void buildAuthorizeUrl_rejectsBlankClientId() {
+        for (String blank : new String[] {null, "", "   "}) {
+            KakaoProperties props = new KakaoProperties();
+            props.setClientId(blank);
+            props.setRedirectUri("https://test.example.com/api/v1/auth/kakao/callback");
+            props.setAuthorizeUri("https://kauth.kakao.com/oauth/authorize");
+            props.setAppCallbackScheme("mapauth://kakao");
+            KakaoOAuthService svc = new KakaoOAuthService(props, null, null, null, null, null);
+
+            assertThatThrownBy(() -> svc.buildAuthorizeUrl("state"))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.KAKAO_NOT_CONFIGURED);
+        }
     }
 
     @Test

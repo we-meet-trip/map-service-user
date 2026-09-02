@@ -54,8 +54,16 @@ public class KakaoOAuthService {
      * @param state 앱이 생성한 CSRF 방지 랜덤값(앱이 콜백에서 재검증)
      */
     public String buildAuthorizeUrl(String state) {
+        // 발급 식별자가 비어 있어도 주소는 만들어진다. 그 주소를 받은 앱은
+        // 바깥 브라우저를 열고, 사용자는 카카오 오류 화면을 보고, 앱은 돌아오지
+        // 않는 응답을 기다리다 한참 뒤에야 시간 초과로 접힌다. 설정이 덜 된
+        // 것을 사용자가 잘못한 것처럼 보여 주는 셈이라, 여기서 바로 끊는다.
+        String clientId = kakaoProperties.getClientId();
+        if (clientId == null || clientId.isBlank()) {
+            throw new CustomException(ErrorCode.KAKAO_NOT_CONFIGURED);
+        }
         return kakaoProperties.getAuthorizeUri()
-                + "?client_id="     + enc(kakaoProperties.getClientId())
+                + "?client_id="     + enc(clientId)
                 + "&redirect_uri="  + enc(kakaoProperties.getRedirectUri())
                 + "&response_type=code"
                 + "&scope="         + enc(SCOPE)

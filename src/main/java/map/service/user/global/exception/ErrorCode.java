@@ -24,6 +24,7 @@ public enum ErrorCode {
     // Auth — Kakao
     KAKAO_TOKEN_EXCHANGE_FAILED(HttpStatus.BAD_GATEWAY, "KAKAO_001", "카카오 인가 코드 교환에 실패했습니다."),
     KAKAO_USER_INFO_FAILED(HttpStatus.BAD_GATEWAY, "KAKAO_002", "카카오 사용자 정보 조회에 실패했습니다."),
+    KAKAO_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "KAKAO_003", "카카오 로그인이 아직 열리지 않았습니다."),
 
     // Rate Limit
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "RATE_001", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
