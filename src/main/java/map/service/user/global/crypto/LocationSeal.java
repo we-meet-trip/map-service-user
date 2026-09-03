@@ -108,25 +108,38 @@ public class LocationSeal {
      * 알리지 않는 이유는, 어느 단계에서 막혔는지 알려 주면 그것만으로
      * 무엇을 바꿔 가며 시도할지가 정해지기 때문이다.
      *
-     * 만든 시각은 여기서 보지 않는다. 이 길로 오는 것은 스트림에 쌓여 있다가
-     * 뒤늦게 처리되는 값이라, 만든 지 오래됐다는 이유로 버리면 밀린 작업이
-     * 통째로 사라진다.
+     * 만든 시각도 본다. 다만 이 길로 오는 것은 스트림에 쌓여 있다가 뒤늦게
+     * 처리되는 값이라, 보내는 쪽의 짧은 만료를 그대로 쓰면 밀린 작업이
+     * 통째로 사라진다. 그래서 상한을 따로 두고 훨씬 느슨하게 잡는다.
+     * max-age-seconds 를 0 으로 두면 예전처럼 시각을 보지 않는다.
      */
     public JsonNode open(String token) {
         if (!isSealed(token)) {
             throw new IllegalStateException("not a sealed value");
         }
         String[] parts = token.split("\\.", 3);
+        JsonNode body;
         try {
             Base64.Decoder decoder = Base64.getUrlDecoder();
             Cipher cipher = Cipher.getInstance(TRANSFORM);
             cipher.init(Cipher.DECRYPT_MODE, key,
                     new GCMParameterSpec(TAG_BITS, decoder.decode(parts[1])));
             cipher.updateAAD(AAD);
-            return objectMapper.readTree(cipher.doFinal(decoder.decode(parts[2])));
+            body = objectMapper.readTree(cipher.doFinal(decoder.decode(parts[2])));
         } catch (Exception e) {
             throw new IllegalStateException("cannot open sealed value", e);
         }
+        long maxAge = properties.getMaxAgeSeconds();
+        if (maxAge > 0) {
+            // iat 가 없으면 0 으로 읽혀 나이가 현재 시각만큼 커지고, 그대로
+            // 거절된다. 미래 60초까지는 서버끼리 시계가 조금 어긋난 것으로
+            // 보고 허용한다.
+            long age = Instant.now().getEpochSecond() - body.path("iat").asLong();
+            if (age > maxAge || age < -60) {
+                throw new IllegalStateException("sealed value expired");
+            }
+        }
+        return body;
     }
 
     /** 위도·경도 한 쌍을 감싼다. */

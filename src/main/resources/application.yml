@@ -358,6 +358,8 @@ auth:
 #   쓰는 열쇠와 반드시 다른 값으로 둔다 — 하나로 합치면 그 서비스들 중
 #   하나가 뚫렸을 때 저장된 것까지 함께 열린다.
 # - enabled=false 는 상대가 아직 봉투를 열 줄 모르는 동안의 임시 스위치다.
+# - max-age-seconds 는 열 때 보는 봉투 나이 상한이다. 스트림에 밀려 있다가
+#   뒤늦게 오는 값을 살려야 하므로 느슨하게 둔다. 0 이면 나이를 보지 않는다.
 location:
   crypto:
     enabled: ${LOCATION_ENC_ENABLED:true}
@@ -366,6 +368,7 @@ location:
   wire:
     enabled: ${LOCATION_WIRE_ENABLED:true}
     key: ${LOCATION_WIRE_KEY:}
+    max-age-seconds: ${LOCATION_WIRE_MAX_AGE_SECONDS:3600}
 
 # ---- tester : 테스터 계정 시더 ----
 # TesterAccountSeedRunner / TesterAccountSeeder 가 본 섹션을 참조한다.

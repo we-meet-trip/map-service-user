@@ -15,6 +15,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * enabled: 끄면 좌표를 예전처럼 값 그대로 보낸다. 상대 서비스가 아직 봉투를
  *          열 줄 모르는 동안 넘어가기 위한 스위치다. 양쪽이 준비되면 켠다.
  * key: 32바이트로 풀리는 base64. 켜 두었는데 없으면 부팅을 멈춘다.
+ * max-age-seconds: 열 때 보는 봉투 나이 상한(초). 이 길로 오는 값은 스트림에
+ *          쌓였다가 뒤늦게 처리될 수 있어 보내는 쪽 만료보다 느슨하게 둔다.
+ *          0 이면 나이를 보지 않는다.
  */
 @Getter
 @Setter
@@ -24,4 +27,6 @@ public class LocationWireProperties {
     private boolean enabled = true;
 
     private String key = "";
+
+    private long maxAgeSeconds = 3600;
 }
