@@ -22,6 +22,22 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # 부팅까지 하는 시험이 몇 개 있고, 그 부팅은 저장소를 구독하면서 끝난다.
+    # 없으면 그 자리에서 죽는다. 만드는 사람 컴퓨터에는 대개 하나가 떠 있어
+    # 통과하는데, 여기에는 없어서 그때만 실패한다 — 원인이 코드에 없으니
+    # 찾는 데 오래 걸린다. 그래서 여기서 하나 띄운다.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
