@@ -1,6 +1,11 @@
 package map.service.user.recommend;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import map.service.user.global.crypto.LocationSeal;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,17 +22,45 @@ import org.springframework.web.client.RestClient;
  *
  * client: @Qualifier("agentRestClient") 로 주입되는 RestClient.
  *         agent 호출용 baseUrl·타임아웃·HTTP/1.1 설정이 외부 Configuration 에서 구성되어 있다.
+ *
+ * 고른 장소는 감싸서 보낸다. 그 목록에는 좌표와 장소 이름이 함께 들어 있어,
+ * 이름만으로도 어디를 다니는지가 드러난다. 봉투를 만들 수 있다는 것 자체가
+ * 자격이 되므로, 받는 쪽은 열쇠를 가진 곳에서 온 것만 받는다.
  */
 @Component
 public class AgentClient {
 
     private final RestClient client;
+    private final LocationSeal seal;
+    private final ObjectMapper objectMapper;
 
     /** 오류 응답 본문을 메모리에 읽을 최대 바이트(과대 응답 OOM 방지). */
     private static final int ERROR_BODY_MAX = 4096;
 
-    public AgentClient(@Qualifier("agentRestClient") RestClient client) {
+    public AgentClient(@Qualifier("agentRestClient") RestClient client,
+                       LocationSeal seal,
+                       ObjectMapper objectMapper) {
         this.client = client;
+        this.seal = seal;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 보낼 본문을 만든다.
+     *
+     * 감싸기가 켜져 있고 고른 장소가 있으면 그 목록을 봉투에 담고 평문 자리를
+     * 비운다. 꺼져 있으면 예전처럼 그대로 보낸다 — 받는 쪽이 아직 봉투를 열 줄
+     * 모르는 동안 넘어가기 위한 자리이고, 양쪽이 준비되면 이 갈래는 지나가지 않는다.
+     */
+    private Object body(RecommendRequest request) {
+        if (!seal.isEnabled() || request.places() == null || request.places().isEmpty()) {
+            return request;
+        }
+        Map<String, Object> out = new LinkedHashMap<>(
+                objectMapper.convertValue(request, new TypeReference<Map<String, Object>>() {}));
+        out.remove("places");
+        out.put("loc", seal.seal(Map.of("places", request.places())));
+        return out;
     }
 
     /**
@@ -43,7 +76,7 @@ public class AgentClient {
         return client.post()
                 .uri("/v1/recommend")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
+                .body(body(request))
                 .retrieve()
                 .onStatus(
                         HttpStatusCode::isError,

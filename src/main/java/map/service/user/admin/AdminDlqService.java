@@ -2,6 +2,7 @@ package map.service.user.admin;
 
 import map.service.user.admin.dto.DlqActionResult;
 import map.service.user.admin.dto.DlqEntry;
+import map.service.user.global.crypto.PayloadCipher;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendJobStore;
 import org.slf4j.Logger;
@@ -40,16 +41,19 @@ public class AdminDlqService {
     private final DraftStore draftStore;
     private final RecommendJobStore jobStore;
     private final String dlqStream;
+    private final PayloadCipher payloadCipher;
 
     public AdminDlqService(
             @Qualifier("streamsConnectionFactory") RedisConnectionFactory streamsFactory,
             DraftStore draftStore,
             RecommendJobStore jobStore,
-            @Value("${streams.recommend-dlq-stream:agent:jobs:done:dlq}") String dlqStream) {
+            @Value("${streams.recommend-dlq-stream:agent:jobs:done:dlq}") String dlqStream,
+            PayloadCipher payloadCipher) {
         this.streamsTemplate = new StringRedisTemplate(streamsFactory);
         this.draftStore = draftStore;
         this.jobStore = jobStore;
         this.dlqStream = dlqStream;
+        this.payloadCipher = payloadCipher;
     }
 
     /** DLQ 최근 항목을 limit 개까지(최신순) 조회한다. */
@@ -89,7 +93,9 @@ public class AdminDlqService {
                     continue;
                 }
                 String jobId = str(v.get("job_id"));
-                String payload = str(v.get("payload"));
+                String payload = payloadCipher.decrypt(
+                        str(v.get("payload")),
+                        PayloadCipher.aad("redis", "agent:jobs:done:dlq", jobId));
                 String status = str(v.get("status"));
                 if (jobId == null || payload == null || payload.isBlank()) {
                     failed.add(id);

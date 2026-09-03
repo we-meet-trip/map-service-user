@@ -2,6 +2,7 @@ package map.service.user.transit;
 
 import java.nio.charset.StandardCharsets;
 import map.service.user.transit.dto.SubwayRouteResponse;
+import map.service.user.global.crypto.LocationSeal;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
@@ -27,7 +28,11 @@ public class SubwayRouteClient {
     /** 오류 응답 본문을 메모리에 읽을 최대 바이트(과대 응답 OOM 방지). */
     private static final int ERROR_BODY_MAX = 4096;
 
-    public SubwayRouteClient(@Qualifier("hubRestClient") RestClient client) {
+    private final LocationSeal seal;
+
+    public SubwayRouteClient(@Qualifier("hubRestClient") RestClient client,
+                             LocationSeal seal) {
+        this.seal = seal;
         this.client = client;
     }
 
@@ -43,10 +48,8 @@ public class SubwayRouteClient {
             double startLat, double startLng, double endLat, double endLng) {
         return client.get()
                 .uri(uri -> uri.path("/v1/transit/subway")
-                        .queryParam("start_lat", startLat)
-                        .queryParam("start_lng", startLng)
-                        .queryParam("end_lat", endLat)
-                        .queryParam("end_lng", endLng)
+                        .queryParam("loc",
+                                seal.sealPair(startLat, startLng, endLat, endLng))
                         .build())
                 .retrieve()
                 .onStatus(

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import map.service.user.global.crypto.TestPayloadCiphers;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendJobStore;
 import map.service.user.recommend.RecommendService;
@@ -56,8 +57,8 @@ class ScheduleServiceTest {
         weatherService = mock(ScheduleWeatherService.class);
         recommendService = mock(RecommendService.class);
         service = new ScheduleService(draftStore, repository, new ObjectMapper(),
-                mock(TripStopsAssembler.class), jobStore, weatherService,
-                recommendService);
+                mock(TripStopsAssembler.class), TestPayloadCiphers.enabled(),
+                jobStore, weatherService, recommendService);
         when(draftStore.find(JOB_ID))
                 .thenReturn(Optional.of("{\"job_id\":\"" + JOB_ID + "\",\"places\":[]}"));
         when(jobStore.findRegion(JOB_ID)).thenReturn(Optional.empty());
@@ -167,6 +168,27 @@ class ScheduleServiceTest {
         assertThatThrownBy(() -> service.replan(5L, 42L))
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
         verify(recommendService, never()).createRecommendation(any());
+    }
+
+    @Test
+    @DisplayName("persist — 저장되는 본문은 평문이 아니고, 같은 소유자로 다시 읽힌다")
+    void persistSealsPayloadAndReadsItBack() {
+        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"places\":[{\"lat\":38.1907}]}"));
+
+        service.persist(request(), 42L);
+
+        ArgumentCaptor<ScheduleEntity> captor = ArgumentCaptor.forClass(ScheduleEntity.class);
+        verify(repository).save(captor.capture());
+        ScheduleEntity saved = captor.getValue();
+
+        // 저장 자리에 좌표가 그대로 남아 있으면 감싸기가 걸리지 않은 것이다.
+        assertThat(saved.getPayload().toString()).doesNotContain("38.1907");
+
+        // 쓸 때와 읽을 때의 자리 이름이 어긋나면 여기서 복호가 실패한다.
+        // 그 어긋남은 배포 후 상세 조회에서야 드러나므로 여기서 잡는다.
+        when(repository.findByScheduleIdAndUserId(7L, 42L)).thenReturn(Optional.of(saved));
+        assertThat(service.detail(7L, 42L)).isNotNull();
     }
 
     @Test

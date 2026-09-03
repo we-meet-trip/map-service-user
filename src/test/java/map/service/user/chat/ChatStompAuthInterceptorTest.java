@@ -165,9 +165,15 @@ class ChatStompAuthInterceptorTest {
     }
 
     @Test
-    @DisplayName("SUBSCRIBE — 와일드카드 목적지는 거부(전 방 도청 방지)")
+    @DisplayName("SUBSCRIBE — 패턴 목적지는 거부(전 방 도청 방지)")
     void subscribe_wildcardDestination_denied() {
-        for (String dest : new String[] {"/topic/rooms/*", "/topic/**", "/topic/rooms/1*"}) {
+        // 중괄호 형태는 별표도 물음표도 없어 예전 검사를 그냥 통과했고, 방 토픽
+        // 접두어로 시작하지도 않아 참가자 확인마저 건너뛰었다. 그런데 브로커는
+        // 그것을 경로 패턴으로 보고 실제 방 토픽에 맞춰 보내므로, 한 번 구독으로
+        // 남의 방 대화가 함께 왔다.
+        for (String dest : new String[] {
+                "/topic/rooms/*", "/topic/**", "/topic/rooms/1*",
+                "/topic/{a}/{b}", "/topic/{x}/5", "/topic/rooms/{id}"}) {
             Message<byte[]> message = frame(StompCommand.SUBSCRIBE, dest, null, new StompPrincipal("7"));
             assertThatThrownBy(() -> interceptor().preSend(message, null))
                     .as("wildcard destination %s must be denied", dest)

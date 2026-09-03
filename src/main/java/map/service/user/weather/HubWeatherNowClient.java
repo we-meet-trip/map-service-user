@@ -3,6 +3,7 @@ package map.service.user.weather;
 import map.service.user.weather.dto.HubWeatherNowResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import map.service.user.global.crypto.LocationSeal;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -26,7 +27,11 @@ public class HubWeatherNowClient {
 
     private final RestClient client;
 
-    public HubWeatherNowClient(@Qualifier("hubRestClient") RestClient client) {
+    private final LocationSeal seal;
+
+    public HubWeatherNowClient(@Qualifier("hubRestClient") RestClient client,
+                               LocationSeal seal) {
+        this.seal = seal;
         this.client = client;
     }
 
@@ -43,8 +48,7 @@ public class HubWeatherNowClient {
         try {
             return client.get()
                     .uri(uri -> uri.path("/v1/weather/now")
-                            .queryParam("lat", lat)
-                            .queryParam("lng", lng)
+                            .queryParam("loc", seal.seal(lat, lng))
                             .build())
                     .retrieve()
                     .body(HubWeatherNowResponse.class);

@@ -2,6 +2,7 @@ package map.service.user.recommend;
 
 import java.time.Duration;
 import java.util.Optional;
+import map.service.user.global.crypto.PayloadCipher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -34,22 +35,35 @@ public class ReuseCacheStore {
     private final StringRedisTemplate redis;
     private final Duration cacheTtl;
     private final Duration linkTtl;
+    private final PayloadCipher payloadCipher;
 
     public ReuseCacheStore(
             @Qualifier("cacheRedisTemplate") StringRedisTemplate redis,
             @Value("${redis.cache-ttl-seconds:604800}") long cacheTtlSeconds,
-            @Value("${redis.cache-link-ttl-seconds:3600}") long linkTtlSeconds
+            @Value("${redis.cache-link-ttl-seconds:3600}") long linkTtlSeconds,
+            PayloadCipher payloadCipher
     ) {
         this.redis = redis;
         this.cacheTtl = Duration.ofSeconds(cacheTtlSeconds);
         this.linkTtl = Duration.ofSeconds(linkTtlSeconds);
+        this.payloadCipher = payloadCipher;
+    }
+
+    /**
+     * 캐시 본체를 묶어 둘 자리 이름. 이 캐시는 일곱 날을 살아 남으므로 저장소
+     * 파일이 유출됐을 때 가장 오래된 본문까지 함께 나간다. 요청 조건 해시를
+     * 묶어, 한 조건의 본문을 다른 조건의 키에 옮겨 넣어도 열리지 않게 한다.
+     */
+    private static String aadFor(String hash) {
+        return PayloadCipher.aad("redis", CACHE_PREFIX, hash);
     }
 
     /**
      * hash 에 해당하는 캐시 본체(draft JSON) 조회. 없으면 Optional.empty.
      */
     public Optional<String> find(String hash) {
-        return Optional.ofNullable(redis.opsForValue().get(cacheKey(hash)));
+        return Optional.ofNullable(redis.opsForValue().get(cacheKey(hash)))
+                .map(value -> payloadCipher.decrypt(value, aadFor(hash)));
     }
 
     /**
@@ -57,7 +71,8 @@ public class ReuseCacheStore {
      * (신규 생성 및 백그라운드 통짜 갱신 양쪽에서 사용).
      */
     public void save(String hash, String payloadJson) {
-        redis.opsForValue().set(cacheKey(hash), payloadJson, cacheTtl);
+        redis.opsForValue().set(
+                cacheKey(hash), payloadCipher.encrypt(payloadJson, aadFor(hash)), cacheTtl);
     }
 
     /**

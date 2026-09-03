@@ -1,5 +1,6 @@
 package map.service.user.recommend;
 
+import map.service.user.global.crypto.TestPayloadCiphers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +42,7 @@ class RecommendJobStoreTest {
 
     @BeforeEach
     void setUp() {
-        store = new RecommendJobStore(repository, objectMapper);
+        store = new RecommendJobStore(repository, objectMapper, TestPayloadCiphers.enabled());
     }
 
     /** 보류 중인 변경을 DB 로 flush 하고 영속성 컨텍스트를 비워 진짜 DB 재조회를 강제한다. */

@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import map.service.user.global.crypto.PayloadCipher;
+import com.fasterxml.jackson.databind.JsonNode;
+import map.service.user.global.crypto.LocationSeal;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
@@ -58,6 +61,8 @@ public class RecommendJobsConsumer
     private final String stream;
     private final String group;
     private final String consumer;
+    private final PayloadCipher payloadCipher;
+    private final LocationSeal seal;
     private final String dlqStream;
     private final int maxRetry;
     private final long dlqMaxlen;
@@ -85,8 +90,12 @@ public class RecommendJobsConsumer
             @Value("${streams.recommend-max-retry:3}") int maxRetry,
             @Value("${streams.recommend-dlq-maxlen:2000}") long dlqMaxlen,
             @Value("${streams.recommend-min-idle-ms:60000}") long minIdleMs,
-            @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch
+            @Value("${streams.recommend-reclaim-batch:64}") long reclaimBatch,
+            PayloadCipher payloadCipher,
+            LocationSeal seal
     ) {
+        this.payloadCipher = payloadCipher;
+        this.seal = seal;
         this.draftStore = draftStore;
         this.jobStore = jobStore;
         this.reuseCacheStore = reuseCacheStore;
@@ -118,10 +127,20 @@ public class RecommendJobsConsumer
         String recordId = message.getId().getValue();
         Map<String, String> value = message.getValue();
         String jobId = value.get("job_id");
-        String payloadJson = value.get("payload");
+        // agent 는 본문을 감싸서 넣는다. 감싸지 않은 것도 그대로 받아 준다 —
+        // 양쪽 배포 사이에 스트림에 남아 있던 옛 메시지를 버리지 않기 위해서다.
+        String payloadJson = openIfSealed(value.get("payload"), jobId);
 
         if (jobId == null || payloadJson == null) {
-            log.warn("Stream message missing job_id or payload id={}", recordId);
+            // 그룹을 만들려면 스트림이 있어야 해서, 없을 때 자리표시 한 건을
+            // 넣어 두고 만든다(StreamsConsumerConfig). 그 한 건이 여기로 온다.
+            // 정상 동작이므로 경고로 남기지 않는다 — 새로 띄울 때마다 경고가
+            // 뜨면 진짜 경고를 함께 흘려 보게 된다.
+            if (value.containsKey("_init")) {
+                log.info("stream placeholder discarded id={}", recordId);
+            } else {
+                log.warn("Stream message missing job_id or payload id={}", recordId);
+            }
             ack(recordId);
             return;
         }
@@ -233,7 +252,12 @@ public class RecommendJobsConsumer
         MapRecord<String, String, String> rec = claimed.get(0);
         Map<String, String> value = rec.getValue();
         long deliveries = pm.getTotalDeliveryCount();
-        routeToDlq(rec, value.get("job_id"), value.get("payload"), value.get("status"),
+        // 대기열에는 한 겹만 씌운다. 들어온 값이 감싸여 있으면 먼저 열고 저장
+        // 암호화로 다시 감싼다. 두 겹으로 두면 되살리는 쪽이 어느 것부터
+        // 풀어야 하는지 알 수 없다.
+        routeToDlq(rec, value.get("job_id"),
+                openIfSealed(value.get("payload"), value.get("job_id")),
+                value.get("status"),
                 (int) deliveries,
                 "max retries exceeded (" + deliveries + " deliveries)");
         ack(rec.getId().getValue());
@@ -259,6 +283,36 @@ public class RecommendJobsConsumer
      * dlqMaxlen > 0 이면 XTRIM ~MAXLEN(approximate=true) 로 길이를 제한한다.
      * trim/publish 자체의 예외는 로그만 남기고 삼킨다.
      */
+    /**
+     * 실패한 본문을 묶어 둘 자리 이름. 이 스트림은 최근 2000건을 계속 들고
+     * 있으므로, 감싸지 않으면 실패한 요청의 본문이 그만큼 쌓여 남는다.
+     */
+    private static String dlqAad(String jobId) {
+        return PayloadCipher.aad("redis", "agent:jobs:done:dlq", jobId);
+    }
+
+    /**
+     * 감싸서 온 본문을 연다. 감싸지 않은 값은 그대로 돌려준다.
+     *
+     * 열지 못하면 null 을 돌려주어 이 메시지를 버린다. 열지 못한 값을 그대로
+     * 저장하면 화면이 알아볼 수 없는 문자열을 일정으로 받게 되는데, 그때는
+     * 사용자에게 빈 일정으로 보여 원인이 드러나지 않는다.
+     */
+    private String openIfSealed(String raw, String jobId) {
+        if (raw == null || !seal.isSealed(raw)) {
+            return raw;
+        }
+        try {
+            JsonNode opened = seal.open(raw);
+            JsonNode body = opened.get("payload");
+            return body == null ? null : body.asText();
+        } catch (RuntimeException e) {
+            log.error("cannot open sealed payload job_id={} reason={}",
+                    jobId, e.getMessage());
+            return null;
+        }
+    }
+
     private void routeToDlq(
             MapRecord<String, String, String> message,
             String jobId,
@@ -271,7 +325,8 @@ public class RecommendJobsConsumer
             Map<String, String> dlqEntry = Map.of(
                     "job_id", jobId != null ? jobId : "unknown",
                     "status", status != null ? status : "unknown",
-                    "payload", payloadJson != null ? payloadJson : "",
+                    "payload", payloadJson != null
+                            ? payloadCipher.encrypt(payloadJson, dlqAad(jobId)) : "",
                     "original_id", message.getId().getValue(),
                     "delivery_count", String.valueOf(deliveryCount),
                     "error", error

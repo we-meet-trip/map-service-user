@@ -3,6 +3,8 @@ package map.service.user.trip;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import map.service.user.global.crypto.LocationSeal;
 import map.service.user.trip.dto.HubDirectionsDtos.BatchRequest;
 import map.service.user.trip.dto.HubDirectionsDtos.BatchResponse;
 import map.service.user.trip.dto.HubDirectionsDtos.LegReq;
@@ -46,8 +48,11 @@ public class HubDirectionsClient {
     private static final int MAX_LEGS_PER_BATCH = 20;
 
     private final RestClient client;
+    private final LocationSeal seal;
 
-    public HubDirectionsClient(@Qualifier("hubRestClient") RestClient client) {
+    public HubDirectionsClient(@Qualifier("hubRestClient") RestClient client,
+            LocationSeal seal) {
+        this.seal = seal;
         this.client = client;
     }
 
@@ -98,11 +103,24 @@ public class HubDirectionsClient {
      * 되돌아오는데, 거기에는 방문지 이름과 좌표가 들어 있어 로그에 남기면
      * 사용자의 이동 경로가 그대로 기록된다.
      */
+    /**
+     * 구간을 감싼 요청을 만든다.
+     *
+     * 감싸기를 꺼 두었을 때만 구간을 값 그대로 싣는다. 상대가 아직 열 줄
+     * 모르는 동안 넘어가기 위한 길이며, 둘을 함께 싣지는 않는다.
+     */
+    private BatchRequest sealedRequest(String mode, List<LegReq> batch) {
+        if (!seal.isEnabled()) {
+            return new BatchRequest(mode, null, batch);
+        }
+        return new BatchRequest(mode, seal.seal(Map.of("legs", batch)), List.of());
+    }
+
     private List<Route> fetchOneBatch(String mode, List<LegReq> batch) {
         try {
             BatchResponse res = client.post()
                     .uri("/v1/directions/batch")
-                    .body(new BatchRequest(mode, batch))
+                    .body(sealedRequest(mode, batch))
                     .retrieve()
                     .body(BatchResponse.class);
             if (res == null || res.routes() == null) {

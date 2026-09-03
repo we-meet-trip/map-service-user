@@ -1,0 +1,70 @@
+# 되돌리기 어려운 사고를 사람 손보다 먼저 잡는 자리.
+#
+# 왜 두는가: 시험 스택을 늘 띄워 두는 것보다 싸고 확실하다. 사람은 "먼저
+# 돌려 보기" 를 잊지만 여기는 잊지 않는다. 개발 기계의 메모리도 쓰지 않는다.
+#
+# 판을 박아 두는 이유: build.gradle 이 JDK 17 로 고정돼 있다. 여기서 다른
+# 판으로 돌리면 통과한 것이 배포에서 깨질 수 있다.
+#
+# 이 검사가 특히 값진 지점: 마이그레이션과 엔티티가 어긋나면 부팅이 막히는데
+# (ddl-auto=validate), 테스트가 그 불일치를 먼저 잡는다.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # 부팅까지 하는 시험이 몇 개 있고, 그 부팅은 저장소를 구독하면서 끝난다.
+    # 없으면 그 자리에서 죽는다. 만드는 사람 컴퓨터에는 대개 하나가 떠 있어
+    # 통과하는데, 여기에는 없어서 그때만 실패한다 — 원인이 코드에 없으니
+    # 찾는 데 오래 걸린다. 그래서 여기서 하나 띄운다.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: test
+        run: ./gradlew --no-daemon clean test
+
+      # 실패한 것을 눈으로 볼 수 있어야 한다. 로그만 남기면 어느 단언이
+      # 깨졌는지 확인하러 다시 돌려야 한다.
+      - name: upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test
+          retention-days: 7
+
+      # 만드는 이미지의 판과 래퍼의 판이 갈라지면, 손에서 통과한 것이 이미지
+      # 안에서 다른 도구로 만들어진다. 어긋난 순간 여기서 멈춘다.
+      - name: 만드는 판이 래퍼와 같은가
+        run: |
+          set -euo pipefail
+          w=$(sed -n 's/.*gradle-\(.*\)-bin\.zip/\1/p' gradle/wrapper/gradle-wrapper.properties)
+          d=$(sed -n 's/^FROM gradle:\([^-]*\)-.*/\1/p' Dockerfile)
+          [ "$w" = "$d" ] || { echo "래퍼 $w · 이미지 $d 로 갈라져 있다"; exit 1; }

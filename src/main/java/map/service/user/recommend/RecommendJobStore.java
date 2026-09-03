@@ -2,6 +2,7 @@ package map.service.user.recommend;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import map.service.user.global.crypto.PayloadCipher;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.Set;
@@ -34,10 +35,15 @@ public class RecommendJobStore {
 
     private final RecommendJobRepository repository;
     private final ObjectMapper objectMapper;
+    private final PayloadCipher payloadCipher;
 
-    public RecommendJobStore(RecommendJobRepository repository, ObjectMapper objectMapper) {
+    public RecommendJobStore(
+            RecommendJobRepository repository,
+            ObjectMapper objectMapper,
+            PayloadCipher payloadCipher) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.payloadCipher = payloadCipher;
     }
 
     /**
@@ -123,10 +129,10 @@ public class RecommendJobStore {
         RecommendJobEntity entity = repository.findById(uuid).orElse(null);
         if (entity == null) {
             entity = new RecommendJobEntity(
-                    uuid, null, status, payload, null, OffsetDateTime.now());
+                    uuid, null, status, sealed(uuid, payload), null, OffsetDateTime.now());
         } else {
             entity.setStatus(status);
-            entity.setResultPayload(payload);
+            entity.setResultPayload(sealed(uuid, payload));
             entity.setFinishedAt(OffsetDateTime.now());
         }
         repository.save(entity);
@@ -152,7 +158,8 @@ public class RecommendJobStore {
                     || entity.getResultPayload() == null) {
                 return Optional.empty();
             }
-            return Optional.of(objectMapper.writeValueAsString(entity.getResultPayload()));
+            return Optional.of(objectMapper.writeValueAsString(
+                    payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid))));
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
             log.warn("recommend job fallback read failed job_id={} reason={}",
                     jobId, e.getMessage());
@@ -185,6 +192,19 @@ public class RecommendJobStore {
 
     /** 광역시도·시군구 한 쌍. 둘 다 값이 있을 때만 만들어진다. */
     public record Region(String province, String city) {
+    }
+
+    /**
+     * 결과 본문을 묶어 둘 자리 이름. 작업 식별자는 행이 사는 동안 바뀌지 않고
+     * 행마다 다르므로, 한 작업의 결과를 다른 작업의 행에 옮겨 넣어도 열리지 않는다.
+     */
+    private static String aadFor(UUID uuid) {
+        return PayloadCipher.aad("recommend_jobs", "result_payload", uuid.toString());
+    }
+
+    /** 저장 직전에 결과 본문을 감싼다. */
+    private JsonNode sealed(UUID uuid, JsonNode payload) {
+        return payloadCipher.encryptNode(payload, aadFor(uuid));
     }
 
     /** jobId 를 UUID 로 파싱. 형식 오류/ null 은 null 반환(no-op 유도). */

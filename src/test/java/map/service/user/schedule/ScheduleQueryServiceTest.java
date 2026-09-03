@@ -1,5 +1,6 @@
 package map.service.user.schedule;
 
+import map.service.user.global.crypto.TestPayloadCiphers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,6 +54,7 @@ class ScheduleQueryServiceTest {
         when(weatherService.readAlert(any())).thenReturn(java.util.Optional.empty());
         service = new ScheduleService(
                 mock(DraftStore.class), repository, objectMapper, assembler,
+                TestPayloadCiphers.enabled(),
                 mock(map.service.user.recommend.RecommendJobStore.class),
                 weatherService,
                 mock(map.service.user.recommend.RecommendService.class));
