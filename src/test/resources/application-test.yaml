@@ -60,3 +60,11 @@ kakao:
   app-callback-scheme: mapauth://kakao
   token-uri: https://kauth.kakao.com/oauth/token
   user-info-uri: https://kapi.kakao.com/v2/user/me
+
+# 날씨 감시 배치는 테스트에서 돌지 않는다. 컨텍스트를 띄우는 테스트가 최초 지연을
+# 넘겨 살아 있으면 배치가 깨어나 hub 를 부르는데, 시험 환경에는 hub 가 없다.
+# 지금은 지연(60초)이 테스트 수명보다 길어 우연히 안 터질 뿐이라, 느린 기기나
+# CI 에서만 실패하는 종류의 불안정을 남기지 않으려면 여기서 꺼 둔다.
+# 감시가 무엇을 고르는지는 ScheduleWeatherWatcherTest 가 빈을 직접 만들어 본다.
+weather-watch:
+  enabled: false

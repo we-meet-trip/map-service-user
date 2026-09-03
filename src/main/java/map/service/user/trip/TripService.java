@@ -11,6 +11,8 @@ import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.DateRange;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
+import map.service.user.schedule.ScheduleReplanSpec;
+import map.service.user.schedule.ScheduleService;
 import map.service.user.recommend.dto.RecommendResponse;
 import map.service.user.trip.dto.HubWeatherResponse;
 import map.service.user.trip.dto.Schedule;
@@ -53,6 +55,7 @@ public class TripService {
     private final ObjectMapper objectMapper;
     private final long pollTimeoutSeconds;
     private final long pollIntervalMs;
+    private final ScheduleService scheduleService;
 
     public TripService(
             RecommendService recommendService,
@@ -61,6 +64,7 @@ public class TripService {
             TripStopsAssembler stopsAssembler,
             ReviewSummaryService reviewSummaryService,
             ObjectMapper objectMapper,
+            ScheduleService scheduleService,
             @Value("${trip.poll-timeout-seconds:150}") long pollTimeoutSeconds,
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
     ) {
@@ -70,6 +74,7 @@ public class TripService {
         this.stopsAssembler = stopsAssembler;
         this.reviewSummaryService = reviewSummaryService;
         this.objectMapper = objectMapper;
+        this.scheduleService = scheduleService;
         this.pollTimeoutSeconds = pollTimeoutSeconds;
         this.pollIntervalMs = pollIntervalMs;
     }
@@ -165,6 +170,86 @@ public class TripService {
         return new TripGenerateResponse(
                 jobId, totalDuration, stops, forecast,
                 result.warnings(), result.timelineStatus());
+    }
+
+    /**
+     * 저장된 일정을 지금 날씨로 다시 짜서 완성된 결과를 돌려준다(동기).
+     *
+     * client 는 job 폴링 경로를 구현하지 않는다 — 추천은 generate/route 처럼
+     * 한 번의 요청으로 완성된 일정을 받는 계약뿐이다. 날씨 재추천만 비동기로
+     * 두면 앱이 폴링 코드를 새로 만들어야 하고, 추천 흐름이 두 갈래로 갈린다.
+     * 그래서 같은 동기 형태로 맞춘다 — 결과 화면 코드도 그대로 재사용된다.
+     *
+     * 조건은 저장된 일정에서 그대로 가져온다(지역·기간·이동수단·활동 시간대).
+     * 사용자가 조건을 다시 입력하지 않아도 되는 것이 이 기능의 요점이다.
+     * 검증(소유자·지역 보유·지나지 않은 일정)은 일정 도메인이 끝낸 뒤 사양만
+     * 넘겨받는다.
+     *
+     * 재사용 캐시는 타지 않는다(createFreshRecommendation). 캐시 키에 날씨가
+     * 없어 조건이 그대로인 이 요청은 반드시 캐시에 맞고, 맞으면 agent 가 돌지
+     * 않아 바뀐 날씨가 반영될 기회 자체가 사라진다.
+     *
+     * 기준선 갱신은 <b>성공한 뒤에만</b> 한다. 실패한 재추천으로 알림을 지우면
+     * 사용자는 바뀐 날씨를 모른 채 옛 코스를 그대로 들고 간다.
+     *
+     * scheduleId: 다시 짤 일정. userId: 소유자(다르면 404).
+     */
+    public TripGenerateResponse replan(Long scheduleId, Long userId) {
+        ScheduleReplanSpec spec = scheduleService.replanSpec(scheduleId, userId);
+
+        int startHour = spec.activeStartHour() != null
+                ? spec.activeStartHour()
+                : TripStopsAssembler.DEFAULT_START_HOUR;
+        int endHour = spec.activeEndHour() != null
+                ? spec.activeEndHour()
+                : TripStopsAssembler.DEFAULT_END_HOUR;
+
+        RecommendRequest recommendRequest = new RecommendRequest(
+                new DateRange(
+                        spec.dateStart(),
+                        spec.dateEnd(),
+                        TripMapping.hourToLocalTime(startHour),
+                        TripMapping.hourToLocalTime(endHour)),
+                null,
+                null,
+                TripMapping.toAgentMobility(spec.transport()),
+                spec.province(),
+                spec.city(),
+                String.valueOf(spec.scheduleId()),
+                null,
+                null,
+                null);
+
+        String jobId = recommendService
+                .createFreshRecommendation(recommendRequest).jobId();
+        log.info("trip replan started job_id={} schedule_id={}", jobId, scheduleId);
+
+        RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
+        if ("failed".equalsIgnoreCase(result.status())) {
+            String reason = result.error() != null ? result.error() : "recommendation failed";
+            throw new TripGenerationException(reason);
+        }
+
+        List<TripStop> stops = stopsAssembler.assemble(
+                result, spec.transport(), startHour, endHour);
+        prewarmSummaries(stops);
+
+        List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(
+                hubWeatherClient.fetchWeather(
+                        spec.province(), spec.city(),
+                        spec.dateStart(), spec.dateEnd()));
+
+        // 여기까지 왔으면 사용자는 지금 날씨를 반영한 결과를 받은 것이다.
+        scheduleService.markReplanned(scheduleId, userId);
+
+        log.info("trip replan done job_id={} stops={}", jobId, stops.size());
+        return new TripGenerateResponse(
+                jobId,
+                TripStopsAssembler.totalDurationMinutes(stops),
+                stops,
+                forecast,
+                result.warnings(),
+                result.timelineStatus());
     }
 
     /**

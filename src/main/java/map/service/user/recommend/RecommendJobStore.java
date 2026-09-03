@@ -57,6 +57,20 @@ public class RecommendJobStore {
      * scheduleId: 연관 일정 식별자(nullable).
      */
     public void insertInProgress(String jobId, String scheduleId) {
+        insertInProgress(jobId, scheduleId, null, null);
+    }
+
+    /**
+     * 요청 지역까지 함께 남기는 최초 기록.
+     *
+     * 지역은 추천 자체에는 쓰이지 않지만, 이 작업으로 저장될 일정이 나중에
+     * 날씨를 다시 물으려면 필요하다. 나머지 동작은 위 메서드와 같다.
+     *
+     * province / city: 요청의 광역시도·시군구(nullable).
+     */
+    public void insertInProgress(
+            String jobId, String scheduleId, String province, String city
+    ) {
         UUID uuid = parseUuid(jobId);
         if (uuid == null) {
             return;
@@ -65,8 +79,10 @@ public class RecommendJobStore {
             if (repository.existsById(uuid)) {
                 return;
             }
-            repository.save(new RecommendJobEntity(
-                    uuid, scheduleId, "in_progress", null, null, null));
+            RecommendJobEntity entity = new RecommendJobEntity(
+                    uuid, scheduleId, "in_progress", null, null, null);
+            entity.setRegion(province, city);
+            repository.save(entity);
         } catch (DataIntegrityViolationException e) {
             // 있는지 보고 넣는 사이에 완료 처리가 같은 행을 만들었다. 그쪽이 더
             // 나중 상태이므로 이쪽은 물러난다.
@@ -149,6 +165,33 @@ public class RecommendJobStore {
                     jobId, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * 작업에 남아 있는 요청 지역을 조회한다.
+     *
+     * 일정을 저장할 때 그 일정의 지역을 채우는 데 쓴다. 행이 없거나 지역을
+     * 남기지 않은 작업이면 빈 값이며, 그런 일정은 날씨 감시 대상에서 빠진다.
+     * 어떤 예외도 던지지 않는다.
+     */
+    public Optional<Region> findRegion(String jobId) {
+        UUID uuid = parseUuid(jobId);
+        if (uuid == null) {
+            return Optional.empty();
+        }
+        try {
+            return repository.findById(uuid)
+                    .filter(e -> e.getProvince() != null && e.getCity() != null)
+                    .map(e -> new Region(e.getProvince(), e.getCity()));
+        } catch (RuntimeException e) {
+            log.warn("recommend job region read failed job_id={} reason={}",
+                    jobId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** 광역시도·시군구 한 쌍. 둘 다 값이 있을 때만 만들어진다. */
+    public record Region(String province, String city) {
     }
 
     /**

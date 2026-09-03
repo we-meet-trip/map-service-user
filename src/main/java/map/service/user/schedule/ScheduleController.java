@@ -6,6 +6,7 @@ import java.util.Map;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import map.service.user.global.security.JwtAuthenticationFilter;
+import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +32,8 @@ import org.springframework.web.bind.annotation.RestController;
  * - GET    /api/v1/schedules             → list   (내 일정 목록)
  * - GET    /api/v1/schedules/{id}        → detail (방문지까지 조립된 상세)
  * - POST   /api/v1/schedules/{id}/start  → start  (시작 기록 + 상세)
+ * - POST   /api/v1/schedules/{id}/replan → replan (날씨 변화 뒤 1클릭 재추천)
+ * - POST   /api/v1/schedules/{id}/weather-alert/dismiss → 알림 무시(이대로 유지)
  * - DELETE /api/v1/schedules/{id}        → delete
  *
  * 조회·삭제는 소유자 범위로 제한된다. 남의 일정이나 없는 일정은 똑같이
@@ -124,6 +127,49 @@ public class ScheduleController {
             @AuthenticationPrincipal Long userId
     ) {
         return ResponseEntity.ok(service.start(scheduleId, userId));
+    }
+
+    /**
+     * 날씨가 바뀐 일정을 저장된 조건 그대로 다시 추천한다(배너의 1클릭 재추천).
+     *
+     * 저장해 둔 지역·기간·이동수단으로 새 추천 작업을 띄우고 202 + job_id 를
+     * 준다. 결과는 기존 GET /api/v1/recommend/{jobId} 로 받으므로 클라이언트가
+     * 조회 코드를 새로 만들 필요가 없다.
+     *
+     * 재탐색(mode1)이 아니라 일반 추천 경로라 1일 3회 한도를 깎지 않는다.
+     * 지역을 모르는 옛 일정이면 409(ScheduleReplanUnavailableException).
+     * 소유자가 아니거나 없는 일정이면 404.
+     */
+    @PostMapping("/{scheduleId}/replan")
+    public ResponseEntity<JobAccepted> replan(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        return ResponseEntity.accepted().body(service.replan(scheduleId, userId));
+    }
+
+    /**
+     * 날씨 알림을 받아들이지 않고 지운다("이대로 갈래"). 성공 시 본문 없이 204.
+     *
+     * 알림만 지우면 다음 감시 순회에서 같은 변화가 다시 잡혀 또 붙는다. 그래서
+     * 서비스가 기준선을 지금 예보로 옮겨, 사용자가 알고도 그대로 가기로 한
+     * 지점을 기억한다. 이후 예보가 또 달라지면 새 기준선 대비로 다시 알린다.
+     *
+     * 소유자가 아니거나 없는 일정이면 404.
+     */
+    @PostMapping("/{scheduleId}/weather-alert/dismiss")
+    public ResponseEntity<Void> dismissWeatherAlert(
+            @PathVariable Long scheduleId,
+            @AuthenticationPrincipal Long userId
+    ) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        service.dismissWeatherAlert(scheduleId, userId);
+        return ResponseEntity.noContent().build();
     }
 
     /**

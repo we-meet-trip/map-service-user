@@ -44,14 +44,20 @@ class ScheduleQueryServiceTest {
     private ScheduleRepository repository;
     private TripStopsAssembler assembler;
     private ScheduleService service;
+    private map.service.user.weather.ScheduleWeatherService weatherService;
 
     @BeforeEach
     void setUp() {
         repository = mock(ScheduleRepository.class);
         assembler = mock(TripStopsAssembler.class);
+        weatherService = mock(map.service.user.weather.ScheduleWeatherService.class);
+        when(weatherService.readAlert(any())).thenReturn(java.util.Optional.empty());
         service = new ScheduleService(
                 mock(DraftStore.class), repository, objectMapper, assembler,
-                TestPayloadCiphers.enabled());
+                TestPayloadCiphers.enabled(),
+                mock(map.service.user.recommend.RecommendJobStore.class),
+                weatherService,
+                mock(map.service.user.recommend.RecommendService.class));
     }
 
     private ScheduleEntity entity(
@@ -64,6 +70,66 @@ class ScheduleQueryServiceTest {
                 userId, UUID.randomUUID(), "속초 당일치기",
                 LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 6),
                 payload, transport, startHour, endHour);
+    }
+
+    /** 아직 끝나지 않은 일정. 날씨 알림은 이런 일정에만 붙는다. */
+    private ScheduleEntity upcoming() {
+        LocalDate soon = LocalDate.now().plusDays(3);
+        JsonNode payload = objectMapper.createObjectNode()
+                .put("job_id", UUID.randomUUID().toString())
+                .put("status", "done");
+        return new ScheduleEntity(
+                OWNER, UUID.randomUUID(), "다가오는 여행",
+                soon, soon, payload, "walk", 9, 18);
+    }
+
+    @Test
+    @DisplayName("목록 — 걸려 있는 날씨 알림을 함께 내려준다")
+    void listCarriesWeatherAlert() {
+        ScheduleEntity e = upcoming();
+        when(repository.findByUserIdOrderByDateStartAsc(OWNER))
+                .thenReturn(List.of(e));
+        map.service.user.weather.dto.WeatherAlert alert =
+                new map.service.user.weather.dto.WeatherAlert(
+                        "rain_appeared", LocalDate.of(2026, 7, 6),
+                        20, 80, "sunny", "rainy", null);
+        when(weatherService.readAlert(e)).thenReturn(java.util.Optional.of(alert));
+
+        ScheduleListResponse out = service.list(OWNER);
+
+        assertThat(out.schedules().get(0).weatherAlert()).isEqualTo(alert);
+    }
+
+    @Test
+    @DisplayName("상세 — 걸려 있는 날씨 알림을 함께 내려준다")
+    void detailCarriesWeatherAlert() {
+        ScheduleEntity e = upcoming();
+        when(repository.findByScheduleIdAndUserId(1L, OWNER))
+                .thenReturn(java.util.Optional.of(e));
+        map.service.user.weather.dto.WeatherAlert alert =
+                new map.service.user.weather.dto.WeatherAlert(
+                        "rain_cleared", LocalDate.of(2026, 7, 6),
+                        80, 10, "rainy", "sunny", null);
+        when(weatherService.readAlert(e)).thenReturn(java.util.Optional.of(alert));
+
+        assertThat(service.detail(1L, OWNER).weatherAlert()).isEqualTo(alert);
+    }
+
+    @Test
+    @DisplayName("목록 — 이미 지나간 일정의 알림은 내보내지 않는다")
+    void listHidesAlertOnPastSchedule() {
+        // 다녀온 여행에 "비 예보로 바뀌었어요" 가 남아 있으면 사용자가 무엇을
+        // 해야 하는지 알 수 없다. 데이터는 남기되 표시만 하지 않는다.
+        ScheduleEntity past = entity(OWNER, "walk", 9, 18);
+        when(repository.findByUserIdOrderByDateStartAsc(OWNER))
+                .thenReturn(List.of(past));
+        when(weatherService.readAlert(past)).thenReturn(java.util.Optional.of(
+                new map.service.user.weather.dto.WeatherAlert(
+                        "rain_appeared", LocalDate.of(2026, 7, 6),
+                        20, 80, "sunny", "rainy", null)));
+
+        assertThat(service.list(OWNER).schedules().get(0).weatherAlert())
+                .isNull();
     }
 
     private static TripStop stop(int order, Integer durationMinutes) {

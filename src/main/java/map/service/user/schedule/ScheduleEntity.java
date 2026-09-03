@@ -90,6 +90,38 @@ public class ScheduleEntity {
     private OffsetDateTime startedAt;
 
     /**
+     * 추천 당시의 광역시도/시군구. 이 일정의 날씨를 다시 물으려면 지역이
+     * 있어야 한다 — payload 의 장소에는 좌표만 있고 hub 날씨는 지역명으로
+     * 묻는다. 지역 도입 이전에 저장된 행은 둘 다 null 이고, 그런 일정은
+     * 날씨 감시 대상에서 빠진다(추측해 채우지 않는다).
+     */
+    @Column(name = "province", length = 20)
+    private String province;
+
+    @Column(name = "city", length = 20)
+    private String city;
+
+    /**
+     * 저장 시점에 굳혀 둔 날짜별 예보(WeatherSnapshotItem 목록의 JSON).
+     * 나중 예보와 견주는 기준선이다. hub 가 답하지 못했으면 null.
+     */
+    @Column(name = "weather_baseline", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode weatherBaseline;
+
+    /**
+     * 지금 걸려 있는 날씨 변화 알림(WeatherAlert 의 JSON). 없으면 null.
+     * 재추천을 시작하면 지운다 — 다시 짠 코스는 지금 예보를 이미 반영한다.
+     */
+    @Column(name = "weather_alert", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode weatherAlert;
+
+    /** 마지막으로 예보를 다시 받아 견준 시각. 견준 적이 없으면 null. */
+    @Column(name = "weather_checked_at")
+    private OffsetDateTime weatherCheckedAt;
+
+    /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */
     protected ScheduleEntity() {
@@ -230,5 +262,53 @@ public class ScheduleEntity {
      */
     public OffsetDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    /** 추천 당시 광역시도. 지역을 모르는 행이면 null. */
+    public String getProvince() {
+        return province;
+    }
+
+    /** 추천 당시 시군구. 지역을 모르는 행이면 null. */
+    public String getCity() {
+        return city;
+    }
+
+    /**
+     * 지역을 새긴다. 둘 중 하나라도 비면 둘 다 비운다 — 반쪽 지역으로는
+     * hub 에 날씨를 물을 수 없어 남겨 두면 감시가 매번 실패한다.
+     */
+    public void setRegion(String province, String city) {
+        boolean usable = province != null && !province.isBlank()
+                && city != null && !city.isBlank();
+        this.province = usable ? province : null;
+        this.city = usable ? city : null;
+    }
+
+    /** 저장 시점 예보 기준선 반환. 없으면 null. */
+    public JsonNode getWeatherBaseline() {
+        return weatherBaseline;
+    }
+
+    public void setWeatherBaseline(JsonNode weatherBaseline) {
+        this.weatherBaseline = weatherBaseline;
+    }
+
+    /** 지금 걸려 있는 날씨 변화 알림 반환. 없으면 null. */
+    public JsonNode getWeatherAlert() {
+        return weatherAlert;
+    }
+
+    public void setWeatherAlert(JsonNode weatherAlert) {
+        this.weatherAlert = weatherAlert;
+    }
+
+    /** 마지막으로 예보를 견준 시각 반환. 견준 적 없으면 null. */
+    public OffsetDateTime getWeatherCheckedAt() {
+        return weatherCheckedAt;
+    }
+
+    public void setWeatherCheckedAt(OffsetDateTime weatherCheckedAt) {
+        this.weatherCheckedAt = weatherCheckedAt;
     }
 }

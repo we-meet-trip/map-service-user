@@ -145,8 +145,11 @@ class RecommendServiceTest {
     void createWritesInProgressJobRecord() {
         service.createRecommendation(request("init", List.of()));
 
-        // 접수 직후 발급된 job_id 와 scheduleId 로 in_progress write-through.
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        // 접수 직후 발급된 job_id·scheduleId 와 요청 지역으로 in_progress
+        // write-through. 지역은 나중에 이 작업으로 저장될 일정이 날씨를 다시
+        // 물을 때 쓰인다 — 여기서 남기지 않으면 되찾을 곳이 없다.
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
     }
 
     // ---- research(Mode 1) ----
@@ -314,7 +317,8 @@ class RecommendServiceTest {
 
         JobAccepted result = service.createRecommendation(cacheRequest);
 
-        verify(jobStore).insertInProgress(result.jobId(), "sched-9");
+        verify(jobStore).insertInProgress(
+                result.jobId(), "sched-9", "서울특별시", "동작구");
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
         verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
@@ -415,7 +419,8 @@ class RecommendServiceTest {
     void routeJobRecordsInProgress() {
         service.createRouteJob(routeRequest("init"));
 
-        verify(jobStore).insertInProgress("job-2", "sched-1");
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
     }
 
     // ─── 저장된 취향 병합 ────────────────────────────────────────
@@ -584,5 +589,39 @@ class RecommendServiceTest {
                 base.date(), base.budget(), theme, base.mobility(),
                 base.province(), base.city(), base.scheduleId(),
                 base.stage(), base.exclude(), base.places());
+    }
+
+    // ---- 날씨 변화 재추천(캐시 우회) ----
+
+    @Test
+    void freshRecommendationSkipsReuseCacheEntirely() {
+        // 캐시에 같은 조건의 결과가 있어도 그것을 쓰면 안 된다. 날씨가 바뀌어
+        // 다시 짜는 요청인데 캐시가 맞으면 agent 가 아예 돌지 않고, 그러면
+        // 비 오기 전에 만든 그 야외 코스가 그대로 돌아온다.
+        when(reuseCacheStore.find(anyString()))
+                .thenReturn(Optional.of("{\"job_id\":\"old\",\"places\":[]}"));
+
+        JobAccepted accepted =
+                service.createFreshRecommendation(request("init", List.of()));
+
+        assertThat(accepted.jobId()).isEqualTo("job-2");
+        verify(agentClient).requestRecommend(any());
+        verify(reuseCacheStore, never()).find(anyString());
+        // 등록도 하지 않는다 — 비 오는 날 만든 코스가 맑은 날 요청의 캐시로
+        // 재사용되면 반대 방향으로 같은 사고가 난다.
+        verify(reuseCacheStore, never()).linkJob(anyString(), anyString());
+    }
+
+    @Test
+    void freshRecommendationForcesInitStageAndRecordsRegion() {
+        service.createFreshRecommendation(request("mode1", List.of("cheat")));
+
+        ArgumentCaptor<RecommendRequest> captor =
+                ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(agentClient).requestRecommend(captor.capture());
+        assertThat(captor.getValue().stage()).isEqualTo("init");
+        assertThat(captor.getValue().exclude()).isEmpty();
+        verify(jobStore).insertInProgress(
+                "job-2", "sched-1", "서울특별시", "강남구");
     }
 }

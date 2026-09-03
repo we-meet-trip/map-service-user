@@ -108,6 +108,29 @@ class RecommendJobStoreTest {
     }
 
     @Test
+    @DisplayName("요청 지역을 함께 기록하고 되읽는다")
+    void keepsRequestRegion() {
+        String jobId = UUID.randomUUID().toString();
+
+        store.insertInProgress(jobId, "sched-3", "서울특별시", "중구");
+        flushAndClear();
+
+        assertThat(store.findRegion(jobId))
+                .contains(new RecommendJobStore.Region("서울특별시", "중구"));
+    }
+
+    @Test
+    @DisplayName("지역 없이 만든 작업은 지역을 돌려주지 않는다")
+    void regionAbsentWhenNotRecorded() {
+        String jobId = UUID.randomUUID().toString();
+
+        store.insertInProgress(jobId, "sched-4");
+        flushAndClear();
+
+        assertThat(store.findRegion(jobId)).isEmpty();
+    }
+
+    @Test
     @DisplayName("완료 기록이 먼저 도착해도 뒤늦은 최초 기록이 그것을 되돌리지 않는다")
     void lateInsertDoesNotRevertFinished() {
         // 작업이 즉시 실패하면 완료 이벤트가 최초 기록보다 먼저 온다.
