@@ -9,6 +9,7 @@ import map.service.user.places.PlaceSearchException;
 import map.service.user.places.ReviewSearchException;
 import map.service.user.recommend.AgentRequestException;
 import map.service.user.transit.SubwayRouteException;
+import map.service.user.transit.TransitRouteException;
 import map.service.user.trip.TripGenerationException;
 import map.service.user.trip.TripTimeoutException;
 import org.springframework.http.HttpStatus;
@@ -224,6 +225,24 @@ public class GlobalExceptionHandler {
                 ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "subway_route_upstream_error");
+        body.put("upstream_status", ex.statusCode());
+        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    /**
+     * hub 통합 길찾기(/v1/transit/routes) 조회가 비정상 응답을 반환했을 때 호출된다.
+     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     *
+     * handleSubwayRoute 와 같은 이유로 별도 타입을 둔다 — 발급처 조회 실패는
+     * 여기로 오지 않는다(hub 가 status 로 알려 준다).
+     */
+    @ExceptionHandler(TransitRouteException.class)
+    public ResponseEntity<Map<String, Object>> handleTransitRoute(TransitRouteException ex) {
+        log.warn("transit routes upstream error status={} body={}",
+                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "transit_route_upstream_error");
         body.put("upstream_status", ex.statusCode());
         body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
