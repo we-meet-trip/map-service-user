@@ -1,6 +1,7 @@
 package map.service.user.transit;
 
 import java.nio.charset.StandardCharsets;
+import map.service.user.global.crypto.LocationSeal;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
@@ -24,7 +25,11 @@ public class TransitRouteClient {
     /** 오류 응답 본문을 메모리에 읽을 최대 바이트(과대 응답 OOM 방지). */
     private static final int ERROR_BODY_MAX = 4096;
 
-    public TransitRouteClient(@Qualifier("hubRestClient") RestClient client) {
+    private final LocationSeal seal;
+
+    public TransitRouteClient(@Qualifier("hubRestClient") RestClient client,
+                              LocationSeal seal) {
+        this.seal = seal;
         this.client = client;
     }
 
@@ -43,10 +48,10 @@ public class TransitRouteClient {
             String mode) {
         return client.get()
                 .uri(uri -> uri.path("/v1/transit/routes")
-                        .queryParam("start_lat", startLat)
-                        .queryParam("start_lng", startLng)
-                        .queryParam("end_lat", endLat)
-                        .queryParam("end_lng", endLng)
+                        // 좌표는 감싸서 loc 하나로 보낸다. mode 는 위치
+                        // 정보가 아니라 값 그대로 둔다.
+                        .queryParam("loc",
+                                seal.sealPair(startLat, startLng, endLat, endLng))
                         .queryParam("mode", mode)
                         .build())
                 .retrieve()

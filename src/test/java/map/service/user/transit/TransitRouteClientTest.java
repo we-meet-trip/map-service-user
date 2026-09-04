@@ -4,11 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import map.service.user.global.crypto.TestLocationSeals;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +34,7 @@ class TransitRouteClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://hub:8000");
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new TransitRouteClient(builder.build());
+        client = new TransitRouteClient(builder.build(), TestLocationSeals.enabled());
     }
 
     @Test
@@ -65,10 +65,7 @@ class TransitRouteClientTest {
                 ]}""";
         server.expect(requestTo(startsWith("http://hub:8000/v1/transit/routes")))
                 .andExpect(method(HttpMethod.GET))
-                .andExpect(queryParam("start_lat", "37.4979"))
-                .andExpect(queryParam("start_lng", "127.0276"))
-                .andExpect(queryParam("end_lat", "37.5663"))
-                .andExpect(queryParam("end_lng", "126.9779"))
+                .andExpect(TestLocationSeals.coordinatesAreSealed())
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
 
         TransitRouteOptionsResponse response =
