@@ -1,15 +1,21 @@
 package map.service.user.domain.user.controller;
 
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import map.service.user.chat.service.ChatRealtimeService;
 import map.service.user.domain.user.dto.UserMeResponse;
 import map.service.user.domain.user.dto.UserUpdateRequest;
+import map.service.user.domain.user.service.AccountWithdrawalService;
 import map.service.user.domain.user.service.UserProfileService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,6 +34,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserProfileService userProfileService;
+    private final AccountWithdrawalService withdrawalService;
+    private final ChatRealtimeService realtimeService;
 
     @GetMapping("/me")
     public ResponseEntity<UserMeResponse> getMe(
@@ -42,5 +50,28 @@ public class UserController {
             @Valid @RequestBody UserUpdateRequest request
     ) {
         return ResponseEntity.ok(userProfileService.updateMe(userId, request));
+    }
+
+    /**
+     * 탈퇴.
+     *
+     * 방 종료 통지는 삭제가 커밋된 뒤에 보낸다. 트랜잭션 안에서 먼저 알리면 뒤이어
+     * 실패해 되돌아갔을 때 살아 있는 방을 종료됐다고 알린 꼴이 된다.
+     */
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> withdraw(
+            @AuthenticationPrincipal Long userId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader
+    ) {
+        List<Long> closedRoomIds = withdrawalService.withdraw(userId, extractBearerToken(authHeader));
+        closedRoomIds.forEach(realtimeService::broadcastRoomClosed);
+        return ResponseEntity.noContent().build();
+    }
+
+    private String extractBearerToken(String header) {
+        if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
+            return header.substring(7);
+        }
+        return header;
     }
 }

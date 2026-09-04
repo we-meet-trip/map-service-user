@@ -28,6 +28,16 @@ public interface ScheduleRepository extends JpaRepository<ScheduleEntity, Long> 
     Optional<ScheduleEntity> findByScheduleIdAndUserId(Long scheduleId, Long userId);
 
     /**
+     * 소유자의 일정 전부 삭제.
+     *
+     * 탈퇴 처리에서만 부른다. schedules 는 users 를 외래키로 걸지 않아 사용자 행을
+     * 지워도 함께 사라지지 않는다 — 남겨 두면 주인 없는 일정이 되고, 그 일정에 걸린
+     * 채팅방도 같이 남는다. 방은 schedule_id 외래키가 ON DELETE CASCADE 이므로
+     * 이 삭제로 함께 정리된다.
+     */
+    void deleteByUserId(Long userId);
+
+    /**
      * 날씨를 계속 지켜볼 일정들.
      *
      * 아직 끝나지 않았고(종료일이 오늘 이후), 지역과 기준선을 둘 다 가진 행만

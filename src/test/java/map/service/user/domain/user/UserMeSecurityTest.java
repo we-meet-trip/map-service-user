@@ -1,6 +1,7 @@
 package map.service.user.domain.user;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,9 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import io.jsonwebtoken.Claims;
 import java.time.LocalDate;
 import java.util.List;
+import map.service.user.chat.service.ChatRealtimeService;
 import map.service.user.domain.user.controller.UserController;
 import map.service.user.domain.user.dto.UserMeResponse;
 import map.service.user.domain.user.entity.AuthProvider;
+import map.service.user.domain.user.service.AccountWithdrawalService;
 import map.service.user.domain.user.service.UserProfileService;
 import map.service.user.global.config.CorsProperties;
 import map.service.user.global.config.SecurityConfig;
@@ -52,6 +55,8 @@ class UserMeSecurityTest {
     @MockitoBean private JwtService jwtService;
     @MockitoBean private RateLimitService rateLimitService;
     @MockitoBean private UserProfileService userProfileService;
+    @MockitoBean private AccountWithdrawalService withdrawalService;
+    @MockitoBean private ChatRealtimeService realtimeService;
 
     @Test
     @DisplayName("토큰 없이 접근하면 401 (인가 시행이 꺼져 있어도)")
@@ -90,5 +95,29 @@ class UserMeSecurityTest {
                 .andExpect(jsonPath("$.nickname").value("테스터"))
                 .andExpect(jsonPath("$.interests[0]").value("맛집 🍜"))
                 .andExpect(jsonPath("$.themes[0]").value("food"));
+    }
+
+    @Test
+    @DisplayName("탈퇴도 토큰이 있어야 한다 — 남의 계정을 지울 수 있으면 안 된다")
+    void withdrawRequiresToken() throws Exception {
+        mockMvc.perform(delete("/api/v1/users/me"))
+                .andExpect(status().isUnauthorized());
+
+        Mockito.verifyNoInteractions(withdrawalService);
+    }
+
+    @Test
+    @DisplayName("유효 토큰이면 토큰 주인의 계정을 지운다")
+    void validTokenWithdrawsOwnAccount() throws Exception {
+        Claims claims = Mockito.mock(Claims.class);
+        when(jwtService.validateAccessToken("tok")).thenReturn(claims);
+        when(jwtService.extractUserId(claims)).thenReturn(7L);
+        when(withdrawalService.withdraw(7L, "tok")).thenReturn(List.of());
+
+        mockMvc.perform(delete("/api/v1/users/me")
+                        .header("Authorization", "Bearer tok"))
+                .andExpect(status().isNoContent());
+
+        Mockito.verify(withdrawalService).withdraw(7L, "tok");
     }
 }
