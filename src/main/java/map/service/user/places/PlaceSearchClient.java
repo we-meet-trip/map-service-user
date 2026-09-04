@@ -1,6 +1,7 @@
 package map.service.user.places;
 
 import java.nio.charset.StandardCharsets;
+import map.service.user.places.dto.AddressSearchResponse;
 import map.service.user.places.dto.PlaceSearchResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
@@ -75,6 +76,29 @@ public class PlaceSearchClient {
                                     res.getStatusCode().value(), body);
                         })
                 .body(PlaceSearchResponse.class);
+    }
+
+    /**
+     * hub GET /v1/places/address 호출.
+     *
+     * 앱이 카카오를 직접 부르던 자리를 대신한다. 앱에 발급처 키를 실어야
+     * 했던 마지막 경로였고, 설치 파일을 연 사람이면 누구나 그 키를 꺼낼 수
+     * 있었다. 좌표가 오가지 않아 봉투는 필요 없다.
+     */
+    public AddressSearchResponse searchAddress(String query) {
+        return client.get()
+                .uri(uri -> uri.path("/v1/places/address")
+                        .queryParam("query", query)
+                        .build())
+                .retrieve()
+                .onStatus(
+                        HttpStatusCode::isError,
+                        (req, res) -> {
+                            String body = readBody(res.getBody());
+                            throw new PlaceSearchException(
+                                    res.getStatusCode().value(), body);
+                        })
+                .body(AddressSearchResponse.class);
     }
 
     /**

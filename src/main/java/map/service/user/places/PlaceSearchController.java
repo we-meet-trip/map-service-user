@@ -3,6 +3,8 @@ package map.service.user.places;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import map.service.user.places.dto.AddressSearchResponse;
 import map.service.user.places.dto.PlaceSearchResponse;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,5 +53,17 @@ public class PlaceSearchController {
             @RequestParam(required = false) @Min(1) @Max(15) Integer size
     ) {
         return client.search(province, city, query, category, mobility, size);
+    }
+
+    /**
+     * 주소 검색.
+     *
+     * query: 검색할 주소 문자열(필수). 예: "테헤란로 1"
+     */
+    @GetMapping("/address")
+    public AddressSearchResponse searchAddress(
+            @RequestParam @NotBlank @Size(max = 80) String query
+    ) {
+        return client.searchAddress(query);
     }
 }
