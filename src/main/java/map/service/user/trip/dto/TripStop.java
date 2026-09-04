@@ -43,6 +43,12 @@ import java.util.List;
  * 값이 없어 키가 빠지므로, 있을 때만 그리면 된다.
  * endTime: 그 장소를 떠나는 시각("HH:MM"). JSON key "end_time".
  * stayMinutes: 머무는 시간(분). JSON key "stay_minutes".
+ *
+ * contentId: 출처 접두사가 붙은 장소 식별자("kakao:123"). JSON key "content_id".
+ *            placeId 가 한 번의 추천 안에서만 유효한 번호인 반면 이 값은 추천을
+ *            가로질러 같은 장소를 가리킨다. 재탐색이 "이 장소들 말고 다른 곳"을
+ *            요구할 때 client 가 지목하는 키다. LLM 이 지어낸 장소는 이 값이
+ *            없어 키가 빠진다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TripStop(
@@ -62,6 +68,7 @@ public record TripStop(
         String reason,
         List<String> bullets,
         @JsonProperty("end_time") String endTime,
-        @JsonProperty("stay_minutes") Integer stayMinutes
+        @JsonProperty("stay_minutes") Integer stayMinutes,
+        @JsonProperty("content_id") String contentId
 ) {
 }

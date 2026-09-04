@@ -383,10 +383,14 @@ public class RecommendService {
      * JSON 파싱 실패, places 비배열 등은 전부 빈 목록으로 처리한다 —
      * exclude 는 best-effort 이며 재추천 자체를 막아선 안 된다.
      *
+     * Redis 만 보면 안 된다. draft 는 만료되고 일정으로 저장될 때 지워지는데,
+     * 그때 이 목록이 조용히 비면 "다른 장소"를 요구한 재탐색이 같은 장소를
+     * 그대로 다시 내놓는다. findDraft 는 PG 에 남은 완료 결과까지 본다.
+     *
      * jobId: 대상 작업 식별자.
      */
     private List<String> collectExcludeContentIds(String jobId) {
-        Optional<String> draft = draftStore.find(jobId);
+        Optional<String> draft = findDraft(jobId);
         if (draft.isEmpty()) {
             return List.of();
         }

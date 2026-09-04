@@ -182,7 +182,8 @@ public class TripStopsAssembler {
                     p.reason(),
                     p.bullets(),
                     hasText(p.visitEnd()) ? p.visitEnd() : null,
-                    p.stayMinutes()));
+                    p.stayMinutes(),
+                    p.contentId()));
         }
         return stops;
     }

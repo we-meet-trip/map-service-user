@@ -23,10 +23,17 @@ class TripStopJsonTest {
             Integer placeId, String placeUrl, String reason,
             List<String> bullets
     ) {
+        return stop(placeId, placeUrl, reason, bullets, null);
+    }
+
+    private static TripStop stop(
+            Integer placeId, String placeUrl, String reason,
+            List<String> bullets, String contentId
+    ) {
         return new TripStop(
                 1, 1, "속초해변", "강원특별자치도 속초시", "09:00",
                 38.19, 128.60, null, "kakao", "관광", true,
-                placeId, placeUrl, reason, bullets, null, null);
+                placeId, placeUrl, reason, bullets, null, null, contentId);
     }
 
     @Test
@@ -57,5 +64,17 @@ class TripStopJsonTest {
         assertThat(json).contains("\"order\":1");
         assertThat(json).contains("\"name\":\"속초해변\"");
         assertThat(json).contains("\"time\":\"09:00\"");
+    }
+
+    @Test
+    @DisplayName("content_id — 있으면 싣고 없으면 키를 생략")
+    void serializesContentIdOnlyWhenPresent() throws Exception {
+        String withId = mapper.writeValueAsString(
+                stop(7, null, null, null, "kakao:12345"));
+        assertThat(withId).contains("\"content_id\":\"kakao:12345\"");
+
+        String withoutId = mapper.writeValueAsString(
+                stop(7, null, null, null, null));
+        assertThat(withoutId).doesNotContain("content_id");
     }
 }
