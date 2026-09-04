@@ -6,6 +6,7 @@ import map.service.user.trip.dto.TripGenerateResponse;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import map.service.user.trip.dto.TripReplanRequest;
+import map.service.user.trip.dto.TripResearchRequest;
 import map.service.user.trip.dto.TripRouteRequest;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -71,6 +72,25 @@ public class TripController {
             @Valid @RequestBody TripRouteRequest request
     ) {
         return service.route(request);
+    }
+
+    /**
+     * 같은 조건에서 다른 장소로 재탐색(동기).
+     *
+     * 방금 받은 추천이 마음에 들지 않을 때 부른다. 조건은 그대로 다시 싣고,
+     * 이전 추천의 장소는 제외 목록으로 실어 보낸다. keep 을 함께 보내면 그
+     * 장소는 남고 나머지 자리만 새로 채워진다.
+     *
+     * generate 와 달리 재사용 캐시를 타지 않으며 하루 재탐색 한도를 깎는다 —
+     * 한도를 넘기면 409 다. 나머지 실패 코드는 generate 와 같다(400/502/504).
+     *
+     * request: @Valid @RequestBody TripResearchRequest.
+     */
+    @PostMapping("/research")
+    public TripGenerateResponse research(
+            @Valid @RequestBody TripResearchRequest request
+    ) {
+        return service.research(request);
     }
 
     /**

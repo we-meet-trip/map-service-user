@@ -18,6 +18,7 @@ import map.service.user.trip.dto.HubWeatherResponse;
 import map.service.user.trip.dto.Schedule;
 import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripResearchRequest;
 import map.service.user.trip.dto.TripRouteRequest;
 import map.service.user.trip.dto.TripStop;
 import map.service.user.trip.dto.WeatherForecastItem;
@@ -312,6 +313,77 @@ public class TripService {
         List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(weather);
 
         log.info("trip route done job_id={} stops={}", jobId, stops.size());
+        return new TripGenerateResponse(
+                jobId, totalDuration, stops, forecast,
+                result.warnings(), result.timelineStatus());
+    }
+
+    /**
+     * 같은 조건에서 다른 장소로 다시 추천해 동기로 돌려준다.
+     *
+     * generate 와 흐름은 같고 두 가지가 다르다. 재사용 캐시를 타지 않으며
+     * (같은 조건이면 같은 결과를 돌려주는 캐시라, 그대로 두면 "다른 장소"라는
+     * 요구가 조용히 무시된다), 이전 추천의 장소를 제외 목록으로 실어 보낸다.
+     *
+     * keep 이 있으면 그 장소들은 그대로 두고 나머지 자리만 새로 채운다.
+     *
+     * 하루 재탐색 한도를 소비한다 — 초과하면 409 로 끝나며 agent 를 부르지
+     * 않는다.
+     *
+     * request: 검증 완료된 TripResearchRequest.
+     */
+    public TripGenerateResponse research(TripResearchRequest request) {
+        String province = TripMapping.normalizeProvince(request.location().province());
+        String city = request.location().city();
+        Schedule schedule = request.schedule();
+
+        DateRange date = new DateRange(
+                schedule.startDate(),
+                schedule.endDate(),
+                TripMapping.hourToLocalTime(schedule.activeStartHour()),
+                TripMapping.hourToLocalTime(schedule.activeEndHour()));
+        // stage/exclude/places 는 RecommendService.research 가 채운다.
+        RecommendRequest recommendRequest = new RecommendRequest(
+                date,
+                TripMapping.toAgentBudget(request.budget()),
+                request.themes(),
+                TripMapping.toAgentMobility(request.transport()),
+                province,
+                city,
+                request.scheduleId() == null
+                        ? null : String.valueOf(request.scheduleId()),
+                null,
+                null,
+                null);
+
+        JobAccepted accepted = recommendService.research(
+                request.prevTripId(), recommendRequest,
+                request.exclude(), request.keep());
+        String jobId = accepted.jobId();
+        log.info("trip research started job_id={} prev={} keep={}",
+                jobId, request.prevTripId(),
+                request.keep() == null ? 0 : request.keep().size());
+
+        RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
+        if ("failed".equalsIgnoreCase(result.status())) {
+            String reason = result.error() != null ? result.error() : "recommendation failed";
+            throw new TripGenerationException(reason);
+        }
+
+        List<TripStop> stops = stopsAssembler.assemble(
+                result,
+                request.transport(),
+                schedule.activeStartHour(),
+                schedule.activeEndHour());
+        int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
+
+        prewarmSummaries(stops);
+
+        HubWeatherResponse weather = hubWeatherClient.fetchWeather(
+                province, city, schedule.startDate(), schedule.endDate());
+        List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(weather);
+
+        log.info("trip research done job_id={} stops={}", jobId, stops.size());
         return new TripGenerateResponse(
                 jobId, totalDuration, stops, forecast,
                 result.warnings(), result.timelineStatus());

@@ -361,16 +361,49 @@ public class RecommendService {
      * request: 신규 추천에 사용할 RecommendRequest.
      */
     public JobAccepted research(String jobId, RecommendRequest request) {
+        return research(jobId, request, List.of(), null);
+    }
+
+    /**
+     * 위와 같되, 호출 측이 제외 목록과 남길 장소를 함께 지정한다.
+     *
+     * extraExclude 를 따로 받는 이유는 이전 draft 가 이미 사라졌을 수 있기
+     * 때문이다 — 만료되거나 일정으로 저장되면 지워진다. 화면은 방금 본
+     * 장소들을 들고 있으므로 그 목록이 서버가 되찾는 것보다 오래 남는다.
+     * 둘을 합집합으로 쓰되 순서를 보존하고 계약 상한까지만 싣는다.
+     *
+     * keep 은 "이 장소는 그대로 두라"는 뜻이다. agent 가 그 자리를 고정하고
+     * 나머지만 다시 뽑는다. keep 에 든 장소도 exclude 에 함께 들어 있어야
+     * 새로 뽑는 쪽에서 같은 곳이 다시 나오지 않는다 — 호출 측이 이전 추천
+     * 전체를 exclude 로 보내므로 자연히 그렇게 된다.
+     *
+     * jobId: 폐기할 기존 작업 식별자.
+     * request: 신규 추천에 사용할 RecommendRequest.
+     * extraExclude: 호출 측이 지정한 제외 목록. null 이면 빈 목록으로 본다.
+     * keep: 고정할 장소 목록. null/빈 목록이면 전부 다시 뽑는다.
+     */
+    public JobAccepted research(
+            String jobId, RecommendRequest request,
+            List<String> extraExclude, List<SelectedPlace> keep) {
         String limitKey = (request.scheduleId() != null && !request.scheduleId().isBlank())
                 ? "sched:" + request.scheduleId()
                 : "job:" + jobId;
         if (!researchLimitService.tryConsume(limitKey)) {
             throw new CustomException(ErrorCode.RESEARCH_LIMIT_EXCEEDED);
         }
-        List<String> exclude = collectExcludeContentIds(jobId);
+        Set<String> exclude = new LinkedHashSet<>(collectExcludeContentIds(jobId));
+        if (extraExclude != null) {
+            for (String id : extraExclude) {
+                if (id != null && !id.isBlank() && exclude.size() < EXCLUDE_MAX) {
+                    exclude.add(id);
+                }
+            }
+        }
         draftStore.delete(jobId);
+        List<SelectedPlace> pinned =
+                (keep == null || keep.isEmpty()) ? null : List.copyOf(keep);
         JobAccepted accepted = agentClient.requestRecommend(
-                withStage(request, "mode1", exclude));
+                withStage(request, "mode1", List.copyOf(exclude), pinned));
         jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
                 request.province(), request.city());
         return accepted;
@@ -432,9 +465,12 @@ public class RecommendService {
      * stage/exclude/places 를 교체한 RecommendRequest 사본 생성.
      *
      * places 를 함께 지정하는 이유는 탐색 기반 추천과 사용자 선택 동선이
-     * 같은 요청 타입을 쓰기 때문이다. 탐색 경로에서는 places 를 null 로
-     * 지워 보내고, 동선 경로에서만 채운다 — 둘이 함께 오면 agent 가 어느
-     * 쪽을 따를지 모호해진다.
+     * 같은 요청 타입을 쓰기 때문이다. 초기 추천에서는 places 를 null 로
+     * 지워 보내고, 동선 경로에서는 일정 전부를 채운다.
+     *
+     * 재탐색(mode1)에서는 "그대로 둘 장소"만 채운다. 받는 쪽이 stage 로
+     * 둘을 구분하므로 exclude 와 함께 와도 모호하지 않다 — 고정할 곳은
+     * places, 피할 곳은 exclude 다.
      */
     private static RecommendRequest withStage(
             RecommendRequest request, String stage, List<String> exclude,
