@@ -9,12 +9,14 @@ import map.service.user.global.security.JwtAuthenticationFilter;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
+import map.service.user.schedule.dto.ScheduleReviseRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -113,6 +115,36 @@ public class ScheduleController {
             @AuthenticationPrincipal Long userId
     ) {
         return ResponseEntity.ok(service.detail(scheduleId, userId));
+    }
+
+    /**
+     * 저장된 일정의 방문지를 새로 만든 동선으로 갈아 끼운다.
+     *
+     * 화면에서 장소를 더하거나 빼거나 순서를 바꾼 뒤 그 목록으로 동선을
+     * 새로 만들고(POST /api/v1/trip/route), 그 결과의 작업 식별자를 여기로
+     * 보낸다. 방문 순서·이동 구간·시각이 서로 맞물려 있어 방문지를 하나씩
+     * 고치는 통로는 두지 않는다.
+     *
+     * 소유자가 아니거나 없는 일정이면 404. 보낸 작업의 초안이 이미 사라졌어도
+     * 404 다 — 만든 직후에 부르는 요청이라 정상 흐름에서는 남아 있다.
+     *
+     * request: @Valid @RequestBody ScheduleReviseRequest.
+     */
+    @PutMapping("/{scheduleId}")
+    public ResponseEntity<ScheduleDetailResponse> revise(
+            @PathVariable Long scheduleId,
+            @Valid @RequestBody ScheduleReviseRequest request,
+            @AuthenticationPrincipal Long userId,
+            HttpServletRequest httpRequest
+    ) {
+        if (userId == null) {
+            Object rejected =
+                    httpRequest.getAttribute(JwtAuthenticationFilter.REJECTED_TOKEN_ATTR);
+            throw new CustomException(rejected instanceof ErrorCode code
+                    ? code
+                    : ErrorCode.INVALID_TOKEN);
+        }
+        return ResponseEntity.ok(service.revise(scheduleId, userId, request));
     }
 
     /**

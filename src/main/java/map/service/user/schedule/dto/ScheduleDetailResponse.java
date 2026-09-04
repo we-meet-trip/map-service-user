@@ -32,6 +32,13 @@ import map.service.user.weather.dto.WeatherAlert;
  *           하므로 상세에도 싣는다. 없으면 키가 없다.
  * timelineStatus: 방문 시각 계산 상태("ok"|"trimmed"|"unverified"). 타임라인
  *                 이전 draft 에는 없다. JSON key "timeline_status".
+ *
+ * 아래 셋은 이 일정을 고칠 때 필요한 조건이다. 장소를 더하거나 빼고 나면
+ * 동선을 새로 짜야 하는데, 그 요청이 지역과 활동 시간대를 요구한다. 지역을
+ * 모르는 옛 일정은 값이 없어 키가 빠지므로 화면은 그때 수정 입구를 감춘다.
+ * province / city: 추천 당시 지역.
+ * activeStartHour / activeEndHour: 활동 시간대. JSON key "active_start_hour"
+ *        / "active_end_hour".
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ScheduleDetailResponse(
@@ -47,6 +54,10 @@ public record ScheduleDetailResponse(
         @JsonProperty("started_at") OffsetDateTime startedAt,
         List<String> warnings,
         @JsonProperty("timeline_status") String timelineStatus,
-        @JsonProperty("weather_alert") WeatherAlert weatherAlert
+        @JsonProperty("weather_alert") WeatherAlert weatherAlert,
+        String province,
+        String city,
+        @JsonProperty("active_start_hour") Integer activeStartHour,
+        @JsonProperty("active_end_hour") Integer activeEndHour
 ) {
 }

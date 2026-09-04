@@ -24,6 +24,7 @@ import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.Mobility;
 import map.service.user.recommend.dto.RecommendRequest;
+import map.service.user.schedule.dto.ScheduleReviseRequest;
 import map.service.user.trip.TripStopsAssembler;
 import map.service.user.weather.ScheduleWeatherService;
 import map.service.user.weather.dto.WeatherSnapshotItem;
@@ -277,6 +278,79 @@ class ScheduleServiceTest {
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
         assertThatThrownBy(() -> service.replanSpec(6L, 42L))
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("revise — 새 동선으로 본문과 작업 식별자를 갈아 끼우고 초안을 지운다")
+    void reviseReplacesItinerary() {
+        String newJob = "22222222-2222-2222-2222-222222222222";
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.fromString(JOB_ID), "제주 여행",
+                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
+                null, "walk", 9, 18);
+        entity.setRegion("서울특별시", "중구");
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+        when(draftStore.find(newJob)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
+
+        service.revise(5L, 42L, new ScheduleReviseRequest(newJob, null, null, null));
+
+        verify(repository).save(entity);
+        verify(draftStore).delete(newJob);
+        assertThat(entity.getJobId().toString()).isEqualTo(newJob);
+        assertThat(entity.getPayload()).isNotNull();
+        // 보내지 않은 조건은 저장돼 있던 값을 그대로 둔다.
+        assertThat(entity.getTransport()).isEqualTo("walk");
+        assertThat(entity.getActiveStartHour()).isEqualTo(9);
+        // 지역과 기간이 그대로라 저장 당시 예보 기준선도 그대로 유효하다.
+        assertThat(entity.getProvince()).isEqualTo("서울특별시");
+    }
+
+    @Test
+    @DisplayName("revise — 바뀐 조건은 덮어쓴다")
+    void reviseOverwritesGivenConditions() {
+        String newJob = "22222222-2222-2222-2222-222222222222";
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.fromString(JOB_ID), "제주 여행",
+                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
+                null, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.of(entity));
+        when(draftStore.find(newJob)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
+
+        service.revise(5L, 42L,
+                new ScheduleReviseRequest(newJob, "bicycle", 10, 20));
+
+        assertThat(entity.getTransport()).isEqualTo("bicycle");
+        assertThat(entity.getActiveStartHour()).isEqualTo(10);
+        assertThat(entity.getActiveEndHour()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("revise — 남의 일정이거나 초안이 사라졌으면 404")
+    void reviseRejectsForeignScheduleAndMissingDraft() {
+        String newJob = "22222222-2222-2222-2222-222222222222";
+        when(repository.findByScheduleIdAndUserId(5L, 42L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.revise(
+                5L, 42L, new ScheduleReviseRequest(newJob, null, null, null)))
+                .isInstanceOf(SavedScheduleNotFoundException.class);
+
+        ScheduleEntity entity = new ScheduleEntity(
+                42L, java.util.UUID.fromString(JOB_ID), "제주 여행",
+                LocalDate.of(2026, 7, 6), LocalDate.of(2026, 7, 7),
+                null, "walk", 9, 18);
+        when(repository.findByScheduleIdAndUserId(6L, 42L))
+                .thenReturn(Optional.of(entity));
+        when(draftStore.find(newJob)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.revise(
+                6L, 42L, new ScheduleReviseRequest(newJob, null, null, null)))
+                .isInstanceOf(ScheduleNotFoundException.class);
+        verify(repository, never()).save(entity);
     }
 
     @Test

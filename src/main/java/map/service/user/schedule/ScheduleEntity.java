@@ -258,6 +258,40 @@ public class ScheduleEntity {
     }
 
     /**
+     * 방문지를 통째로 갈아 끼운다 — 사용자가 일정을 고쳐 다시 만든 경우다.
+     *
+     * 방문지를 하나씩 고치지 않고 통째로 바꾸는 이유는, 스냅샷 안의 방문
+     * 순서·이동 구간·시각이 서로 맞물려 있어 한 자리만 바꾸면 나머지가
+     * 어긋나기 때문이다. 고친 목록으로 동선을 새로 짠 결과가 들어온다.
+     *
+     * 제목·날짜·소유자·지역·예보 기준선은 건드리지 않는다. 장소를 더하고
+     * 빼고 순서를 바꾸는 일로는 그 값들이 달라지지 않는다.
+     *
+     * jobId: 새로 만든 일정의 작업 식별자.
+     * payload: 새 draft JSON 스냅샷(호출 측이 이미 봉한 값).
+     * transport / activeStartHour / activeEndHour: null 이면 기존 값을 둔다.
+     */
+    public void replaceItinerary(
+            UUID jobId,
+            JsonNode payload,
+            String transport,
+            Integer activeStartHour,
+            Integer activeEndHour
+    ) {
+        this.jobId = jobId;
+        this.payload = payload;
+        if (transport != null) {
+            this.transport = transport;
+        }
+        if (activeStartHour != null) {
+            this.activeStartHour = activeStartHour;
+        }
+        if (activeEndHour != null) {
+            this.activeEndHour = activeEndHour;
+        }
+    }
+
+    /**
      * 생성 시각 반환. @CreationTimestamp 로 채워진 값(save 직후에도 non-null).
      */
     public OffsetDateTime getCreatedAt() {

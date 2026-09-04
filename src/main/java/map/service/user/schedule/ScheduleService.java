@@ -22,6 +22,7 @@ import map.service.user.weather.ScheduleWeatherService;
 import map.service.user.weather.dto.WeatherSnapshotItem;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
+import map.service.user.schedule.dto.ScheduleReviseRequest;
 import map.service.user.schedule.dto.ScheduleSummary;
 import map.service.user.trip.TripGenerationException;
 import map.service.user.trip.TripStopsAssembler;
@@ -468,7 +469,54 @@ public class ScheduleService {
                 entity.getStartedAt(),
                 warnings,
                 timelineStatus,
-                visibleAlert(entity));
+                visibleAlert(entity),
+                entity.getProvince(),
+                entity.getCity(),
+                entity.getActiveStartHour(),
+                entity.getActiveEndHour());
+    }
+
+    /**
+     * 저장된 일정의 방문지를 새로 만든 동선으로 갈아 끼운다.
+     *
+     * 화면이 장소를 고쳐 동선을 다시 만든 뒤(POST /api/v1/trip/route) 그
+     * 결과를 이 자리로 보낸다. 만든 직후에 부르는 요청이라 초안은 Redis 에
+     * 남아 있다 — 없으면 그 사이에 무언가 어긋난 것이므로 404 로 끝낸다.
+     *
+     * 제목·날짜·지역·예보 기준선은 그대로 둔다. 장소를 더하고 빼고 순서를
+     * 바꾸는 일로는 여행 지역도 기간도 달라지지 않아, 저장 당시 세운 예보
+     * 기준선이 그대로 유효하다.
+     *
+     * start() 와 같은 이유로 트랜잭션으로 감싸지 않는다 — 상세 조립에 외부
+     * 왕복이 들어 있다. 저장은 repository.save 가 자체 트랜잭션으로 커밋한다.
+     *
+     * scheduleId: 고칠 일정. 남의 것이거나 없으면 404.
+     * userId: 소유자. 없으면 404(존재 여부도 알리지 않는다).
+     * request: 새 동선의 작업 식별자와 함께 바뀐 조건.
+     */
+    public ScheduleDetailResponse revise(
+            Long scheduleId, Long userId, ScheduleReviseRequest request) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        String draftJson = draftStore.find(request.jobId())
+                .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
+        JsonNode payload;
+        try {
+            payload = objectMapper.readTree(draftJson);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("draft json parse failed", e);
+        }
+
+        entity.replaceItinerary(
+                UUID.fromString(request.jobId()),
+                payloadCipher.encryptNode(payload, payloadAad(entity.getUserId())),
+                request.transport(),
+                request.activeStartHour(),
+                request.activeEndHour());
+        repository.save(entity);
+        draftStore.delete(request.jobId());
+        log.info("schedule revised schedule_id={} job_id={}",
+                scheduleId, request.jobId());
+        return toDetail(entity);
     }
 
     /**
