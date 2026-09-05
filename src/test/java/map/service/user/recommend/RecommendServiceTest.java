@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import map.service.user.recommend.dto.EditRequest;
+import map.service.user.recommend.dto.Place;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import map.service.user.global.exception.CustomException;
@@ -25,6 +27,7 @@ import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.Mobility;
 import map.service.user.recommend.dto.RecommendRequest;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -86,6 +89,9 @@ class RecommendServiceTest {
                 immediateExecutor, 3L);
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
+        // 기본은 "이 요청이 만드는 쪽". 같은 조건이 겹치는 상황은 개별
+        // 테스트에서 false 로 바꿔 확인한다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(true);
         // 기본은 한도 이내(허용). 한도 초과 시나리오는 개별 테스트에서 재정의한다.
         when(researchLimitService.tryConsume(anyString())).thenReturn(true);
 
@@ -145,11 +151,12 @@ class RecommendServiceTest {
     void createWritesInProgressJobRecord() {
         service.createRecommendation(request("init", List.of()));
 
-        // 접수 직후 발급된 job_id·scheduleId 와 요청 지역으로 in_progress
-        // write-through. 지역은 나중에 이 작업으로 저장될 일정이 날씨를 다시
-        // 물을 때 쓰인다 — 여기서 남기지 않으면 되찾을 곳이 없다.
-        verify(jobStore).insertInProgress(
-                "job-2", "sched-1", "서울특별시", "강남구");
+        // 접수 직후 발급된 job_id·scheduleId 와 함께 출처와 지역을 남긴다.
+        // 출처가 없으면 캐시로 답한 잡과 구분되지 않아 세는 쪽이 agent 실행
+        // 횟수를 부풀려 읽고, 지역이 없으면 이 작업으로 저장될 일정이 나중에
+        // 날씨를 다시 물을 곳을 잃는다.
+        verify(jobStore).insertInProgress("job-2", "sched-1",
+                RecommendJobStore.JobOrigin.agent("init"), "서울특별시", "강남구");
     }
 
     // ---- research(Mode 1) ----
@@ -258,6 +265,64 @@ class RecommendServiceTest {
         verify(reuseCacheStore, never()).find(anyString());
     }
 
+    private static Place place(int id) {
+        return new Place(id, 1, "장소" + id, "주소", 37.5, 127.0, "10:00",
+                null, null, null, true, null, null, null, null, null, null);
+    }
+
+    // ---- 초안 수정: 앞뒤가 맞는지 ----
+
+    /** 순서와 이동 구간은 장소를 자리 번호로 가리키므로, 장소만 줄이면 없는 자리를 가리키게 된다. */
+    @Test
+    void editRejectedWhenVisitOrderPointsPastPlaces() {
+        String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
+                + "\"visit_order\":[0,1],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        // 장소를 하나로 줄이면서 순서를 함께 보내지 않았다.
+        EditRequest edit = new EditRequest(
+                List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
+                        null, null, null, true, null, null, null, null, null, null)), null, null);
+
+        assertThatThrownBy(() -> service.applyEdit("job-1", edit))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
+        verify(draftStore, never()).save(anyString(), anyString());
+    }
+
+    /** 자리 번호가 아니라 place_id 로 가리키므로, 남은 번호가 띄엄띄엄해도 맞는 것이다. */
+    @Test
+    void editAcceptedWhenRemainingIdsAreSparse() {
+        String draft = "{\"places\":[{\"place_id\":0},{\"place_id\":1},"
+                + "{\"place_id\":2},{\"place_id\":3}],"
+                + "\"visit_order\":[0,1,2,3],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        // 가운데 둘을 빼고 0 과 3 만 남겼다. 번호가 이어지지 않지만 맞는 것이다.
+        EditRequest edit = new EditRequest(
+                List.of(place(0), place(3)), List.of(0, 3), List.of());
+
+        assertThat(service.applyEdit("job-1", edit)).isPresent();
+    }
+
+    @Test
+    void editAcceptedWhenOrderShrinksTogether() {
+        String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
+                + "\"visit_order\":[0,1],\"legs\":[]}";
+        when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
+        when(jobStore.ownerOf("job-1")).thenReturn(null);
+
+        EditRequest edit = new EditRequest(
+                List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
+                        null, null, null, true, null, null, null, null, null, null)),
+                List.of(0), List.of());
+
+        assertThat(service.applyEdit("job-1", edit)).isPresent();
+        verify(draftStore).save(eq("job-1"), anyString());
+    }
+
     // ---- draft 조회 (Redis → PG 폴백) ----
 
     @Test
@@ -337,11 +402,48 @@ class RecommendServiceTest {
 
         JobAccepted result = service.createRecommendation(cacheRequest);
 
-        verify(jobStore).insertInProgress(
-                result.jobId(), "sched-9", "서울특별시", "동작구");
+        // 캐시로 답한 잡은 agent 가 돌지 않았다. source 가 그것을 밝혀야 한다.
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit(), "서울특별시", "동작구");
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
         verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
+    }
+
+    @Test
+    void hitLinksBackToTheJobThatFirstProducedIt() {
+        // 캐시 본체는 그 결과를 처음 만든 잡의 식별자를 담고 있다. 사본은 곧바로
+        // 자기 것으로 덮어쓰므로, 덮기 전에 꺼내 두지 않으면 원본을 되짚을 길이
+        // 없다 — 후보와 선택 근거는 원본 잡에만 붙어 있어, 끈이 끊기면 사용자가
+        // 실제로 저장한 일정이 어떤 후보에서 나왔는지 알 수 없게 된다.
+        String origin = "11111111-2222-3333-4444-555555555555";
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash))
+                .thenReturn(Optional.of("{\"job_id\":\"" + origin + "\",\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(1L);
+
+        JobAccepted result = service.createRecommendation(cacheRequest);
+
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit(origin), "서울특별시", "동작구");
+        // 사본이 받은 본문에는 자기 식별자가 들어가야 한다(남의 잡에 작용 방지).
+        ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
+        verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
+        assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
+    }
+
+    @Test
+    void hitWithoutOriginInPayloadStillWorks() {
+        // 계보를 못 읽어도 요청은 그대로 답해야 한다. 캐시는 최적화 경로다.
+        String hash = cacheKeyBuilder.hash(cacheRequest);
+        when(reuseCacheStore.find(hash)).thenReturn(Optional.of("{\"places\":[]}"));
+        when(reuseCacheStore.incrementHits(hash)).thenReturn(1L);
+
+        JobAccepted result = service.createRecommendation(cacheRequest);
+
+        assertThat(result.jobId()).isNotBlank();
+        verify(jobStore).insertInProgress(result.jobId(), "sched-9",
+                RecommendJobStore.JobOrigin.cacheHit(), "서울특별시", "동작구");
     }
 
     @Test
@@ -439,8 +541,10 @@ class RecommendServiceTest {
     void routeJobRecordsInProgress() {
         service.createRouteJob(routeRequest("init"));
 
-        verify(jobStore).insertInProgress(
-                "job-2", "sched-1", "서울특별시", "강남구");
+        // 사용자가 직접 고른 경로다. 후보도 랭킹도 거치지 않으므로 나중에
+        // 학습 자료를 고를 때 다른 경로와 같이 묶이면 안 된다.
+        verify(jobStore).insertInProgress("job-2", "sched-1",
+                RecommendJobStore.JobOrigin.agent("route"), "서울특별시", "강남구");
     }
 
     // ─── 저장된 취향 병합 ────────────────────────────────────────
@@ -641,7 +745,74 @@ class RecommendServiceTest {
         verify(agentClient).requestRecommend(captor.capture());
         assertThat(captor.getValue().stage()).isEqualTo("init");
         assertThat(captor.getValue().exclude()).isEmpty();
-        verify(jobStore).insertInProgress(
-                "job-2", "sched-1", "서울특별시", "강남구");
+        verify(jobStore).insertInProgress("job-2", "sched-1", "서울특별시", "강남구");
+    }
+
+    @Test
+    @DisplayName("같은 조건이 겹치면 agent 를 다시 부르지 않는다")
+    void 겹치는_요청은_agent_를_부르지_않는다() {
+        // 한 건이 LLM 을 두 번 쓴다. 같은 조건 열 건이 동시에 들어오면
+        // 스무 번이 나가는데, 하루 한도가 정해진 자원이라 그 낭비가 크다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        RecommendService.RecommendationResult result =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+
+        verify(agentClient, never()).requestRecommend(any());
+        assertThat(result.accepted().jobId()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("붙는 쪽도 자기 job_id 를 갖는다")
+    void 붙는_쪽도_자기_job_id_를_갖는다() {
+        // 앞선 요청의 job 을 그대로 주면, 한 사람이 고친 것이 다른 사람 결과를
+        // 바꾼다. 초안은 고칠 수 있는 값이므로 반드시 따로 가져가야 한다.
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        RecommendService.RecommendationResult first =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+        RecommendService.RecommendationResult second =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+
+        assertThat(first.accepted().jobId()).isNotEqualTo(second.accepted().jobId());
+        // 앞서 만드는 쪽이 받은 job_id 와도 달라야 한다.
+        assertThat(first.accepted().jobId()).isNotEqualTo("job-2");
+    }
+
+    @Test
+    @DisplayName("취향이 섞인 요청은 겹쳐도 따로 만든다")
+    void 취향이_섞이면_묶지_않는다() {
+        // 해시는 취향을 섞기 전 값으로 만들어져, 취향이 다른 두 사람이 같은
+        // 해시를 만든다. 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된
+        // 결과를 받는다.
+        when(profileThemeProvider.themesFor(any())).thenReturn(List.of("맛집"));
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+
+        service.createRecommendationDetailed(request("init", List.of()), 42L);
+
+        verify(agentClient).requestRecommend(any());
+    }
+
+    @Test
+    @DisplayName("앞선 요청이 끝나면 붙어 있던 job 도 그 결과로 답한다")
+    void 붙어있던_job_이_결과를_받는다() {
+        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        RecommendService.RecommendationResult joined =
+                service.createRecommendationDetailed(request("init", List.of()), null);
+        String jobId = joined.accepted().jobId();
+
+        // 아직 안 나왔으면 진행 중이다.
+        when(reuseCacheStore.waitingHash(jobId)).thenReturn(Optional.of("hash-x"));
+        when(reuseCacheStore.find("hash-x")).thenReturn(Optional.empty());
+        assertThat(service.findDraft(jobId)).isEmpty();
+
+        // 나오면 자기 job_id 로 바꿔 받는다.
+        when(reuseCacheStore.find("hash-x"))
+                .thenReturn(Optional.of("{\"job_id\":\"job-2\",\"places\":[]}"));
+        Optional<String> resolved = service.findDraft(jobId);
+
+        assertThat(resolved).isPresent();
+        assertThat(readJobId(resolved.get())).isEqualTo(jobId);
+        verify(reuseCacheStore).clearWaiting(jobId);
     }
 }

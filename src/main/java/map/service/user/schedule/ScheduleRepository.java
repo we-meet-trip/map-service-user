@@ -1,9 +1,11 @@
 package map.service.user.schedule;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -54,4 +56,28 @@ public interface ScheduleRepository extends JpaRepository<ScheduleEntity, Long> 
             order by s.dateStart asc
             """)
     List<ScheduleEntity> findWatchTargets(@Param("today") LocalDate today);
+     /**
+     * 기한이 지난 흔적을 실제로 지운다. 지운 행 수를 돌려준다.
+     *
+     * 흔적만 남긴 행은 조회에서 빠져 사용자 눈에는 이미 없지만 저장소에는
+     * 남아 있다. 사용자가 지운 것을 무기한 들고 있지 않으려면 언젠가는 진짜로
+     * 지워야 한다. 이때 딸린 채팅방·도착 기록도 외래키를 타고 함께 정리된다.
+     *
+     * 한 번에 지우는 양을 끊는 이유는 학습 신호 정리와 같다 — 한 문장으로
+     * 몰아 지우면 그 트랜잭션이 오래 잠금을 쥔다.
+     *
+     * 엔티티에 걸린 조회 제한을 피해야 하므로 네이티브 문장으로 쓴다.
+     */
+    @Modifying
+    @Query(value = """
+            DELETE FROM user_service.schedules
+            WHERE schedule_id IN (
+                SELECT schedule_id FROM user_service.schedules
+                WHERE deleted_at IS NOT NULL AND deleted_at < :cutoff
+                ORDER BY deleted_at
+                LIMIT :batchSize
+            )
+            """, nativeQuery = true)
+    int deleteTombstonedBefore(@Param("cutoff") OffsetDateTime cutoff,
+                               @Param("batchSize") int batchSize);
 }

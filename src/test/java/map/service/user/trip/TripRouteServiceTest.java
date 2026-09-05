@@ -15,7 +15,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import map.service.user.places.ReviewSummaryService;
-import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
@@ -43,7 +42,6 @@ class TripRouteServiceTest {
     private static final String JOB_ID = "22222222-2222-2222-2222-222222222222";
 
     private RecommendService recommendService;
-    private DraftStore draftStore;
     private HubWeatherClient hubWeatherClient;
     private TripStopsAssembler stopsAssembler;
     private ReviewSummaryService reviewSummaryService;
@@ -52,15 +50,14 @@ class TripRouteServiceTest {
     @BeforeEach
     void setUp() {
         recommendService = mock(RecommendService.class);
-        draftStore = mock(DraftStore.class);
         hubWeatherClient = mock(HubWeatherClient.class);
         stopsAssembler = mock(TripStopsAssembler.class);
         reviewSummaryService = mock(ReviewSummaryService.class);
         service = new TripService(
-                recommendService, draftStore, hubWeatherClient, stopsAssembler,
+                recommendService, hubWeatherClient, stopsAssembler,
                 reviewSummaryService, new ObjectMapper(),
                 mock(map.service.user.schedule.ScheduleService.class), 1L, 10L);
-        when(recommendService.createRouteJob(any()))
+        when(recommendService.createRouteJob(any(), any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
     }
 
@@ -77,7 +74,7 @@ class TripRouteServiceTest {
     }
 
     private void draftIsDone() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\","
                         + "\"places\":[],\"visit_order\":[],\"legs\":[]}"));
     }
@@ -103,7 +100,7 @@ class TripRouteServiceTest {
 
         ArgumentCaptor<RecommendRequest> captor =
                 ArgumentCaptor.forClass(RecommendRequest.class);
-        verify(recommendService).createRouteJob(captor.capture());
+        verify(recommendService).createRouteJob(captor.capture(), any());
         RecommendRequest sent = captor.getValue();
         assertThat(sent.places()).hasSize(2);
         assertThat(sent.places().get(0).name()).isEqualTo("속초해변");
@@ -130,7 +127,7 @@ class TripRouteServiceTest {
     @Test
     @DisplayName("draft 의 warnings 와 timeline_status 를 응답에 그대로 싣는다")
     void passesThroughWarningsAndTimelineStatus() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\","
                         + "\"places\":[],\"visit_order\":[],\"legs\":[],"
                         + "\"timeline_status\":\"unverified\","
@@ -173,7 +170,7 @@ class TripRouteServiceTest {
     @Test
     @DisplayName("추천이 실패로 끝나면 생성과 같은 예외로 502 가 된다")
     void failedDraftRaisesGenerationException() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\","
                         + "\"error\":\"stage=route requires places\"}"));
 
@@ -185,7 +182,7 @@ class TripRouteServiceTest {
     @Test
     @DisplayName("draft 가 오지 않으면 시간초과 예외")
     void missingDraftRaisesTimeout() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.empty());
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.route(request()))
                 .isInstanceOf(TripTimeoutException.class);

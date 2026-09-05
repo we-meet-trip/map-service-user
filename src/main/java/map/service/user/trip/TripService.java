@@ -6,7 +6,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import map.service.user.places.ReviewSummaryService;
-import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.DateRange;
 import map.service.user.recommend.dto.JobAccepted;
@@ -40,7 +39,7 @@ import org.springframework.stereotype.Service;
  *   5) hub /v1/weather 를 별도 호출해 weather_forecast 를 채운다(best-effort).
  *   6) 동기 200 TripGenerateResponse 반환.
  *
- * 기존 자산 재사용: AgentClient · DraftStore · RecommendRequest/RecommendResponse DTO.
+ * 기존 자산 재사용: RecommendService · RecommendRequest/RecommendResponse DTO.
  * (SoT D6/B7 의 long-poll 대신 사용자 결정 D-1 의 동기 facade — 위험 등록부 등재 대상.)
  */
 @Service
@@ -49,7 +48,6 @@ public class TripService {
     private static final Logger log = LoggerFactory.getLogger(TripService.class);
 
     private final RecommendService recommendService;
-    private final DraftStore draftStore;
     private final HubWeatherClient hubWeatherClient;
     private final TripStopsAssembler stopsAssembler;
     private final ReviewSummaryService reviewSummaryService;
@@ -60,7 +58,6 @@ public class TripService {
 
     public TripService(
             RecommendService recommendService,
-            DraftStore draftStore,
             HubWeatherClient hubWeatherClient,
             TripStopsAssembler stopsAssembler,
             ReviewSummaryService reviewSummaryService,
@@ -70,7 +67,6 @@ public class TripService {
             @Value("${trip.poll-interval-ms:700}") long pollIntervalMs
     ) {
         this.recommendService = recommendService;
-        this.draftStore = draftStore;
         this.hubWeatherClient = hubWeatherClient;
         this.stopsAssembler = stopsAssembler;
         this.reviewSummaryService = reviewSummaryService;
@@ -266,6 +262,11 @@ public class TripService {
      * request: 검증 완료된 TripRouteRequest.
      */
     public TripGenerateResponse route(TripRouteRequest request) {
+        return route(request, null);
+    }
+
+    /** 위와 같되, 장소를 고른 사람을 잡에 남긴다. */
+    public TripGenerateResponse route(TripRouteRequest request, Long userId) {
         String province = TripMapping.normalizeProvince(request.location().province());
         String city = request.location().city();
         Schedule schedule = request.schedule();
@@ -288,7 +289,7 @@ public class TripService {
                 null,
                 request.places());
 
-        JobAccepted accepted = recommendService.createRouteJob(recommendRequest);
+        JobAccepted accepted = recommendService.createRouteJob(recommendRequest, userId);
         String jobId = accepted.jobId();
         log.info("trip route started job_id={} places={}",
                 jobId, request.places().size());
@@ -418,7 +419,12 @@ public class TripService {
         long deadlineNanos = System.nanoTime()
                 + Duration.ofSeconds(pollTimeoutSeconds).toNanos();
         while (true) {
-            Optional<String> draft = draftStore.find(jobId);
+            // 초안 저장소를 직접 보지 않고 RecommendService 를 거친다.
+            // 그쪽이 Redis 초안 → PG 완료본 → 앞선 요청 결과 순으로 찾는데,
+            // 여기서 저장소만 보면 뒤의 두 경로를 건너뛴다. 특히 같은 조건이
+            // 겹쳐 앞선 요청에 붙은 job 은 자기 초안이 따로 만들어지지 않으므로,
+            // 저장소만 보면 영영 못 찾고 시한까지 기다리다 끊긴다.
+            Optional<String> draft = recommendService.findDraft(jobId);
             if (draft.isPresent()) {
                 return draft.get();
             }

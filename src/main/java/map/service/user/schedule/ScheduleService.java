@@ -6,9 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import map.service.user.chat.repository.ChatRoomRepository;
 import map.service.user.global.crypto.PayloadCipher;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendJobStore;
@@ -29,6 +31,7 @@ import map.service.user.trip.TripStopsAssembler;
 import map.service.user.trip.dto.TripStop;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,7 +41,10 @@ import org.springframework.transaction.annotation.Transactional;
  * 추천 draft 를 일정(ScheduleEntity)으로 변환하여 저장한다.
  * DraftStore 에서 draft JSON 을 읽어 payload 로 보관하고, 저장 성공 시 draft 를 삭제한다.
  *
- * draftStore: DraftStore. draft JSON 조회/삭제.
+ * draftStore: DraftStore. 저장 성공 후 초안 삭제.
+ * recommendService: RecommendService. 초안 조회(초안이 만료됐으면 완료 기록으로
+ *                   내려간다). 조회 화면과 같은 길로 읽어야 "화면에는 보이는데
+ *                   저장만 안 되는" 상태가 생기지 않는다.
  * repository: ScheduleRepository. ScheduleEntity 영속화.
  * objectMapper: Jackson ObjectMapper. draft JSON → JsonNode 파싱.
  * stopsAssembler: TripStopsAssembler. 저장된 draft 를 상세 조회 응답의
@@ -50,32 +56,38 @@ public class ScheduleService {
     private static final Logger log = LoggerFactory.getLogger(ScheduleService.class);
 
     private final DraftStore draftStore;
+    private final RecommendService recommendService;
     private final ScheduleRepository repository;
+    private final ChatRoomRepository chatRoomRepository;
+    private final ScheduleArrivalRepository arrivalRepository;
     private final ObjectMapper objectMapper;
     private final TripStopsAssembler stopsAssembler;
     private final PayloadCipher payloadCipher;
     private final RecommendJobStore jobStore;
     private final ScheduleWeatherService weatherService;
-    private final RecommendService recommendService;
 
     public ScheduleService(
             DraftStore draftStore,
+            RecommendService recommendService,
             ScheduleRepository repository,
+            ChatRoomRepository chatRoomRepository,
+            ScheduleArrivalRepository arrivalRepository,
             ObjectMapper objectMapper,
             TripStopsAssembler stopsAssembler,
             PayloadCipher payloadCipher,
             RecommendJobStore jobStore,
-            ScheduleWeatherService weatherService,
-            RecommendService recommendService
+            ScheduleWeatherService weatherService
     ) {
         this.draftStore = draftStore;
+        this.recommendService = recommendService;
         this.repository = repository;
+        this.chatRoomRepository = chatRoomRepository;
+        this.arrivalRepository = arrivalRepository;
         this.objectMapper = objectMapper;
         this.stopsAssembler = stopsAssembler;
         this.payloadCipher = payloadCipher;
         this.jobStore = jobStore;
         this.weatherService = weatherService;
-        this.recommendService = recommendService;
     }
 
     /**
@@ -110,7 +122,11 @@ public class ScheduleService {
      */
     @Transactional
     public Long persist(ScheduleSaveRequest request, Long userId) {
-        String draftJson = draftStore.find(request.jobId())
+        // 조회와 같은 길로 찾는다. 초안은 한 시간이면 사라지는데 저장만
+        // 그것을 직접 보고 있어, 만들어 둔 일정을 조금 뒤에 저장하려 하면
+        // 화면에는 멀쩡히 보이는 것이 저장에서만 없다고 나왔다.
+        // recommendService.findDraft 는 초안이 없으면 완료 기록으로 내려간다.
+        String draftJson = recommendService.findDraft(request.jobId())
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {
@@ -417,7 +433,11 @@ public class ScheduleService {
      */
     public ScheduleDetailResponse start(Long scheduleId, Long userId) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
-        if (entity.markStarted(OffsetDateTime.now())) {
+        // 마이크로초 아래를 버리고 새긴다. 안 그러면 방금 새긴 값을 담아 준
+        // 응답과, 나중에 저장소에서 읽어 준 응답의 시각이 미세하게 어긋난다 —
+        // 저장소가 그보다 잘게 담지 못해 반올림하기 때문이다. 같은 값을
+        // 두 번 물었는데 다르게 오면 "처음 한 번만 새긴다"는 약속이 깨져 보인다.
+        if (entity.markStarted(OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS))) {
             repository.save(entity);
             log.info("schedule started schedule_id={}", scheduleId);
         }
@@ -520,22 +540,43 @@ public class ScheduleService {
     }
 
     /**
-     * 일정 1건을 삭제한다. 소유자가 아니거나 없으면 404.
+     * 일정 1건을 지운다. 소유자가 아니거나 없으면 404.
      *
-     * 저장된 draft 스냅샷도 함께 사라진다 — 일정 밖에서 그 payload 를
-     * 참조하는 곳은 없다.
+     * 행을 통째로 지우지 않고 지운 표시만 남긴다. "저장했다가 물렀다" 는
+     * 사용자가 남기는 가장 뚜렷한 부정 신호인데, 지워 버리면 그 판단이 아무
+     * 데도 남지 않기 때문이다. 표시된 행은 모든 조회에서 빠지므로 사용자
+     * 눈에는 지운 것과 같고, 기한이 지나면 정리하는 쪽이 진짜로 지운다.
+     *
+     * 딸린 채팅방은 함께 없애지 않고 읽기 전용으로 돌린다. 예전에는 일정을
+     * 지우면 방·참가자·주고받은 말까지 외래키를 타고 통째로 사라졌는데,
+     * 그 방은 지운 사람 혼자만의 것이 아니다 — 초대로 들어온 사람들의
+     * 대화까지 한 사람의 삭제로 없어졌다. 새로 말을 붙이지는 못하게 하되
+     * 지난 것은 남긴다.
      */
     @Transactional
     public void delete(Long scheduleId, Long userId) {
-        repository.delete(findOwned(scheduleId, userId));
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        entity.markDeleted(OffsetDateTime.now());
+        repository.save(entity);
+        chatRoomRepository.findByScheduleId(scheduleId).ifPresent(room -> {
+            room.close();
+            chatRoomRepository.save(room);
+        });
     }
 
     /**
      * 소유자 조건을 붙여 일정을 찾는다. 없으면 404 예외.
      *
+     * <p>바깥에 열어 둔 이유: 일정에 딸린 다른 기능(주변 장소 등)도 같은
+     * 규칙으로 주인을 가려야 한다. 규칙을 옮겨 적으면 한쪽만 고쳐져 갈라진다.
+     *
      * 토큰이 없으면 조회 자체를 하지 않는다 — 소유자 없는 행은 누가 저장한
      * 것인지 구분할 수 없어서 열어 주는 순간 전원 공용이 된다.
      */
+    public ScheduleEntity requireOwned(Long scheduleId, Long userId) {
+        return findOwned(scheduleId, userId);
+    }
+
     private ScheduleEntity findOwned(Long scheduleId, Long userId) {
         if (userId == null) {
             // 소유자 없는 행을 토큰 없이 열어 주면 식별자만 바꿔 가며 남의
@@ -544,5 +585,43 @@ public class ScheduleService {
         }
         return repository.findByScheduleIdAndUserId(scheduleId, userId)
                 .orElseThrow(() -> new SavedScheduleNotFoundException(scheduleId));
+    }
+
+    /**
+     * 방문지에 닿았다고 기기가 알려 온 것을 남긴다. 소유자가 아니면 404.
+     *
+     * 처음 닿은 것만 남긴다. 기기는 위치가 들어올 때마다 판정하므로 같은 자리를
+     * 여러 번 알려 오는 것이 정상이고, 뒤엣것은 조용히 버린다.
+     *
+     * 좌표는 받지 않는다. 어디였는지는 일정에 이미 적혀 있어 (일차, 순번) 으로
+     * 지목하면 되고, 위치 원점을 서버에 한 벌 더 두면 다루기가 무거워진다.
+     *
+     * 계획 시각이 확실치 않았던 일정인지도 함께 적어 둔다 — 그 경우 계획과
+     * 실제의 시간차를 비교해도 뜻이 없어, 읽는 쪽이 갈라 볼 수 있어야 한다.
+     *
+     * @return 이번에 새로 남겼으면 true, 이미 있었으면 false
+     */
+    @Transactional
+    public boolean recordArrival(Long scheduleId, Long userId,
+                                 int day, int stopOrder, OffsetDateTime arrivedAt) {
+        ScheduleEntity entity = findOwned(scheduleId, userId);
+        String timelineStatus = null;
+        JsonNode payload = entity.getPayload();
+        if (payload != null && payload.hasNonNull("timeline_status")) {
+            timelineStatus = payload.get("timeline_status").asText();
+        }
+        if (arrivalRepository.existsById(
+                new ScheduleArrivalId(scheduleId, day, stopOrder))) {
+            return false;
+        }
+        try {
+            arrivalRepository.save(new ScheduleArrivalEntity(
+                    scheduleId, day, stopOrder, arrivedAt, timelineStatus));
+            return true;
+        } catch (DataIntegrityViolationException e) {
+            // 있는지 보고 넣는 사이에 같은 알림이 한 번 더 들어왔다. 먼저 온
+            // 것이 남으면 되므로 조용히 넘어간다.
+            return false;
+        }
     }
 }

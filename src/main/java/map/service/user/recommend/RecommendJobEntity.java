@@ -67,6 +67,48 @@ public class RecommendJobEntity {
 
     @Column(name = "city", length = 20)
     private String city;
+     /**
+     * 이 잡을 만든 경로. init | research | route | refresh.
+     * 이 마이그레이션 이전 행은 비어 있으며 "미상" 으로 읽는다.
+     */
+    @Column(name = "mode", length = 16)
+    private String mode;
+
+    /** 재탐색일 때 거부된 원본 잡. 논리 참조이며 외래키를 걸지 않는다. */
+    @Column(name = "parent_job_id")
+    private UUID parentJobId;
+
+    /**
+     * 결과를 실제로 만든 주체. agent | cache_hit.
+     * 캐시로 답한 잡은 agent 가 돌지 않았는데도 완료로 기록되므로, 세는 쪽이
+     * 이 값으로 갈라 보지 않으면 LLM 사용량이 부풀어 보인다.
+     */
+    @Column(name = "source", length = 16)
+    private String source;
+
+    /** 함께 보관된 학습 신호의 계약 판. 신호가 없으면 비어 있다. */
+    @Column(name = "schema_version")
+    private Integer schemaVersion;
+
+    /**
+     * 이 잡을 만든 사용자. 토큰 없이 들어온 요청과 이전 행은 비어 있다.
+     * 비어 있으면 소유자를 모르는 것이므로 수정을 막지 않는다.
+     */
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
+    /**
+     * 잡을 만든 시점의 요청자 성향(연령대·성별·테마·취향병합여부).
+     *
+     * 스냅샷인 이유: 사람이 나중에 프로필을 고치면 조인으로 읽는 값은 함께
+     * 바뀌어, 같은 기록을 두 번 읽을 때 다른 입력이 나온다. 물어본 그때의
+     * 값을 붙여 두어야 학습과 재현이 어긋나지 않는다.
+     *
+     * 원문(생년월일 등)은 담지 않는다 — 학습에 필요한 만큼만 옮긴다.
+     */
+    @Column(name = "user_segment", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode userSegment;
 
     /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
@@ -100,6 +142,24 @@ public class RecommendJobEntity {
         this.resultPayload = resultPayload;
         this.error = error;
         this.finishedAt = finishedAt;
+    }
+
+    /** 요청자 성향 스냅샷 반환. nullable(모르면 비어 있다). */
+    public JsonNode getUserSegment() {
+        return userSegment;
+    }
+
+    /**
+     * 성향 스냅샷을 처음 한 번만 새긴다.
+     *
+     * 이미 있으면 두지 않는다. 같은 잡에 접수 기록이 두 번 들어와도 처음
+     * 물어본 시점의 값이 남아야 하기 때문이다 — 나중 값으로 덮으면 스냅샷을
+     * 두는 뜻이 사라진다.
+     */
+    public void fillUserSegmentIfAbsent(JsonNode segment) {
+        if (userSegment == null && segment != null) {
+            userSegment = segment;
+        }
     }
 
     /** 작업 UUID 반환. */
@@ -156,6 +216,31 @@ public class RecommendJobEntity {
                 && city != null && !city.isBlank();
         this.province = usable ? province : null;
         this.city = usable ? city : null;
+    }
+
+    /** 이 잡을 만든 경로 반환. 이전 행은 null(미상). */
+    public String getMode() {
+        return mode;
+    }
+
+    /** 재탐색일 때 거부된 원본 잡 반환. nullable. */
+    public UUID getParentJobId() {
+        return parentJobId;
+    }
+
+    /** 결과를 만든 주체 반환(agent/cache_hit). 이전 행은 null(미상). */
+    public String getSource() {
+        return source;
+    }
+
+    /** 함께 보관된 학습 신호의 계약 판 반환. nullable. */
+    public Integer getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    /** 이 잡을 만든 사용자 반환. 모르면 null. */
+    public Long getOwnerUserId() {
+        return ownerUserId;
     }
 
     /** 상태를 갱신한다(완료 기록 시 사용). */

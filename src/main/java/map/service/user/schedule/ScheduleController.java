@@ -7,6 +7,7 @@ import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import map.service.user.global.security.JwtAuthenticationFilter;
 import map.service.user.recommend.dto.JobAccepted;
+import map.service.user.schedule.dto.ArrivalRequest;
 import map.service.user.schedule.dto.ScheduleDetailResponse;
 import map.service.user.schedule.dto.ScheduleListResponse;
 import map.service.user.schedule.dto.ScheduleReviseRequest;
@@ -214,5 +215,26 @@ public class ScheduleController {
     ) {
         service.delete(scheduleId, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 방문지 도착 알림. 처음 닿은 것만 남고, 같은 자리를 다시 알려도 200 이다.
+     *
+     * 같은 자리를 여러 번 알려 오는 것이 정상이라 성공/중복을 나눠 응답하지
+     * 않는다 — 기기는 위치가 들어올 때마다 판정하고, 통신이 끊겼다 이어지면
+     * 다시 보낸다. 부르는 쪽이 실패를 신경 쓰지 않아도 되게 한다.
+     *
+     * scheduleId: 저장된 일정. 소유자가 아니면 404.
+     * request: @Valid @RequestBody ArrivalRequest.
+     */
+    @PostMapping("/{scheduleId}/arrivals")
+    public ResponseEntity<Void> recordArrival(
+            @PathVariable Long scheduleId,
+            @Valid @RequestBody ArrivalRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
+        service.recordArrival(scheduleId, userId,
+                request.day(), request.stopOrder(), request.arrivedAt());
+        return ResponseEntity.ok().build();
     }
 }

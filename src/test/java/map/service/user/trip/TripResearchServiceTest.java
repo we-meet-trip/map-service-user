@@ -18,7 +18,6 @@ import java.util.Optional;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import map.service.user.places.ReviewSummaryService;
-import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
@@ -48,7 +47,6 @@ class TripResearchServiceTest {
     private static final String JOB_ID = "22222222-2222-2222-2222-222222222222";
 
     private RecommendService recommendService;
-    private DraftStore draftStore;
     private HubWeatherClient hubWeatherClient;
     private TripStopsAssembler stopsAssembler;
     private TripService service;
@@ -56,11 +54,10 @@ class TripResearchServiceTest {
     @BeforeEach
     void setUp() {
         recommendService = mock(RecommendService.class);
-        draftStore = mock(DraftStore.class);
         hubWeatherClient = mock(HubWeatherClient.class);
         stopsAssembler = mock(TripStopsAssembler.class);
         service = new TripService(
-                recommendService, draftStore, hubWeatherClient, stopsAssembler,
+                recommendService, hubWeatherClient, stopsAssembler,
                 mock(ReviewSummaryService.class), new ObjectMapper(),
                 mock(map.service.user.schedule.ScheduleService.class), 1L, 10L);
         when(recommendService.research(anyString(), any(), any(), any()))
@@ -83,7 +80,7 @@ class TripResearchServiceTest {
     }
 
     private void draftIsDone() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\","
                         + "\"places\":[],\"visit_order\":[],\"legs\":[]}"));
     }
@@ -165,7 +162,7 @@ class TripResearchServiceTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.RESEARCH_LIMIT_EXCEEDED);
 
-        verify(draftStore, never()).find(anyString());
+        verify(recommendService, never()).findDraft(anyString());
     }
 
     @Test
@@ -184,7 +181,7 @@ class TripResearchServiceTest {
     @Test
     @DisplayName("추천이 실패로 끝나면 502 로 올린다")
     void failedDraftBecomesGenerationException() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\","
                         + "\"error\":\"no candidates\"}"));
 

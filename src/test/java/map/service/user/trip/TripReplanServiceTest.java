@@ -15,7 +15,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import map.service.user.places.ReviewSummaryService;
-import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendService;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.Mobility;
@@ -47,7 +46,6 @@ class TripReplanServiceTest {
     private static final LocalDate D1 = LocalDate.of(2026, 9, 10);
 
     private RecommendService recommendService;
-    private DraftStore draftStore;
     private HubWeatherClient hubWeatherClient;
     private TripStopsAssembler stopsAssembler;
     private ScheduleService scheduleService;
@@ -56,12 +54,11 @@ class TripReplanServiceTest {
     @BeforeEach
     void setUp() {
         recommendService = mock(RecommendService.class);
-        draftStore = mock(DraftStore.class);
         hubWeatherClient = mock(HubWeatherClient.class);
         stopsAssembler = mock(TripStopsAssembler.class);
         scheduleService = mock(ScheduleService.class);
         service = new TripService(
-                recommendService, draftStore, hubWeatherClient, stopsAssembler,
+                recommendService, hubWeatherClient, stopsAssembler,
                 mock(ReviewSummaryService.class), new ObjectMapper(),
                 scheduleService, 5L, 10L);
 
@@ -69,7 +66,7 @@ class TripReplanServiceTest {
                 5L, "서울특별시", "중구", D1, D1, "bicycle", 9, 18));
         when(recommendService.createFreshRecommendation(any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\",\"places\":[]}"));
         when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of());
@@ -106,7 +103,7 @@ class TripReplanServiceTest {
     @Test
     @DisplayName("추천이 실패하면 기준선을 건드리지 않는다")
     void keepsBaselineWhenRecommendationFails() {
-        when(draftStore.find(JOB_ID)).thenReturn(Optional.of(
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\","
                         + "\"error\":\"gemini down\"}"));
 

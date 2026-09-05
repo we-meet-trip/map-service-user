@@ -1,6 +1,7 @@
 package map.service.user.recommend;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -146,15 +147,29 @@ public class RecommendJobsConsumer
         }
 
         try {
+            // 1) 초안 먼저. 사용자가 결과를 보는 경로라 여기서 막히면 안 된다.
+            //    같은 값을 다시 써도 되므로 재처리에 안전하다.
             draftStore.save(jobId, payloadJson);
-            jobStore.markFinished(jobId, value.get("status"), payloadJson);
+
+            // 2) 영속 기록. **실패하면 예외가 올라와 ack 하지 않는다.**
+            //    예전에는 이 기록이 실패를 삼켜서, 기록이 안 됐는데도 ack 되어
+            //    메시지가 사라졌다. 사용자는 초안으로 결과를 이미 받았으므로
+            //    아무도 눈치채지 못한 채 학습 신호만 조용히 없어졌다.
+            jobStore.recordCompletion(
+                    jobId, value.get("status"), payloadJson, value.get("training"));
+
+            // 3) 재사용 캐시. 영속 기록이 끝난 뒤에 한다 — 연결고리를 읽으면서
+            //    지우기 때문에(GETDEL), 앞 단계가 실패해 재처리될 때 이미
+            //    소비돼 있으면 캐시가 영영 갱신되지 않는다.
             updateReuseCacheIfLinked(jobId, payloadJson, value.get("status"));
+
             ack(recordId);
-            log.info("draft saved job_id={} stream_id={}", jobId, recordId);
+            log.info("draft saved job_id={} stream_id={} training={}",
+                    jobId, recordId, value.get("training") != null);
         } catch (RuntimeException e) {
             // ack 하지 않고 PEL 에 남긴다. reclaimPending() 이 idle 경과 후
             // XCLAIM 으로 재처리(재배달 횟수 +1)하고, maxRetry 초과 시 DLQ 로 보낸다.
-            log.error("draft save failed job_id={} stream_id={} reason={} "
+            log.error("job completion persist failed job_id={} stream_id={} reason={} "
                     + "(left pending for reclaim)", jobId, recordId, e.getMessage());
         }
     }
@@ -176,6 +191,10 @@ public class RecommendJobsConsumer
         try {
             reuseCacheStore.consumeLink(jobId)
                     .ifPresent(hash -> {
+                        // 만드는 중 표시는 성공이든 실패든 치운다. 실패했는데
+                        // 그대로 두면 시한이 끝날 때까지 같은 조건의 모든 요청이
+                        // 나오지 않을 결과를 기다린다.
+                        reuseCacheStore.releaseProducer(hash);
                         if (!"done".equals(status)) {
                             log.warn("reuse cache skipped for non-done job job_id={} status={}",
                                     jobId, status);
@@ -258,7 +277,7 @@ public class RecommendJobsConsumer
         routeToDlq(rec, value.get("job_id"),
                 openIfSealed(value.get("payload"), value.get("job_id")),
                 value.get("status"),
-                (int) deliveries,
+                value.get("training"), (int) deliveries,
                 "max retries exceeded (" + deliveries + " deliveries)");
         ack(rec.getId().getValue());
     }
@@ -318,19 +337,26 @@ public class RecommendJobsConsumer
             String jobId,
             String payloadJson,
             String status,
+            String trainingJson,
             int deliveryCount,
             String error
     ) {
         try {
-            Map<String, String> dlqEntry = Map.of(
-                    "job_id", jobId != null ? jobId : "unknown",
-                    "status", status != null ? status : "unknown",
-                    "payload", payloadJson != null
-                            ? payloadCipher.encrypt(payloadJson, dlqAad(jobId)) : "",
-                    "original_id", message.getId().getValue(),
-                    "delivery_count", String.valueOf(deliveryCount),
-                    "error", error
-            );
+            // 고정 목록 대신 맵을 쌓는 이유: 학습 신호는 없을 수도 있는데
+            // Map.of 는 null 을 받지 않는다. 그리고 이 신호를 여기서 빠뜨리면
+            // 재처리 못 한 잡의 후보 목록이 통째로 사라진다 — DLQ 로 보내는
+            // 목적이 나중에 되살리는 것이므로 본문은 전부 남겨야 한다.
+            Map<String, String> dlqEntry = new HashMap<>();
+            dlqEntry.put("job_id", jobId != null ? jobId : "unknown");
+            dlqEntry.put("status", status != null ? status : "unknown");
+            dlqEntry.put("payload", payloadJson != null
+                    ? payloadCipher.encrypt(payloadJson, dlqAad(jobId)) : "");
+            dlqEntry.put("original_id", message.getId().getValue());
+            dlqEntry.put("delivery_count", String.valueOf(deliveryCount));
+            dlqEntry.put("error", error);
+            if (trainingJson != null) {
+                dlqEntry.put("training", trainingJson);
+            }
             MapRecord<String, String, String> dlqRecord =
                     StreamRecords.mapBacked(dlqEntry).withStreamKey(dlqStream);
             streamsTemplate.opsForStream().add(dlqRecord);
