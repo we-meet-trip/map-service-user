@@ -5,6 +5,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -155,5 +156,33 @@ class ScheduleControllerTest {
                 .andExpect(status().isUnauthorized());
 
         verify(service, never()).dismissWeatherAlert(any(), any());
+    }
+
+    @Test
+    @DisplayName("일정 수정 — 토큰이 없으면 고치지 않고 401")
+    void revise_withoutOwner_returns401() throws Exception {
+        SecurityContextHolder.clearContext();
+
+        mockMvc.perform(put("/api/v1/schedules/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"job_id":"22222222-2222-2222-2222-222222222222"}
+                                """))
+                .andExpect(status().isUnauthorized());
+
+        verify(service, never()).revise(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("일정 수정 — 작업 식별자 형식이 어긋나면 400")
+    void revise_withMalformedJobId_returns400() throws Exception {
+        mockMvc.perform(put("/api/v1/schedules/7")
+                        .with(owner(42L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"job_id\":\"not-a-uuid\"}"))
+                .andExpect(status().isBadRequest());
+
+        verify(service, never()).revise(any(), any(), any());
+        SecurityContextHolder.clearContext();
     }
 }

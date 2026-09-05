@@ -207,6 +207,26 @@ class RecommendServiceTest {
     }
 
     @Test
+    void researchFallsBackToStoredPayloadForExclude() {
+        // Redis draft 는 만료·일정 저장으로 사라진다. 그때도 PG 에 남은 완료
+        // 결과에서 제외 목록을 세워야 "다른 장소"라는 약속이 지켜진다.
+        when(draftStore.find("job-z")).thenReturn(Optional.empty());
+        when(jobStore.findFinishedPayload("job-z")).thenReturn(Optional.of("""
+                {"job_id":"job-z","status":"done","places":[
+                  {"place_id":0,"content_id":"kakao:9"},
+                  {"place_id":1,"content_id":"durunubi:3"}
+                ]}"""));
+
+        service.research("job-z", request(null, null));
+
+        ArgumentCaptor<RecommendRequest> captor =
+                ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(agentClient).requestRecommend(captor.capture());
+        assertThat(captor.getValue().exclude())
+                .containsExactly("kakao:9", "durunubi:3");
+    }
+
+    @Test
     void researchUsesScheduleBucketWhenScheduleIdPresent() {
         // scheduleId 가 있으면 "sched:{id}" 버킷으로 카운트한다.
         service.research("job-1", request(null, null));

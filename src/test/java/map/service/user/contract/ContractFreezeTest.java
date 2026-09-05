@@ -187,7 +187,8 @@ class ContractFreezeTest {
                 "reason", "String",
                 "bullets", "List<String>",
                 "end_time", "String",
-                "stay_minutes", "Integer"));
+                "stay_minutes", "Integer",
+                "content_id", "String"));
     }
 
     @Test

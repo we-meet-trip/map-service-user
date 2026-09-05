@@ -138,7 +138,7 @@ class ScheduleQueryServiceTest {
                 durationMinutes == null ? null
                         : new map.service.user.trip.dto.TransportToNext(
                                 "walk", "이동: 도보", durationMinutes, 1.0, null),
-                "kakao", "관광", true, order, null, null, null, null, null);
+                "kakao", "관광", true, order, null, null, null, null, null, null);
     }
 
     // ── 목록 ──────────────────────────────────────────────
