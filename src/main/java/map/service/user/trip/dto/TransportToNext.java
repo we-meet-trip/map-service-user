@@ -32,7 +32,8 @@ public record TransportToNext(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         List<List<Double>> path,
         String source,
-        @JsonProperty("route_profile") String routeProfile
+        @JsonProperty("route_profile") String routeProfile,
+        @JsonProperty("data_version") String dataVersion
 ) {
     public TransportToNext {
         source = "OSRM".equals(source) ? "OSRM"
@@ -42,6 +43,6 @@ public record TransportToNext(
     /** Legacy constructors describe an estimate; a path alone is not provenance. */
     public TransportToNext(String type, String label, int durationMinutes,
             double distanceKm, List<List<Double>> path) {
-        this(type, label, durationMinutes, distanceKm, path, "ESTIMATED", null);
+        this(type, label, durationMinutes, distanceKm, path, "ESTIMATED", null, null);
     }
 }

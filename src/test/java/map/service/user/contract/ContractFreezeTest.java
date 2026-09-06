@@ -201,7 +201,8 @@ class ContractFreezeTest {
                 "distance_km", "double",
                 "path", "List<List<Double>>",
                 "source", "String",
-                "route_profile", "String"));
+                "route_profile", "String",
+                "data_version", "String"));
     }
 
     @Test

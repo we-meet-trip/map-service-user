@@ -111,7 +111,8 @@ class TripStopsAssemblerMeasuredTest {
         var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         var road = TripStopsAssembler.withMeasured(base(), new Route(
                 List.of(List.of(37.5, 127.0), List.of(37.51, 127.01)),
-                1400, 900, "OSRM", "foot"));
+                1400, 900, "OSRM", "foot", "2026-09-05T20:22:06Z"));
+        assertThat(road.dataVersion()).isEqualTo("2026-09-05T20:22:06Z");
         assertThat(mapper.readValue(mapper.writeValueAsBytes(road), TransportToNext.class))
                 .isEqualTo(road);
         var legacy = mapper.readValue("{\"type\":\"walk\",\"duration_minutes\":9,\"distance_km\":0.9}",

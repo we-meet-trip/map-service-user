@@ -352,7 +352,7 @@ public class TripStopsAssembler {
         double distanceKm = Math.round(route.distanceM() / 10.0) / 100.0;
         return new TransportToNext(
                 base.type(), base.label(), durationMinutes, distanceKm, route.path(),
-                "OSRM", route.routeProfile());
+                "OSRM", route.routeProfile(), route.dataVersion());
     }
 
     /** Trust explicit provider provenance and validated geometry, never just a non-null body. */
