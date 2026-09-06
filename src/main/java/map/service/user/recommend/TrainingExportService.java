@@ -27,6 +27,7 @@ import map.service.user.schedule.ScheduleArrivalEntity;
 import map.service.user.schedule.ScheduleArrivalRepository;
 import map.service.user.schedule.ScheduleEntity;
 import map.service.user.schedule.ScheduleExportRepository;
+import map.service.user.schedule.ScheduleService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +79,8 @@ public class TrainingExportService {
     private final UserRepository userRepository;
     private final RecommendCacheKey cacheKeyBuilder;
     private final ObjectMapper objectMapper;
+    private final ScheduleService scheduleService;
+    private final RecommendJobStore jobStore;
     private final int batchSize;
 
     public TrainingExportService(
@@ -89,6 +92,8 @@ public class TrainingExportService {
             UserRepository userRepository,
             RecommendCacheKey cacheKeyBuilder,
             ObjectMapper objectMapper,
+            ScheduleService scheduleService,
+            RecommendJobStore jobStore,
             @Value("${training.export.batch-size:500}") int batchSize) {
         this.scheduleExportRepository = scheduleExportRepository;
         this.arrivalRepository = arrivalRepository;
@@ -98,6 +103,8 @@ public class TrainingExportService {
         this.userRepository = userRepository;
         this.cacheKeyBuilder = cacheKeyBuilder;
         this.objectMapper = objectMapper;
+        this.scheduleService = scheduleService;
+        this.jobStore = jobStore;
         this.batchSize = batchSize > 0 ? batchSize : 500;
     }
 
@@ -432,7 +439,7 @@ public class TrainingExportService {
      */
     private List<String> savedContentIds(ScheduleEntity schedule) {
         List<String> out = new ArrayList<>();
-        JsonNode payload = schedule.getPayload();
+        JsonNode payload = readSchedulePayload(schedule);
         if (payload == null) {
             return out;
         }
@@ -452,10 +459,11 @@ public class TrainingExportService {
      * 자리를 집으면 된다. 일차가 어긋나면 옛 일정에 새 기록이 붙은 것이므로 버린다.
      */
     private String contentIdAt(ScheduleEntity schedule, Integer day, Integer stopOrder) {
-        if (day == null || stopOrder == null || schedule.getPayload() == null) {
+        if (day == null || stopOrder == null) {
             return null;
         }
-        JsonNode payload = schedule.getPayload();
+        JsonNode payload = readSchedulePayload(schedule);
+        if (payload == null) return null;
         JsonNode order = payload.path("visit_order");
         JsonNode places = payload.path("places");
         if (!order.isArray() || !places.isArray() || stopOrder < 1 || stopOrder > order.size()) {
@@ -482,7 +490,8 @@ public class TrainingExportService {
         return jobRepository.findById(session.savedJob().getParentJobId())
                 .map(parent -> {
                     List<String> out = new ArrayList<>();
-                    JsonNode result = parent.getResultPayload();
+                    JsonNode result = readStoredPayload(parent.getResultPayload(),
+                            () -> jobStore.readPayload(parent));
                     if (result != null) {
                         for (JsonNode p : result.path("places")) {
                             String cid = text(p, "content_id");
@@ -498,6 +507,28 @@ public class TrainingExportService {
 
     private String rejectedSource(Session session) {
         return rejectedContentIds(session).isEmpty() ? "unavailable" : "parent_result_payload";
+    }
+
+    private JsonNode readSchedulePayload(ScheduleEntity schedule) {
+        return readStoredPayload(schedule.getPayload(), () -> scheduleService.readPayload(schedule));
+    }
+
+    /** Reuse the serving codecs and fail the batch instead of silently losing labels.
+     * Partial envelopes are corruption, not legacy plaintext. Do not propagate a
+     * codec exception's payload, key identifier or cause into the export runner log.
+     */
+    private JsonNode readStoredPayload(JsonNode stored, java.util.function.Supplier<JsonNode> reader) {
+        if (stored == null) return null;
+        boolean envelopeMarker = stored.has("v") || stored.has("kid") || stored.has("iv") || stored.has("ct");
+        if (envelopeMarker && !(stored.hasNonNull("v") && stored.hasNonNull("kid")
+                && stored.hasNonNull("iv") && stored.hasNonNull("ct"))) {
+            throw new IllegalStateException("training export stored payload unreadable");
+        }
+        try {
+            return reader.get();
+        } catch (RuntimeException error) {
+            throw new IllegalStateException("training export stored payload unreadable");
+        }
     }
 
     /** 후보 랭킹 학습에 못 쓰는 세션인지, 쓴다면 왜 못 쓰는지. */

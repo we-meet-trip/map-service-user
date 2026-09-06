@@ -513,7 +513,14 @@ public class RecommendJobStore {
         RecommendJobEntity entity = repository.findById(uuid).orElse(null);
         if (entity == null || !TERMINAL_STATUS.contains(entity.getStatus()) || entity.getResultPayload() == null)
             return Optional.empty();
-        return Optional.of(payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid)).toString());
+        return Optional.of(readPayload(entity).toString());
+    }
+
+    /** Decode a stored result using its original job AAD, without changing the row.
+     * Callers must establish request ownership or a separately authorized batch context.
+     */
+    public JsonNode readPayload(RecommendJobEntity entity) {
+        return payloadCipher.decryptNode(entity.getResultPayload(), aadFor(entity.getJobId()));
     }
 
     /**
