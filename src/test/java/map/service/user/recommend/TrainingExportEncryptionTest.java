@@ -106,13 +106,9 @@ class TrainingExportEncryptionTest {
             when(arrivals.findByScheduleIdIn(any())).thenReturn(List.of(new ScheduleArrivalEntity(
                     SCHEDULE, 1, 1, OffsetDateTime.parse("2026-09-06T10:00:00Z"), "ok")));
             when(impressions.findByScheduleIdIn(any())).thenReturn(List.of());
-            // Only readPayload is invoked. These real codecs share the serving AAD contract.
-            ScheduleService scheduleReader = new ScheduleService(null, null, null, null, null,
-                    mapper, null, cipher, null, null);
-            RecommendJobStore jobReader = new RecommendJobStore(jobs, training, null, mapper,
-                    cipher, null, null, users);
+            // Reuse the serving AAD functions without starting serving services.
             service = new TrainingExportService(schedules, arrivals, impressions, jobs, training,
-                    users, new RecommendCacheKey(50000, 60), mapper, scheduleReader, jobReader, 500);
+                    users, new RecommendCacheKey(50000, 60), mapper, cipher, 500);
         }
 
         private TrainingExportService.Result export() {

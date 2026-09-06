@@ -97,7 +97,7 @@ public class ScheduleService {
      * 다른 사람의 행에 옮겨 넣어도 열리지 않게 한다. 소유자는 행이 사는 동안
      * 바뀌지 않으므로 묶는 값으로 안전하다.
      */
-    private static String payloadAad(Long userId) {
+    public static String payloadAad(Long userId) {
         return PayloadCipher.aad("schedules", "payload",
                 userId == null ? null : userId.toString());
     }

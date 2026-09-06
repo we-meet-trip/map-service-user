@@ -33,6 +33,17 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan("map.service.user.global.config")
 public class ServiceUserApplication {
 
+    @org.springframework.context.annotation.Bean
+    static org.springframework.beans.factory.config.BeanFactoryPostProcessor servingExportGuard(
+            org.springframework.core.env.Environment environment) {
+        return beanFactory -> {
+            if (environment.getProperty("training.export.enabled", Boolean.class, false)) {
+                throw new IllegalStateException("training export is forbidden in serving; use the dedicated exporter entrypoint");
+            }
+        };
+    }
+
+
     /**
      * Spring Boot 애플리케이션을 기동한다.
      *

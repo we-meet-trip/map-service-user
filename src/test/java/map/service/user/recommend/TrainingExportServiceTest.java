@@ -84,10 +84,7 @@ class TrainingExportServiceTest {
                 jobRepository,
                 trainingRepository, userRepository,
                 new RecommendCacheKey(50000, 60), objectMapper,
-                new ScheduleService(null, null, null, null, null, objectMapper, null,
-                        TestPayloadCiphers.enabled(), null, null),
-                new RecommendJobStore(null, null, null, objectMapper, TestPayloadCiphers.enabled(),
-                        null, null, null), 500);
+                TestPayloadCiphers.enabled(), 500);
     }
 
     // ── 픽스처 ────────────────────────────────────────────────────

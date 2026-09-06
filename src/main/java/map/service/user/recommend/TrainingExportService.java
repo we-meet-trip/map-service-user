@@ -28,6 +28,9 @@ import map.service.user.schedule.ScheduleArrivalRepository;
 import map.service.user.schedule.ScheduleEntity;
 import map.service.user.schedule.ScheduleExportRepository;
 import map.service.user.schedule.ScheduleService;
+import map.service.user.global.crypto.PayloadCipher;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -79,8 +82,9 @@ public class TrainingExportService {
     private final UserRepository userRepository;
     private final RecommendCacheKey cacheKeyBuilder;
     private final ObjectMapper objectMapper;
-    private final ScheduleService scheduleService;
-    private final RecommendJobStore jobStore;
+    private final PayloadCipher payloadCipher;
+    @Value("${training.export.max-sessions:10000}")
+    private int maxSessions = 10000;
     private final int batchSize;
 
     public TrainingExportService(
@@ -92,8 +96,7 @@ public class TrainingExportService {
             UserRepository userRepository,
             RecommendCacheKey cacheKeyBuilder,
             ObjectMapper objectMapper,
-            ScheduleService scheduleService,
-            RecommendJobStore jobStore,
+            PayloadCipher payloadCipher,
             @Value("${training.export.batch-size:500}") int batchSize) {
         this.scheduleExportRepository = scheduleExportRepository;
         this.arrivalRepository = arrivalRepository;
@@ -103,8 +106,7 @@ public class TrainingExportService {
         this.userRepository = userRepository;
         this.cacheKeyBuilder = cacheKeyBuilder;
         this.objectMapper = objectMapper;
-        this.scheduleService = scheduleService;
-        this.jobStore = jobStore;
+        this.payloadCipher = payloadCipher;
         this.batchSize = batchSize > 0 ? batchSize : 500;
     }
 
@@ -132,6 +134,7 @@ public class TrainingExportService {
      * @param testEmailDomains    시험용으로 볼 메일 도메인
      * @param salt                식별자를 지문으로 바꿀 때 섞을 소금
      */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, timeout = 300)
     public Result export(boolean excludeTestAccounts,
                          Collection<String> testEmailDomains,
                          String salt) {
@@ -184,6 +187,9 @@ public class TrainingExportService {
             List<ScheduleEntity> page = scheduleExportRepository.findPage(after, batchSize);
             if (page.isEmpty()) {
                 return out;
+            }
+            if (maxSessions < 1 || out.size() + page.size() > maxSessions) {
+                throw new IllegalStateException("training export session budget exceeded");
             }
             out.addAll(page);
             after = page.get(page.size() - 1).getScheduleId();
@@ -491,7 +497,7 @@ public class TrainingExportService {
                 .map(parent -> {
                     List<String> out = new ArrayList<>();
                     JsonNode result = readStoredPayload(parent.getResultPayload(),
-                            () -> jobStore.readPayload(parent));
+                            () -> payloadCipher.decryptNode(parent.getResultPayload(), RecommendJobStore.aadFor(parent.getJobId())));
                     if (result != null) {
                         for (JsonNode p : result.path("places")) {
                             String cid = text(p, "content_id");
@@ -510,7 +516,7 @@ public class TrainingExportService {
     }
 
     private JsonNode readSchedulePayload(ScheduleEntity schedule) {
-        return readStoredPayload(schedule.getPayload(), () -> scheduleService.readPayload(schedule));
+        return readStoredPayload(schedule.getPayload(), () -> payloadCipher.decryptNode(schedule.getPayload(), ScheduleService.payloadAad(schedule.getUserId())));
     }
 
     /** Reuse the serving codecs and fail the batch instead of silently losing labels.

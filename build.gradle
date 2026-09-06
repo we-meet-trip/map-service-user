@@ -117,3 +117,13 @@ tasks.named('test') {
 jar {
     enabled = false
 }
+
+// Serving stays the default artifact entrypoint. Dedicated export has no component scan.
+springBoot { mainClass = 'map.service.user.ServiceUserApplication' }
+tasks.register('trainingExportJar', org.springframework.boot.gradle.tasks.bundling.BootJar) {
+    group = 'build'
+    archiveClassifier = 'training-export'
+    targetJavaVersion = JavaVersion.VERSION_17
+    mainClass = 'map.export.TrainingExportApplication'
+    classpath = sourceSets.main.runtimeClasspath
+}
