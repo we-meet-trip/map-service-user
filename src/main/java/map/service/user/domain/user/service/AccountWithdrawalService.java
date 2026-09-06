@@ -80,6 +80,14 @@ public class AccountWithdrawalService {
                 + "WHERE system_payload->>'user_id'=?", userId.toString());
         jdbc.update("UPDATE user_service.chat_rooms SET schedule_id=NULL, owner_id=NULL, title='종료된 대화', "
                 + "read_only=TRUE, invite_revoked=TRUE, invite_token_hash=NULL WHERE owner_id=?", userId);
+        // Retain only non-identifying moderation outcome/audit metadata. Erase freeform
+        // descriptions even when another reporter may have named the withdrawn author.
+        jdbc.update("UPDATE user_service.moderation_reports SET description=NULL, request_fingerprint=NULL, "
+                + "reporter_id=CASE WHEN reporter_id=? THEN NULL ELSE reporter_id END, reported_user_id=NULL, "
+                + "message_id=NULL, room_id=NULL, message_seq=NULL, schedule_id=NULL, recommend_job_id=NULL "
+                + "WHERE reporter_id=? OR reported_user_id=?", userId, userId, userId);
+        jdbc.update("DELETE FROM user_service.user_blocks WHERE blocker_id=? OR blocked_user_id=?", userId, userId);
+        jdbc.update("DELETE FROM user_service.chat_restrictions WHERE user_id=?", userId);
         java.util.List<String> jobIds = jobs.eraseOwnedJobs(userId);
         // Erase authored personal content, while other participants keep their own conversation.
         jdbc.update("UPDATE user_service.chat_messages SET sender_id=NULL, content=NULL, system_payload=NULL WHERE sender_id=?", userId);

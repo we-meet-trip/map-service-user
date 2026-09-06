@@ -49,6 +49,12 @@ public enum ErrorCode {
     CHAT_INVITE_REVOKED(HttpStatus.GONE, "CHAT_009", "만료되었거나 폐기된 초대 링크입니다."),
     CHAT_KICKED(HttpStatus.FORBIDDEN, "CHAT_010", "내보내진 채팅방에는 다시 참가할 수 없습니다."),
     CHAT_MESSAGE_INVALID(HttpStatus.BAD_REQUEST, "CHAT_011", "메시지 내용이 비어 있거나 허용 길이를 초과했습니다."),
+    CHAT_CONTENT_REJECTED(HttpStatus.BAD_REQUEST, "CHAT_012", "운영 정책에 위반되는 메시지는 보낼 수 없습니다."),
+    CHAT_RESTRICTED(HttpStatus.FORBIDDEN, "CHAT_013", "운영 정책에 따라 채팅 전송이 일시 제한되었습니다."),
+    MODERATION_INVALID(HttpStatus.BAD_REQUEST, "MODERATION_001", "신고 또는 차단 요청을 확인해주세요."),
+    MODERATION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODERATION_002", "대상을 찾을 수 없거나 접근할 수 없습니다."),
+    MODERATION_CONFLICT(HttpStatus.CONFLICT, "MODERATION_003", "요청 식별자가 이미 사용되었거나 처리 상태가 변경되었습니다."),
+    MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MODERATION_004", "신고를 안전하게 보관할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다.");

@@ -58,7 +58,7 @@ public class InternalAdminGuardFilter extends OncePerRequestFilter {
 
         String remote = request.getRemoteAddr();
         if (!isTrusted(remote)) {
-            deny(response, "internal endpoint denied for " + remote);
+            deny(response, "internal endpoint denied for untrusted network");
             return;
         }
         if (!tokenMatches(request.getHeader(TOKEN_HEADER))) {

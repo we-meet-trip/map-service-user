@@ -63,6 +63,12 @@ public class ChatMessage {
     @Column(name = "content")
     private String content;
 
+    @Column(name = "moderation_hidden", nullable = false)
+    private boolean moderationHidden;
+
+    public boolean isModerationHidden() { return moderationHidden; }
+    public void hideForModeration() { moderationHidden=true; }
+
     @Column(name = "system_payload", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode systemPayload;

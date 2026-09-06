@@ -43,11 +43,12 @@ class ChatStompAuthInterceptorTest {
     @Mock private JwtService jwtService;
     @Mock private ChatRoomAccessService access;
 
+    private final map.service.user.moderation.ChatModerationGuard moderation = org.mockito.Mockito.mock(map.service.user.moderation.ChatModerationGuard.class);
     private StompAuthChannelInterceptor interceptor() {
         Claims claims = org.mockito.Mockito.mock(Claims.class);
         when(jwtService.validateAccessToken("session-token")).thenReturn(claims);
         when(jwtService.extractUserId(claims)).thenReturn(7L);
-        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access);
+        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access, moderation);
         interceptor.preSend(frame(StompCommand.CONNECT, null, "Bearer session-token", null), null);
         return interceptor;
     }
@@ -208,6 +209,7 @@ class ChatStompAuthInterceptorTest {
         headers.setSessionId("test-session");
         headers.setDestination("/topic/rooms/10");
         Message<?> outgoing = MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders());
+        when(moderation.mayDeliver(org.mockito.ArgumentMatchers.eq(7L),org.mockito.ArgumentMatchers.eq(10L),org.mockito.ArgumentMatchers.any())).thenReturn(true);
         assertThat(interceptor.authorizeOutbound(outgoing)).isNotNull();
         when(access.requireActiveParticipant(10L, 7L))
                 .thenThrow(new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT));

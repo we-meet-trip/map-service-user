@@ -41,13 +41,27 @@ public class HubClientConfig {
             @Value("${hub.timeout-seconds:5}") long timeoutSeconds,
             @Value("${hub.internal-token:}") String internalToken
     ) {
+        return configured(builder, baseUrl, timeoutSeconds, internalToken);
+    }
+
+    /** One 20-leg directions batch has one request budget; other Hub calls keep 5s. */
+    @Bean(name = "hubDirectionsRestClient")
+    public RestClient hubDirectionsRestClient(RestClient.Builder builder,
+            @Value("${hub.base-url:http://hub:8000}") String baseUrl,
+            @Value("${hub.directions-timeout-seconds:20}") long timeoutSeconds,
+            @Value("${hub.internal-token:}") String internalToken) {
+        return configured(builder, baseUrl, timeoutSeconds, internalToken);
+    }
+
+    private RestClient configured(RestClient.Builder builder, String baseUrl, long timeoutSeconds, String internalToken) {
+        if (timeoutSeconds < 1 || timeoutSeconds > 120) throw new IllegalArgumentException("Invalid Hub request timeout");
         HttpClient httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
-        RestClient.Builder configured = builder
+        RestClient.Builder configured = builder.clone()
                 .baseUrl(baseUrl)
                 .requestFactory(factory);
         // 내부 서비스 인증: 토큰이 설정된 배포에서만 X-Internal-Token 을 모든 hub

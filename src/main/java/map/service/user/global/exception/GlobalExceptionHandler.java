@@ -410,7 +410,7 @@ public class GlobalExceptionHandler {
     /** 위에서 처리되지 않은 모든 예외를 500 으로 변환한다. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception e) {
-        log.error("Unexpected error", e);
+        log.error("Unexpected error cause={}", e.getClass().getSimpleName());
         return ResponseEntity
                 .status(500)
                 .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR));

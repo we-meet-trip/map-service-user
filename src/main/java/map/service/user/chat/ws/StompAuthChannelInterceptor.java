@@ -42,11 +42,14 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
     private final JwtService jwtService;
     private final ChatRoomAccessService access;
+    private final map.service.user.moderation.ChatModerationGuard moderation;
     private final java.util.Map<String, String> sessionTokens = new java.util.concurrent.ConcurrentHashMap<>();
 
-    public StompAuthChannelInterceptor(JwtService jwtService, ChatRoomAccessService access) {
+    public StompAuthChannelInterceptor(JwtService jwtService, ChatRoomAccessService access,
+            map.service.user.moderation.ChatModerationGuard moderation) {
         this.jwtService = jwtService;
         this.access = access;
+        this.moderation = moderation;
     }
 
     @Override
@@ -144,6 +147,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
                 Long room = parseRoomId(destination);
                 if (room == null) return null;
                 access.requireActiveParticipant(room, uid);
+                if (!moderation.mayDeliver(uid, room, message.getPayload())) return null;
             }
             return message;
         } catch (RuntimeException denied) {

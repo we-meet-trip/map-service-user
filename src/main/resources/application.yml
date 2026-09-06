@@ -113,6 +113,7 @@ agent:
 hub:
   base-url: ${HUB_BASE_URL:http://hub:8000}
   timeout-seconds: ${HUB_TIMEOUT_SECONDS:5}
+  directions-timeout-seconds: ${HUB_DIRECTIONS_TIMEOUT_SECONDS:20}
   internal-token: ${INTERNAL_SERVICE_TOKEN:}
 
 # ---- internal.admin : /internal/admin/** 위임 가드 (경계 B9) ----
