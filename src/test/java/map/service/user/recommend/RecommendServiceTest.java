@@ -86,7 +86,7 @@ class RecommendServiceTest {
         service = new RecommendService(
                 agentClient, draftStore, objectMapper, researchLimitService, jobStore,
                 reuseCacheStore, cacheKeyBuilder, profileThemeProvider,
-                immediateExecutor, 3L);
+                immediateExecutor, 3L, mock(map.service.user.schedule.ScheduleRepository.class));
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
         // 기본은 "이 요청이 만드는 쪽". 같은 조건이 겹치는 상황은 개별
@@ -184,7 +184,7 @@ class RecommendServiceTest {
         // null/부재/공백/중복 content_id 는 제외, 순서 보존
         assertThat(sent.exclude())
                 .containsExactly("kakao:1", "durunubi:7");
-        verify(draftStore).delete("job-1");
+        verify(draftStore, never()).delete("job-1");
     }
 
     @Test
@@ -278,14 +278,19 @@ class RecommendServiceTest {
         String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
                 + "\"visit_order\":[0,1],\"legs\":[]}";
         when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
-        when(jobStore.ownerOf("job-1")).thenReturn(null);
+        when(jobStore.persistOwnedEdit(eq("job-1"), any(), any(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    java.util.function.UnaryOperator<String> merge = invocation.getArgument(4);
+                    String after = merge.apply(draft);
+                    return new RecommendJobStore.EditOutcome(after, after);
+                });
 
         // 장소를 하나로 줄이면서 순서를 함께 보내지 않았다.
         EditRequest edit = new EditRequest(
                 List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
                         null, null, null, true, null, null, null, null, null, null)), null, null);
 
-        assertThatThrownBy(() -> service.applyEdit("job-1", edit))
+        assertThatThrownBy(() -> service.applyEdit("job-1", edit, 7L, null))
                 .isInstanceOf(CustomException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RECOMMEND_EDIT_INCONSISTENT);
         verify(draftStore, never()).save(anyString(), anyString());
@@ -298,13 +303,18 @@ class RecommendServiceTest {
                 + "{\"place_id\":2},{\"place_id\":3}],"
                 + "\"visit_order\":[0,1,2,3],\"legs\":[]}";
         when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
-        when(jobStore.ownerOf("job-1")).thenReturn(null);
+        when(jobStore.persistOwnedEdit(eq("job-1"), any(), any(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    java.util.function.UnaryOperator<String> merge = invocation.getArgument(4);
+                    String after = merge.apply(draft);
+                    return new RecommendJobStore.EditOutcome(after, after);
+                });
 
         // 가운데 둘을 빼고 0 과 3 만 남겼다. 번호가 이어지지 않지만 맞는 것이다.
         EditRequest edit = new EditRequest(
                 List.of(place(0), place(3)), List.of(0, 3), List.of());
 
-        assertThat(service.applyEdit("job-1", edit)).isPresent();
+        assertThat(service.applyEdit("job-1", edit, 7L, null)).isPresent();
     }
 
     @Test
@@ -312,31 +322,36 @@ class RecommendServiceTest {
         String draft = "{\"places\":[{\"name\":\"가\"},{\"name\":\"나\"}],"
                 + "\"visit_order\":[0,1],\"legs\":[]}";
         when(draftStore.find("job-1")).thenReturn(Optional.of(draft));
-        when(jobStore.ownerOf("job-1")).thenReturn(null);
+        when(jobStore.persistOwnedEdit(eq("job-1"), any(), any(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    java.util.function.UnaryOperator<String> merge = invocation.getArgument(4);
+                    String after = merge.apply(draft);
+                    return new RecommendJobStore.EditOutcome(after, after);
+                });
 
         EditRequest edit = new EditRequest(
                 List.of(new Place(0, 1, "가", "주소", 37.5, 127.0, "10:00",
                         null, null, null, true, null, null, null, null, null, null)),
                 List.of(0), List.of());
 
-        assertThat(service.applyEdit("job-1", edit)).isPresent();
+        assertThat(service.applyEdit("job-1", edit, 7L, null)).isPresent();
         verify(draftStore).save(eq("job-1"), anyString());
     }
 
     // ---- draft 조회 (Redis → PG 폴백) ----
 
     @Test
-    void findDraftRedisHitReturnsWithoutPgFallback() {
+    void findDraftRedisHitAfterPgMiss() {
         when(draftStore.find("job-1")).thenReturn(Optional.of("{\"a\":1}"));
 
         Optional<String> result = service.findDraft("job-1");
 
         assertThat(result).contains("{\"a\":1}");
-        verify(jobStore, never()).findFinishedPayload(anyString());
+        verify(jobStore).findFinishedPayload("job-1");
     }
 
     @Test
-    void findDraftRedisMissPgHitReturnsPayloadAndRewarms() {
+    void findDraftPgHitDoesNotDependOnRedis() {
         when(draftStore.find("job-1")).thenReturn(Optional.empty());
         when(jobStore.findFinishedPayload("job-1"))
                 .thenReturn(Optional.of("{\"status\":\"done\"}"));
@@ -345,7 +360,8 @@ class RecommendServiceTest {
 
         assertThat(result).contains("{\"status\":\"done\"}");
         // Redis 재적재(re-warm) 확인.
-        verify(draftStore).save("job-1", "{\"status\":\"done\"}");
+        verify(draftStore, never()).find(anyString());
+        verify(draftStore, never()).save(anyString(), anyString());
     }
 
     @Test
@@ -406,7 +422,7 @@ class RecommendServiceTest {
         verify(jobStore).insertInProgress(result.jobId(), "sched-9",
                 RecommendJobStore.JobOrigin.cacheHit(), "서울특별시", "동작구");
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
-        verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
+        verify(jobStore).recordCompletion(eq(result.jobId()), eq("done"), finished.capture(), org.mockito.ArgumentMatchers.isNull());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
     }
 
@@ -428,7 +444,7 @@ class RecommendServiceTest {
                 RecommendJobStore.JobOrigin.cacheHit(origin), "서울특별시", "동작구");
         // 사본이 받은 본문에는 자기 식별자가 들어가야 한다(남의 잡에 작용 방지).
         ArgumentCaptor<String> finished = ArgumentCaptor.forClass(String.class);
-        verify(jobStore).markFinished(eq(result.jobId()), eq("done"), finished.capture());
+        verify(jobStore).recordCompletion(eq(result.jobId()), eq("done"), finished.capture(), org.mockito.ArgumentMatchers.isNull());
         assertThat(readJobId(finished.getValue())).isEqualTo(result.jobId());
     }
 
@@ -745,7 +761,7 @@ class RecommendServiceTest {
         verify(agentClient).requestRecommend(captor.capture());
         assertThat(captor.getValue().stage()).isEqualTo("init");
         assertThat(captor.getValue().exclude()).isEmpty();
-        verify(jobStore).insertInProgress("job-2", "sched-1", "서울특별시", "강남구");
+        verify(jobStore).insertInProgress(eq("job-2"), eq("sched-1"), any(RecommendJobStore.JobOrigin.class), eq("서울특별시"), eq("강남구"));
     }
 
     @Test

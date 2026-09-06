@@ -52,7 +52,10 @@ class JwtServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-        jwtService = new JwtService(keyPair, props, redisTemplate);
+        var users = org.mockito.Mockito.mock(map.service.user.domain.user.repository.UserRepository.class);
+        org.mockito.Mockito.when(users.existsById(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        jwtService = new JwtService(keyPair, props, redisTemplate, users,
+                org.mockito.Mockito.mock(map.service.user.domain.user.repository.RefreshTokenRepository.class));
 
         testUser = User.builder()
                 .email("test@example.com")

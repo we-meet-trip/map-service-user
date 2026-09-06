@@ -64,7 +64,7 @@ class TripReplanServiceTest {
 
         when(scheduleService.replanSpec(5L, 42L)).thenReturn(new ScheduleReplanSpec(
                 5L, "서울특별시", "중구", D1, D1, "bicycle", 9, 18));
-        when(recommendService.createFreshRecommendation(any()))
+        when(recommendService.createFreshRecommendation(any(), any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
         when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"done\",\"places\":[]}"));
@@ -83,7 +83,7 @@ class TripReplanServiceTest {
         assertThat(out.tripId()).isEqualTo(JOB_ID);
         ArgumentCaptor<RecommendRequest> captor =
                 ArgumentCaptor.forClass(RecommendRequest.class);
-        verify(recommendService).createFreshRecommendation(captor.capture());
+        verify(recommendService).createFreshRecommendation(captor.capture(), org.mockito.ArgumentMatchers.eq(42L));
         RecommendRequest sent = captor.getValue();
         assertThat(sent.province()).isEqualTo("서울특별시");
         assertThat(sent.city()).isEqualTo("중구");
@@ -122,6 +122,6 @@ class TripReplanServiceTest {
 
         assertThatThrownBy(() -> service.replan(9L, 42L))
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
-        verify(recommendService, never()).createFreshRecommendation(any());
+        verify(recommendService, never()).createFreshRecommendation(any(), any());
     }
 }

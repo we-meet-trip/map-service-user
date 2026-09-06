@@ -44,13 +44,19 @@ class ChatStompAuthInterceptorTest {
     @Mock private ChatRoomAccessService access;
 
     private StompAuthChannelInterceptor interceptor() {
-        return new StompAuthChannelInterceptor(jwtService, access);
+        Claims claims = org.mockito.Mockito.mock(Claims.class);
+        when(jwtService.validateAccessToken("session-token")).thenReturn(claims);
+        when(jwtService.extractUserId(claims)).thenReturn(7L);
+        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access);
+        interceptor.preSend(frame(StompCommand.CONNECT, null, "Bearer session-token", null), null);
+        return interceptor;
     }
 
     /** 주어진 command 로 가변(mutable) STOMP 메시지를 만든다(인터셉터가 헤더를 수정할 수 있게). */
     private Message<byte[]> frame(StompCommand command, String destination, String authHeader,
                                   StompPrincipal user) {
         StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
+        accessor.setSessionId("test-session");
         if (destination != null) {
             accessor.setDestination(destination);
         }
@@ -194,4 +200,24 @@ class ChatStompAuthInterceptorTest {
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CHAT_NOT_PARTICIPANT);
     }
+    @Test
+    void existingSubscriptionIsDeniedAfterLeaveOrRevocation() {
+        StompAuthChannelInterceptor interceptor = interceptor();
+        var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.create(
+                org.springframework.messaging.simp.SimpMessageType.MESSAGE);
+        headers.setSessionId("test-session");
+        headers.setDestination("/topic/rooms/10");
+        Message<?> outgoing = MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders());
+        assertThat(interceptor.authorizeOutbound(outgoing)).isNotNull();
+        when(access.requireActiveParticipant(10L, 7L))
+                .thenThrow(new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT));
+        assertThat(interceptor.authorizeOutbound(outgoing)).isNull();
+        when(jwtService.validateAccessToken("session-token"))
+                .thenThrow(new CustomException(ErrorCode.BLACKLISTED_TOKEN));
+        assertThat(interceptor.authorizeOutbound(outgoing)).isNull();
+        assertThatThrownBy(() -> interceptor.preSend(
+                frame(StompCommand.SEND, "/app/rooms/10/send", null, new StompPrincipal("7")), null))
+                .isInstanceOf(CustomException.class);
+    }
+
 }

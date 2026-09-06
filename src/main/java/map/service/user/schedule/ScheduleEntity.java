@@ -374,6 +374,22 @@ public class ScheduleEntity {
      * 처음 지운 시각을 지키는 이유: 기한이 지나면 정리하는 쪽이 이 시각을
      * 기준으로 삼는다. 다시 지울 때마다 시각을 덮으면 정리가 계속 미뤄진다.
      */
+    /** Keep only the hidden row needed by shared chat foreign keys; no deleted itinerary for learning. */
+    public void eraseItinerary() {
+        jobId = null;
+        title = null;
+        payload = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        province = null;
+        city = null;
+        transport = null;
+        activeStartHour = null;
+        activeEndHour = null;
+        startedAt = null;
+        weatherBaseline = null;
+        weatherAlert = null;
+        weatherCheckedAt = null;
+    }
+
     public void markDeleted(OffsetDateTime at) {
         if (deletedAt == null) {
             deletedAt = at;

@@ -55,6 +55,8 @@ public class ScheduleService {
 
     private static final Logger log = LoggerFactory.getLogger(ScheduleService.class);
 
+    @org.springframework.beans.factory.annotation.Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
     private final DraftStore draftStore;
     private final RecommendService recommendService;
     private final ScheduleRepository repository;
@@ -116,9 +118,7 @@ public class ScheduleService {
      * @Transactional 로 묶여 있어 저장 단계 실패 시 draft 삭제는 일어나지 않는다.
      *
      * request: ScheduleSaveRequest. jobId/title/dateStart/dateEnd.
-     * userId: 소유자 식별자. 컨트롤러의 @AuthenticationPrincipal 로 주입된 값으로,
-     *         토큰 부재/익명 시 null 이며 이때 user_id 컬럼은 null 로 저장된다
-     *         (auth.enforced=false + 토큰 부재 시 현행 동작 보존).
+     * userId: 인증된 소유자 식별자. 익명 또는 다른 사람의 작업은 저장하지 않는다.
      */
     @Transactional
     public Long persist(ScheduleSaveRequest request, Long userId) {
@@ -126,11 +126,16 @@ public class ScheduleService {
         // 그것을 직접 보고 있어, 만들어 둔 일정을 조금 뒤에 저장하려 하면
         // 화면에는 멀쩡히 보이는 것이 저장에서만 없다고 나왔다.
         // recommendService.findDraft 는 초안이 없으면 완료 기록으로 내려간다.
+        jobStore.requireOwned(request.jobId(), userId);
         String draftJson = recommendService.findDraft(request.jobId())
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {
             payload = objectMapper.readTree(draftJson);
+            stopsAssembler.assemble(objectMapper.treeToValue(payload, RecommendResponse.class),
+                    request.transport(),
+                    request.activeStartHour() == null ? TripStopsAssembler.DEFAULT_START_HOUR : request.activeStartHour(),
+                    request.activeEndHour() == null ? TripStopsAssembler.DEFAULT_END_HOUR : request.activeEndHour());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("draft json parse failed", e);
         }
@@ -166,7 +171,11 @@ public class ScheduleService {
         );
         applyWeatherBaseline(entity, request.jobId(), start, end);
         repository.save(entity);
-        draftStore.delete(request.jobId());
+        try {
+            draftStore.delete(request.jobId());
+        } catch (RuntimeException e) {
+            log.warn("saved schedule draft cache cleanup unavailable cause={}", e.getClass().getSimpleName());
+        }
         return entity.getScheduleId();
     }
 
@@ -279,7 +288,7 @@ public class ScheduleService {
                 List.of(),
                 null);
 
-        JobAccepted accepted = recommendService.createFreshRecommendation(request);
+        JobAccepted accepted = recommendService.createFreshRecommendation(request, userId);
         weatherService.acceptCurrentForecast(entity);
         return accepted;
     }
@@ -470,6 +479,8 @@ public class ScheduleService {
             // 생성 당시 안내만 남으면 무엇에 대한 경고인지 알 수 없다.
             warnings = draft.warnings();
             timelineStatus = draft.timelineStatus();
+        } catch (map.service.user.trip.TripTimelineException inconsistent) {
+            throw inconsistent;
         } catch (JsonProcessingException | TripGenerationException e) {
             log.warn("schedule detail has no renderable stops schedule_id={} reason={}",
                     entity.getScheduleId(), e.getMessage());
@@ -517,7 +528,8 @@ public class ScheduleService {
     public ScheduleDetailResponse revise(
             Long scheduleId, Long userId, ScheduleReviseRequest request) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
-        String draftJson = draftStore.find(request.jobId())
+        jobStore.requireOwned(request.jobId(), userId);
+        String draftJson = recommendService.findDraft(request.jobId())
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {
@@ -532,20 +544,23 @@ public class ScheduleService {
                 request.transport(),
                 request.activeStartHour(),
                 request.activeEndHour());
+        ScheduleDetailResponse detail = toDetail(entity);
         repository.save(entity);
-        draftStore.delete(request.jobId());
+        try {
+            draftStore.delete(request.jobId());
+        } catch (RuntimeException e) {
+            log.warn("saved schedule draft cache cleanup unavailable cause={}", e.getClass().getSimpleName());
+        }
         log.info("schedule revised schedule_id={} job_id={}",
                 scheduleId, request.jobId());
-        return toDetail(entity);
+        return detail;
     }
 
     /**
      * 일정 1건을 지운다. 소유자가 아니거나 없으면 404.
      *
-     * 행을 통째로 지우지 않고 지운 표시만 남긴다. "저장했다가 물렀다" 는
-     * 사용자가 남기는 가장 뚜렷한 부정 신호인데, 지워 버리면 그 판단이 아무
-     * 데도 남지 않기 때문이다. 표시된 행은 모든 조회에서 빠지므로 사용자
-     * 눈에는 지운 것과 같고, 기한이 지나면 정리하는 쪽이 진짜로 지운다.
+     * 조회에서 숨기고 학습 HOLD에서는 여행 본문을 제거한다. 채팅의 외래키에
+     * 필요한 최소 행은 남기며, 계정 탈퇴의 개인 데이터 삭제와는 별개다.
      *
      * 딸린 채팅방은 함께 없애지 않고 읽기 전용으로 돌린다. 예전에는 일정을
      * 지우면 방·참가자·주고받은 말까지 외래키를 타고 통째로 사라졌는데,
@@ -557,6 +572,7 @@ public class ScheduleService {
     public void delete(Long scheduleId, Long userId) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
         entity.markDeleted(OffsetDateTime.now());
+        if (!trainingCaptureEnabled) entity.eraseItinerary();
         repository.save(entity);
         chatRoomRepository.findByScheduleId(scheduleId).ifPresent(room -> {
             room.close();
@@ -573,6 +589,10 @@ public class ScheduleService {
      * 토큰이 없으면 조회 자체를 하지 않는다 — 소유자 없는 행은 누가 저장한
      * 것인지 구분할 수 없어서 열어 주는 순간 전원 공용이 된다.
      */
+    public JsonNode readPayload(ScheduleEntity entity) {
+        return payloadCipher.decryptNode(entity.getPayload(), payloadAad(entity.getUserId()));
+    }
+
     public ScheduleEntity requireOwned(Long scheduleId, Long userId) {
         return findOwned(scheduleId, userId);
     }
@@ -605,8 +625,9 @@ public class ScheduleService {
     public boolean recordArrival(Long scheduleId, Long userId,
                                  int day, int stopOrder, OffsetDateTime arrivedAt) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
+        if (!trainingCaptureEnabled) return false;
         String timelineStatus = null;
-        JsonNode payload = entity.getPayload();
+        JsonNode payload = readPayload(entity);
         if (payload != null && payload.hasNonNull("timeline_status")) {
             timelineStatus = payload.get("timeline_status").asText();
         }

@@ -14,6 +14,8 @@ import org.springframework.data.repository.query.Param;
  * 초안 수정 전후 기록을 넣고, 재시도로 같은 요청이 두 번 들어왔는지 확인한다.
  */
 public interface RecommendEditRepository extends JpaRepository<RecommendEditEntity, Long> {
+    void deleteByJobId(java.util.UUID jobId);
+    void deleteByActorUserId(Long actorUserId);
 
     /** 같은 요청이 이미 처리됐는지 본다(재시도 판정). */
     Optional<RecommendEditEntity> findByIdempotencyKey(String idempotencyKey);

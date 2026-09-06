@@ -47,7 +47,9 @@ class RecommendJobStoreConflictTest {
                 .thenReturn(existing);
 
         RecommendJobStore store = new RecommendJobStore(repository, trainingRepository,
-                editRepository, objectMapper, TestPayloadCiphers.enabled());
+                editRepository, objectMapper, TestPayloadCiphers.enabled(),
+                org.mockito.Mockito.mock(RecommendEditRequestRepository.class),
+                org.mockito.Mockito.mock(RecommendCancellationRepository.class), TestJobOwners.active());
         store.markFinished(jobId.toString(), "failed", "{\"status\":\"failed\"}");
 
         ArgumentCaptor<RecommendJobEntity> saved =
@@ -72,7 +74,9 @@ class RecommendJobStoreConflictTest {
                 .thenThrow(new DataIntegrityViolationException("duplicate key"));
 
         RecommendJobStore store = new RecommendJobStore(repository, trainingRepository,
-                editRepository, objectMapper, TestPayloadCiphers.enabled());
+                editRepository, objectMapper, TestPayloadCiphers.enabled(),
+                org.mockito.Mockito.mock(RecommendEditRequestRepository.class),
+                org.mockito.Mockito.mock(RecommendCancellationRepository.class), TestJobOwners.active());
         store.markFinished(jobId.toString(), "done", "{}");
 
         verify(repository, times(2)).save(any(RecommendJobEntity.class));
@@ -88,7 +92,9 @@ class RecommendJobStoreConflictTest {
         when(repository.existsById(jobId)).thenReturn(true);
 
         RecommendJobStore store = new RecommendJobStore(repository, trainingRepository,
-                editRepository, objectMapper, TestPayloadCiphers.enabled());
+                editRepository, objectMapper, TestPayloadCiphers.enabled(),
+                org.mockito.Mockito.mock(RecommendEditRequestRepository.class),
+                org.mockito.Mockito.mock(RecommendCancellationRepository.class), TestJobOwners.active());
         store.insertInProgress(jobId.toString(), "sched-2");
 
         verify(repository, times(0)).save(any(RecommendJobEntity.class));

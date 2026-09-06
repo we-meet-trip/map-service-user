@@ -45,7 +45,7 @@ class ChatSystemMessageServiceTest {
 
     @BeforeEach
     void setUp() {
-        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository);
+        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository, org.mockito.Mockito.mock(map.service.user.chat.repository.ChatMembershipIntervalRepository.class));
         systemMessageService = new ChatSystemMessageService(
                 messageRepository, access, Mockito.mock(ChatBroadcastRelay.class), new ObjectMapper());
         ChatRoom room = roomRepository.save(

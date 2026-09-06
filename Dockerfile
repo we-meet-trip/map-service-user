@@ -37,7 +37,10 @@ RUN gradle clean bootJar -x test --no-daemon
 #                 /actuator/health 응답에서 "status":"UP" 문자열을 확인한다.
 # - ENTRYPOINT  : java -jar 로 부트 애플리케이션 실행.
 FROM eclipse-temurin:17-jre AS runtime
-RUN groupadd -r app && useradd -r -g app -u 10001 app
+# The base image also ships Pebble, an unused Go service manager. This image
+# starts Java directly and needs no second supervisor or its vulnerable runtime.
+RUN rm -f /usr/bin/pebble \
+    && groupadd -r app && useradd -r -g app -u 10001 app
 WORKDIR /app
 COPY --from=builder /workspace/build/libs/*.jar /app/app.jar
 USER app

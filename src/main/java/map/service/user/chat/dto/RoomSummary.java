@@ -16,7 +16,7 @@ import java.time.OffsetDateTime;
  */
 public record RoomSummary(
         @JsonProperty("room_id") long roomId,
-        @JsonProperty("schedule_id") long scheduleId,
+        @JsonProperty("schedule_id") Long scheduleId,
         String title,
         @JsonProperty("read_only") boolean readOnly,
         @JsonProperty("unread_count") long unreadCount,

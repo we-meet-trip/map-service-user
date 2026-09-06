@@ -37,7 +37,9 @@ public interface ScheduleRepository extends JpaRepository<ScheduleEntity, Long> 
      * 채팅방도 같이 남는다. 방은 schedule_id 외래키가 ON DELETE CASCADE 이므로
      * 이 삭제로 함께 정리된다.
      */
-    void deleteByUserId(Long userId);
+    @Modifying
+    @Query(value = "DELETE FROM user_service.schedules WHERE user_id = :userId", nativeQuery = true)
+    void deleteByUserId(@Param("userId") Long userId);
 
     /**
      * 날씨를 계속 지켜볼 일정들.

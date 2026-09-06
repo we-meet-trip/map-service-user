@@ -82,7 +82,8 @@ class ContractFreezeTest {
                 "schedule_id", "String",
                 "stage", "String",
                 "exclude", "List<String>",
-                "places", "List<SelectedPlace>"));
+                "places", "List<SelectedPlace>",
+                "optimize", "boolean"));
     }
 
     @Test

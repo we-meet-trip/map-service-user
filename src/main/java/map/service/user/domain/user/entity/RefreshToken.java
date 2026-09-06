@@ -30,6 +30,9 @@ public class RefreshToken {
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;
 
+    @Column(name = "session_id", length = 64)
+    private String sessionId;
+
     /** NULL = 유효, NOT NULL = 폐기 (폐기 시각 기록) */
     @Column(name = "revoked_at")
     private OffsetDateTime revokedAt;
@@ -38,7 +41,8 @@ public class RefreshToken {
     private OffsetDateTime createdAt;
 
     @Builder
-    public RefreshToken(User user, String tokenHash, OffsetDateTime expiresAt) {
+    public RefreshToken(User user, String tokenHash, OffsetDateTime expiresAt, String sessionId) {
+        this.sessionId = sessionId;
         this.user = user;
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;

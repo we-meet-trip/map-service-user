@@ -93,6 +93,7 @@ public class ChatRoomService {
         roomRepository.save(room);
         participantRepository.save(
                 new ChatParticipant(room.getRoomId(), userId, ChatParticipant.Role.OWNER));
+        access.openInterval(room.getRoomId(), userId, room.getNextSeq());
         return new RoomResult(access.toRoomResponse(room), true);
     }
 
@@ -100,8 +101,8 @@ public class ChatRoomService {
     @Transactional(readOnly = true)
     public RoomResponse getRoom(Long roomId, Long userId) {
         ChatRoom room = access.requireRoom(roomId);
-        access.requireActiveParticipant(roomId, userId);
-        return access.toRoomResponse(room);
+        ChatParticipant participant = access.requireReadableParticipant(roomId, userId);
+        return visibleRoom(room, participant);
     }
 
     /** 일정 식별자로 방 조회. 호출자는 ACTIVE 참가자여야 한다. */
@@ -109,8 +110,8 @@ public class ChatRoomService {
     public RoomResponse getRoomBySchedule(Long scheduleId, Long userId) {
         ChatRoom room = roomRepository.findByScheduleId(scheduleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CHAT_ROOM_NOT_FOUND));
-        access.requireActiveParticipant(room.getRoomId(), userId);
-        return access.toRoomResponse(room);
+        ChatParticipant participant = access.requireReadableParticipant(room.getRoomId(), userId);
+        return visibleRoom(room, participant);
     }
 
     /**
@@ -126,28 +127,40 @@ public class ChatRoomService {
     @Transactional(readOnly = true)
     public List<RoomSummary> listMyRooms(Long userId) {
         List<ChatParticipant> memberships =
-                participantRepository.findByUserIdAndStatus(userId, ChatParticipant.Status.ACTIVE);
+                participantRepository.findByUserIdAndStatusNot(userId, ChatParticipant.Status.KICKED);
         List<RoomSummary> summaries = new ArrayList<>();
         for (ChatParticipant membership : memberships) {
             ChatRoom room = roomRepository.findById(membership.getRoomId()).orElse(null);
             if (room == null) {
                 continue;
             }
-            long latestSeq = room.getNextSeq();
-            long unread = Math.max(0, latestSeq - membership.getLastReadMessageSeq());
-            Optional<ChatMessage> latest = messageRepository.findTopByRoomIdOrderBySeqDesc(room.getRoomId());
+            Optional<ChatMessage> latest = latestVisible(room.getRoomId(), userId);
+            long latestSeq = latest.map(ChatMessage::getSeq).orElse(0L);
+            long unread = messageRepository.countVisibleAfter(room.getRoomId(), userId, membership.getLastReadMessageSeq());
             summaries.add(new RoomSummary(
                     room.getRoomId(),
                     room.getScheduleId(),
                     room.getTitle(),
-                    room.isReadOnly(),
+                    room.isReadOnly() || !membership.isActive(),
                     unread,
                     latest.map(ChatMessage::getContent).orElse(null),
                     latest.map(ChatMessage::getCreatedAt).orElse(null),
                     latestSeq,
-                    access.activeCount(room.getRoomId())));
+                    membership.isActive() ? access.activeCount(room.getRoomId()) : 0));
         }
         return summaries;
+    }
+
+    private Optional<ChatMessage> latestVisible(Long room, Long user) {
+        return messageRepository.findVisible(room, user, Long.MAX_VALUE,
+                org.springframework.data.domain.PageRequest.of(0, 1)).stream().findFirst();
+    }
+
+    private RoomResponse visibleRoom(ChatRoom room, ChatParticipant participant) {
+        return new RoomResponse(room.getRoomId(), room.getScheduleId(), room.getOwnerId(), room.getTitle(),
+                room.isReadOnly() || !participant.isActive(), room.getExpiresAt(),
+                participant.isActive() ? access.activeCount(room.getRoomId()) : 0,
+                latestVisible(room.getRoomId(), participant.getUserId()).map(ChatMessage::getSeq).orElse(0L));
     }
 
     /**

@@ -50,10 +50,10 @@ public class ChatRoom {
     @Column(name = "room_id")
     private Long roomId;
 
-    @Column(name = "schedule_id", nullable = false)
+    @Column(name = "schedule_id", nullable = true)
     private Long scheduleId;
 
-    @Column(name = "owner_id", nullable = false)
+    @Column(name = "owner_id", nullable = true)
     private Long ownerId;
 
     @Column(name = "title")

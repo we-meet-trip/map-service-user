@@ -23,7 +23,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "POST:/api/v1/auth/login",          new int[]{10, 60},
             "POST:/api/v1/auth/signup",         new int[]{5,  60},
             "POST:/api/v1/auth/token/refresh",  new int[]{20, 60},
-            "POST:/api/v1/auth/kakao/callback", new int[]{10, 60}
+            "POST:/api/v1/auth/kakao/callback", new int[]{10, 60},
+            "GET:/api/v1/auth/apple/nonce", new int[]{10, 60},
+            "POST:/api/v1/auth/apple/callback", new int[]{10, 60}
     );
 
     private final RateLimitService rateLimitService;

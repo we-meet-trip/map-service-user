@@ -90,47 +90,59 @@ public class AuthService {
 
     @Transactional
     public void logout(String rawAccessToken, String rawRefreshToken) {
-        jwtService.blacklistAccessToken(rawAccessToken);
-
+        var claims = jwtService.validateAccessToken(rawAccessToken);
+        Long uid = jwtService.extractUserId(claims);
+        userRepository.findByIdForUpdate(uid)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
+        String sessionId = claims.get("sid", String.class);
         if (rawRefreshToken != null) {
-            String hash = sha256Hex(rawRefreshToken);
-            refreshTokenRepository.findByTokenHash(hash)
-                    .ifPresent(RefreshToken::revoke);
+            RefreshToken token = refreshTokenRepository.findByTokenHash(sha256Hex(rawRefreshToken))
+                    .orElseThrow(() -> new CustomException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
+            if (!uid.equals(token.getUser().getId())) throw new CustomException(ErrorCode.INVALID_TOKEN);
+            String refreshSession = token.getSessionId() == null ? token.getTokenHash() : token.getSessionId();
+            if (sessionId != null && !sessionId.equals(refreshSession))
+                throw new CustomException(ErrorCode.INVALID_TOKEN);
+            sessionId = refreshSession;
         }
+        if (sessionId != null) refreshTokenRepository.revokeSession(uid, sessionId, OffsetDateTime.now());
+        jwtService.blacklistAccessToken(rawAccessToken);
     }
 
-    // ── Refresh Token 회전 ────────────────────────────────────────────────────
-
-    @Transactional
+    // Serialize refresh and logout for one user; a reused token revokes its session durably.
+    @Transactional(noRollbackFor = CustomException.class)
     public AuthResponse refreshTokens(TokenRefreshRequest request) {
         String hash = sha256Hex(request.getRefreshToken());
+        Long uid = refreshTokenRepository.findUserIdByTokenHash(hash)
+                .orElseThrow(() -> new CustomException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
+        userRepository.findByIdForUpdate(uid)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new CustomException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
-
+        String sessionId = stored.getSessionId() == null ? stored.getTokenHash() : stored.getSessionId();
         if (stored.isRevoked()) {
-            // 재사용 탐지: REQUIRES_NEW로 즉시 커밋 (메인 트랜잭션 롤백과 무관하게 폐기 보장)
-            tokenRevokeService.revokeAllForUser(stored.getUser().getId());
+            refreshTokenRepository.revokeSession(uid, sessionId, OffsetDateTime.now());
             throw new CustomException(ErrorCode.REFRESH_TOKEN_REVOKED);
         }
-
-        if (stored.isExpired()) {
-            throw new CustomException(ErrorCode.REFRESH_TOKEN_EXPIRED);
-        }
-
-        stored.revoke();  // 기존 토큰 폐기 (회전)
-        return buildAuthResponse(stored.getUser());
+        if (stored.isExpired()) throw new CustomException(ErrorCode.REFRESH_TOKEN_EXPIRED);
+        stored.revoke();
+        return buildAuthResponse(stored.getUser(), sessionId);
     }
 
     // ── 공통 ──────────────────────────────────────────────────────────────────
 
     @Transactional
     public AuthResponse buildAuthResponse(User user) {
-        String accessToken  = jwtService.generateAccessToken(user);
+        return buildAuthResponse(user, java.util.UUID.randomUUID().toString());
+    }
+
+    private AuthResponse buildAuthResponse(User user, String sessionId) {
+        String accessToken  = jwtService.generateAccessToken(user, sessionId);
         String rawRefresh   = jwtService.generateRawRefreshToken();
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .tokenHash(sha256Hex(rawRefresh))
+                .sessionId(sessionId)
                 .expiresAt(OffsetDateTime.now().plusSeconds(jwtService.getRefreshTokenExpirySeconds()))
                 .build();
 

@@ -218,7 +218,7 @@ public class TripService {
                 null);
 
         String jobId = recommendService
-                .createFreshRecommendation(recommendRequest).jobId();
+                .createFreshRecommendation(recommendRequest, userId).jobId();
         log.info("trip replan started job_id={} schedule_id={}", jobId, scheduleId);
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
@@ -287,7 +287,7 @@ public class TripService {
                 null,
                 null,
                 null,
-                request.places());
+                request.places(), request.optimize());
 
         JobAccepted accepted = recommendService.createRouteJob(recommendRequest, userId);
         String jobId = accepted.jobId();
@@ -334,6 +334,10 @@ public class TripService {
      * request: 검증 완료된 TripResearchRequest.
      */
     public TripGenerateResponse research(TripResearchRequest request) {
+        return research(request, null);
+    }
+
+    public TripGenerateResponse research(TripResearchRequest request, Long userId) {
         String province = TripMapping.normalizeProvince(request.location().province());
         String city = request.location().city();
         Schedule schedule = request.schedule();
@@ -359,7 +363,7 @@ public class TripService {
 
         JobAccepted accepted = recommendService.research(
                 request.prevTripId(), recommendRequest,
-                request.exclude(), request.keep());
+                request.exclude(), request.keep(), userId);
         String jobId = accepted.jobId();
         log.info("trip research started job_id={} prev={} keep={}",
                 jobId, request.prevTripId(),

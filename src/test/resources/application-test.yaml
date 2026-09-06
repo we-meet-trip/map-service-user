@@ -54,6 +54,8 @@ tester:
 
 # 내보내기 러너도 테스트에서 돌지 않는다. 셸 환경변수가 새지 않게 못 박는다.
 training:
+  capture:
+    enabled: false
   export:
     enabled: false
 

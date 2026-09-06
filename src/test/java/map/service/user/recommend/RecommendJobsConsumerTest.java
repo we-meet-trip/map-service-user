@@ -65,7 +65,7 @@ class RecommendJobsConsumerTest {
     }
 
     @Test
-    void 영속기록이_실패해도_초안은_남는다() {
+    void 영속기록이_실패하면_초안을_공개하지_않는다() {
         // 사용자가 결과를 보는 경로는 초안이다. 기록 실패가 결과 전달까지
         // 막아서는 안 된다.
         org.mockito.Mockito.doThrow(new RuntimeException("db down"))
@@ -73,7 +73,7 @@ class RecommendJobsConsumerTest {
 
         consumer.onMessage(record("job-9", "{\"places\":[]}"));
 
-        verify(draftStore).save("job-9", "{\"places\":[]}");
+        verify(draftStore, never()).save(any(), any());
     }
 
     @Test

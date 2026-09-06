@@ -45,10 +45,15 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    /** 클라이언트에 노출하는 upstream 본문 최대 길이(문자 수). */
-    private static final int CLIENT_BODY_MAX = 100;
-    /** 서버 로그에 남기는 upstream 본문 최대 길이(문자 수). 과대 응답 로그 폭주 방지. */
-    private static final int LOG_BODY_MAX = 1000;
+    /** Upstream bodies may echo credentials, coordinates, or user input. Never reflect them. */
+    private ResponseEntity<Map<String, Object>> upstreamFailure(String code, int statusCode) {
+        log.warn("upstream request failed code={} status={}", code, statusCode);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", code);
+        body.put("upstream_status", statusCode);
+        body.put("detail", "외부 서비스 요청을 완료하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
 
     // ── 인증/입력 계열 : 구조화 ErrorResponse ──────────────────────────────────
 
@@ -153,67 +158,43 @@ public class GlobalExceptionHandler {
 
     /**
      * agent 가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(AgentRequestException.class)
     public ResponseEntity<Map<String, Object>> handleAgentRequest(AgentRequestException ex) {
-        log.warn("agent upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "agent upstream error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("agent upstream error", ex.statusCode());
     }
 
     /**
      * hub 장소 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(PlaceSearchException.class)
     public ResponseEntity<Map<String, Object>> handlePlaceSearch(PlaceSearchException ex) {
-        log.warn("place search upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "place_search_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("place_search_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 리뷰 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(ReviewSearchException.class)
     public ResponseEntity<Map<String, Object>> handleReviewSearch(ReviewSearchException ex) {
-        log.warn("review search upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "review_search_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("review_search_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 장소 사진 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(PlacePhotosException.class)
     public ResponseEntity<Map<String, Object>> handlePlacePhotos(PlacePhotosException ex) {
-        log.warn("place photos upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "place_photos_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("place_photos_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 지하철 경로 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      *
      * 발급처 조회가 실패한 경우는 여기로 오지 않는다. hub 가 그 경우를
      * 오류가 아니라 응답의 status 로 알려 주므로, 여기 걸리는 것은 hub 에
@@ -221,61 +202,37 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(SubwayRouteException.class)
     public ResponseEntity<Map<String, Object>> handleSubwayRoute(SubwayRouteException ex) {
-        log.warn("subway route upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "subway_route_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("subway_route_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 통합 길찾기(/v1/transit/routes) 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      *
      * handleSubwayRoute 와 같은 이유로 별도 타입을 둔다 — 발급처 조회 실패는
      * 여기로 오지 않는다(hub 가 status 로 알려 준다).
      */
     @ExceptionHandler(TransitRouteException.class)
     public ResponseEntity<Map<String, Object>> handleTransitRoute(TransitRouteException ex) {
-        log.warn("transit routes upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "transit_route_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("transit_route_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 따릉이 대여소 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(BikeStationException.class)
     public ResponseEntity<Map<String, Object>> handleBikeStation(BikeStationException ex) {
-        log.warn("bike stations upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "bike_stations_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("bike_stations_upstream_error", ex.statusCode());
     }
 
     /**
      * hub 공유 킥보드 조회가 비정상 응답을 반환했을 때 호출된다.
-     * 상태/본문은 로그에 남기고, 클라이언트에는 502 와 요약 정보만 전달한다.
+     * 상태 코드만 기록하고, 클라이언트에는 502 와 고정 안내만 전달한다.
      */
     @ExceptionHandler(PmVehicleException.class)
     public ResponseEntity<Map<String, Object>> handlePmVehicle(PmVehicleException ex) {
-        log.warn("pm vehicles upstream error status={} body={}",
-                ex.statusCode(), ex.truncatedBody(LOG_BODY_MAX));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", "pm_vehicles_upstream_error");
-        body.put("upstream_status", ex.statusCode());
-        body.put("detail", ex.truncatedBody(CLIENT_BODY_MAX));
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+        return upstreamFailure("pm_vehicles_upstream_error", ex.statusCode());
     }
 
     /**
@@ -292,12 +249,12 @@ public class GlobalExceptionHandler {
 
     /**
      * agent/hub 호출이 도달하지 못하거나 응답이 타임아웃된 경우 호출된다.
-     * 내부 호스트/URL 이 담긴 원인 메시지는 로그에만 남기고, 클라이언트에는
+     * 내부 호스트/URL 이 담긴 원인 메시지를 기록하지 않고, 클라이언트에는
      * 고정 문구만 반환한다(정보 누출 차단). 응답 본문은 기존 계약을 그대로 보존한다.
      */
     @ExceptionHandler(ResourceAccessException.class)
     public ResponseEntity<Map<String, Object>> handleTimeout(ResourceAccessException ex) {
-        log.warn("agent unreachable: {}", ex.getMessage());
+        log.warn("upstream request unreachable cause={}", ex.getClass().getSimpleName());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "agent unreachable");
         body.put("detail", "upstream request timed out");
@@ -313,7 +270,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(map.service.user.weather.WeatherUnavailableException.class)
     public ResponseEntity<Map<String, Object>> handleWeatherUnavailable(
             map.service.user.weather.WeatherUnavailableException ex) {
-        log.warn("weather home unavailable: {}", ex.getMessage());
+        log.warn("weather home unavailable cause={}", ex.getClass().getSimpleName());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "weather_unavailable");
         body.put("message", "날씨 정보를 가져오지 못했어요.");
@@ -326,10 +283,13 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(TripGenerationException.class)
     public ResponseEntity<Map<String, Object>> handleTripGeneration(TripGenerationException ex) {
-        log.warn("trip generation failed: {}", ex.getMessage());
+        log.warn("trip generation failed cause={}", ex.getClass().getSimpleName());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "trip_generation_failed");
-        body.put("message", ex.getMessage());
+        // The ordinary exception may contain a worker's raw error. Only this local,
+        // fixed timeline diagnosis is suitable for displaying directly.
+        body.put("message", ex instanceof map.service.user.trip.TripTimelineException
+                ? ex.getMessage() : "추천을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
     }
 

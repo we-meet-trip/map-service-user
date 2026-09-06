@@ -134,6 +134,7 @@ public class ChatInviteService {
             }
             requireCapacity(room.getRoomId());
             participant.reactivate();
+            access.openInterval(room.getRoomId(), userId, room.getNextSeq());
             // 재입장 시점 이전 메시지는 안 읽은 인원수에 포함되지 않도록 읽음 위치를 현재까지 당긴다.
             participant.advanceReadPointer(room.getNextSeq());
             return access.toRoomResponse(room);
@@ -145,6 +146,7 @@ public class ChatInviteService {
         // 입장 이전 메시지는 이 참가자의 미읽음으로 세지 않는다(카톡식: 입장 전 메시지는 대상 아님).
         participant.advanceReadPointer(room.getNextSeq());
         participantRepository.save(participant);
+        access.openInterval(room.getRoomId(), userId, room.getNextSeq());
         return access.toRoomResponse(room);
     }
 

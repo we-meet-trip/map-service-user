@@ -34,6 +34,8 @@ public class NearbyService {
     private final ScheduleService scheduleService;
     private final HubNearbyClient hubClient;
     private final NearbyImpressionRepository impressionRepository;
+    @Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
     private final int radiusMeters;
     private final int size;
 
@@ -82,7 +84,7 @@ public class NearbyService {
             ranked.add(new NearbyPlace(p.contentId(), p.name(), p.address(),
                     p.lat(), p.lng(), p.category(), i, p.placeUrl()));
         }
-        recordImpressions(scheduleId, day, stopOrder, category, ranked);
+        if (trainingCaptureEnabled) recordImpressions(scheduleId, day, stopOrder, category, ranked);
         return ranked;
     }
 
@@ -98,6 +100,7 @@ public class NearbyService {
     public boolean recordClick(Long scheduleId, Long userId, int day, int stopOrder,
                                String category, String contentId) {
         scheduleService.requireOwned(scheduleId, userId);
+        if (!trainingCaptureEnabled) return false;
         return impressionRepository
                 .findByScheduleIdAndDayAndStopOrderAndCategoryAndContentId(
                         scheduleId, day, stopOrder, category, contentId)
@@ -152,7 +155,7 @@ public class NearbyService {
      * 규칙이라, 두 신호가 같은 자리를 가리킨다.
      */
     private double[] coordinateAt(ScheduleEntity schedule, int day, int stopOrder) {
-        JsonNode payload = schedule.getPayload();
+        JsonNode payload = scheduleService.readPayload(schedule);
         if (payload == null) {
             return null;
         }

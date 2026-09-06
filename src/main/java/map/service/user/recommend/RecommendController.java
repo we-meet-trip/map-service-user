@@ -2,6 +2,8 @@ package map.service.user.recommend;
 
 import jakarta.validation.Valid;
 import java.util.Optional;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
 import map.service.user.recommend.dto.EditRequest;
 import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
@@ -61,6 +63,7 @@ public class RecommendController {
             @Valid @RequestBody RecommendRequest request,
             @AuthenticationPrincipal Long userId
     ) {
+        if (userId == null) throw new map.service.user.global.exception.CustomException(map.service.user.global.exception.ErrorCode.INVALID_TOKEN);
         RecommendService.RecommendationResult result =
                 service.createRecommendationDetailed(request, userId);
         return ResponseEntity.accepted()
@@ -91,6 +94,7 @@ public class RecommendController {
             throw new IllegalArgumentException(
                     "places must contain 2 to 10 selected places");
         }
+        if (userId == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
         return ResponseEntity.accepted().body(service.createRouteJob(request, userId));
     }
 
@@ -104,8 +108,9 @@ public class RecommendController {
      * jobId: @PathVariable. 추천 작업 식별자.
      */
     @GetMapping("/{jobId}")
-    public ResponseEntity<String> get(@PathVariable String jobId) {
-        Optional<String> draft = service.findDraft(jobId);
+    public ResponseEntity<String> get(@PathVariable String jobId,
+                                      @AuthenticationPrincipal Long userId) {
+        Optional<String> draft = service.findOwnedDraft(jobId, userId);
         if (draft.isPresent()) {
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)

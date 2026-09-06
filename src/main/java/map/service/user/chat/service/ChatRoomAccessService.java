@@ -22,9 +22,12 @@ public class ChatRoomAccessService {
 
     private final ChatRoomRepository roomRepository;
     private final ChatParticipantRepository participantRepository;
+    private final map.service.user.chat.repository.ChatMembershipIntervalRepository intervals;
 
     public ChatRoomAccessService(ChatRoomRepository roomRepository,
-                                 ChatParticipantRepository participantRepository) {
+                                 ChatParticipantRepository participantRepository,
+                                 map.service.user.chat.repository.ChatMembershipIntervalRepository intervals) {
+        this.intervals = intervals;
         this.roomRepository = roomRepository;
         this.participantRepository = participantRepository;
     }
@@ -56,6 +59,21 @@ public class ChatRoomAccessService {
         }
         return participant;
     }
+
+    public ChatParticipant requireReadableParticipant(Long roomId, Long userId) {
+        if (userId == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        ChatParticipant participant = participantRepository.findByRoomIdAndUserId(roomId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT));
+        if (participant.getStatus() == ChatParticipant.Status.KICKED)
+            throw new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT);
+        return participant;
+    }
+
+    public void openInterval(Long roomId, Long userId, long seq) {
+        intervals.save(new map.service.user.chat.entity.ChatMembershipInterval(roomId, userId, seq));
+    }
+
+    public void closeInterval(Long roomId, Long userId, long seq) { intervals.close(roomId, userId, seq); }
 
     /** 호출자가 방의 소유자인지 검증한다. ACTIVE 참가자이면서 역할이 OWNER 여야 한다. */
     public ChatParticipant requireOwner(Long roomId, Long userId) {

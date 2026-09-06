@@ -44,9 +44,15 @@ public class JwtService {
     private final JwtProperties       jwtProperties;
     private final StringRedisTemplate redisTemplate;
     private final JwtParser           jwtParser;
+    private final map.service.user.domain.user.repository.UserRepository users;
+    private final map.service.user.domain.user.repository.RefreshTokenRepository refreshTokens;
 
     public JwtService(KeyPair jwtKeyPair, JwtProperties jwtProperties,
-                      @Qualifier("blacklistRedisTemplate") StringRedisTemplate redisTemplate) {
+                      @Qualifier("blacklistRedisTemplate") StringRedisTemplate redisTemplate,
+                      map.service.user.domain.user.repository.UserRepository users,
+                      map.service.user.domain.user.repository.RefreshTokenRepository refreshTokens) {
+        this.users = users;
+        this.refreshTokens = refreshTokens;
         this.jwtKeyPair    = jwtKeyPair;
         this.jwtProperties = jwtProperties;
         this.redisTemplate = redisTemplate;
@@ -58,12 +64,17 @@ public class JwtService {
     // ── Access Token ─────────────────────────────────────────────────────────
 
     public String generateAccessToken(User user) {
+        return generateAccessToken(user, null);
+    }
+
+    public String generateAccessToken(User user, String sessionId) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + jwtProperties.getAccessTokenExpirySeconds() * 1000L);
 
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(user.getId().toString())
+                .claim("sid", sessionId)
                 .claim(CLAIM_EMAIL, user.getEmail())
                 .claim(CLAIM_PROVIDER, user.getAuthProvider().name())
                 .issuedAt(now)
@@ -75,6 +86,11 @@ public class JwtService {
     /** 검증 후 Claims 반환. 유효하지 않으면 CustomException 던짐. */
     public Claims validateAccessToken(String token) {
         Claims claims = parseOrThrow(token);
+        Long userId = extractUserId(claims);
+        if (!users.existsById(userId)) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        String session = claims.get("sid", String.class);
+        if (session != null && !refreshTokens.existsBySessionIdAndRevokedAtIsNullAndExpiresAtAfter(
+                session, java.time.OffsetDateTime.now())) throw new CustomException(ErrorCode.BLACKLISTED_TOKEN);
         if (isBlacklisted(claims.getId())) {
             throw new CustomException(ErrorCode.BLACKLISTED_TOKEN);
         }
@@ -82,7 +98,8 @@ public class JwtService {
     }
 
     public Long extractUserId(Claims claims) {
-        return Long.parseLong(claims.getSubject());
+        try { return Long.parseLong(claims.getSubject()); }
+        catch (NumberFormatException e) { throw new CustomException(ErrorCode.INVALID_TOKEN); }
     }
 
     /** 로그아웃 시 access token을 Redis blacklist에 등록 (남은 유효시간 동안) */

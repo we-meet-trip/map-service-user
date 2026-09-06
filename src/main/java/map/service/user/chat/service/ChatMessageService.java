@@ -83,13 +83,12 @@ public class ChatMessageService {
     @Transactional(readOnly = true)
     public HistoryResponse getHistory(Long roomId, Long userId, Long beforeSeq, Integer limit) {
         access.requireRoom(roomId);
-        access.requireActiveParticipant(roomId, userId);
+        access.requireReadableParticipant(roomId, userId);
 
         int pageSize = clampLimit(limit);
         PageRequest page = PageRequest.of(0, pageSize);
-        List<ChatMessage> messages = (beforeSeq == null)
-                ? messageRepository.findByRoomIdOrderBySeqDesc(roomId, page)
-                : messageRepository.findByRoomIdAndSeqLessThanOrderBySeqDesc(roomId, beforeSeq, page);
+        List<ChatMessage> messages = messageRepository.findVisible(roomId, userId,
+                beforeSeq == null ? Long.MAX_VALUE : beforeSeq, page);
 
         List<Long> pointers =
                 participantRepository.findReadPointers(roomId, ChatParticipant.Status.ACTIVE);
@@ -120,14 +119,14 @@ public class ChatMessageService {
     @Transactional
     public UnreadResponse markRead(Long roomId, Long userId, long lastReadSeq) {
         ChatRoom room = access.requireRoom(roomId);
-        ChatParticipant participant = access.requireActiveParticipant(roomId, userId);
+        ChatParticipant participant = access.requireReadableParticipant(roomId, userId);
 
-        long latestSeq = room.getNextSeq();
+        long latestSeq = latestVisible(roomId, userId);
         long target = Math.min(Math.max(lastReadSeq, 0L), latestSeq);
         participantRepository.advanceReadPointer(roomId, userId, target);
 
         long effectiveLastRead = Math.max(participant.getLastReadMessageSeq(), target);
-        long unread = Math.max(0L, latestSeq - effectiveLastRead);
+        long unread = messageRepository.countVisibleAfter(roomId, userId, effectiveLastRead);
         return new UnreadResponse(roomId, unread, effectiveLastRead, latestSeq);
     }
 
@@ -135,11 +134,16 @@ public class ChatMessageService {
     @Transactional(readOnly = true)
     public UnreadResponse getUnread(Long roomId, Long userId) {
         ChatRoom room = access.requireRoom(roomId);
-        ChatParticipant participant = access.requireActiveParticipant(roomId, userId);
-        long latestSeq = room.getNextSeq();
+        ChatParticipant participant = access.requireReadableParticipant(roomId, userId);
+        long latestSeq = latestVisible(roomId, userId);
         long lastRead = participant.getLastReadMessageSeq();
-        long unread = Math.max(0L, latestSeq - lastRead);
+        long unread = messageRepository.countVisibleAfter(roomId, userId, lastRead);
         return new UnreadResponse(roomId, unread, lastRead, latestSeq);
+    }
+
+    private long latestVisible(Long roomId, Long userId) {
+        return messageRepository.findVisible(roomId, userId, Long.MAX_VALUE, PageRequest.of(0, 1))
+                .stream().findFirst().map(ChatMessage::getSeq).orElse(0L);
     }
 
     /**

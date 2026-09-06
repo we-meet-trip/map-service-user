@@ -147,16 +147,17 @@ public class RecommendJobsConsumer
         }
 
         try {
-            // 1) 초안 먼저. 사용자가 결과를 보는 경로라 여기서 막히면 안 된다.
-            //    같은 값을 다시 써도 되므로 재처리에 안전하다.
-            draftStore.save(jobId, payloadJson);
-
-            // 2) 영속 기록. **실패하면 예외가 올라와 ack 하지 않는다.**
-            //    예전에는 이 기록이 실패를 삼켜서, 기록이 안 됐는데도 ack 되어
-            //    메시지가 사라졌다. 사용자는 초안으로 결과를 이미 받았으므로
-            //    아무도 눈치채지 못한 채 학습 신호만 조용히 없어졌다.
+            if (jobStore.isCancelled(jobId)) { ack(recordId); return; }
+            // Commit the durable result before ACK. Redis is a recoverable cache.
             jobStore.recordCompletion(
                     jobId, value.get("status"), payloadJson, value.get("training"));
+            if (jobStore.isCancelled(jobId)) { ack(recordId); return; }
+            try {
+                draftStore.save(jobId, payloadJson);
+            } catch (RuntimeException cacheFailure) {
+                log.warn("draft cache write failed job_id={} cause={}",
+                        jobId, cacheFailure.getClass().getSimpleName());
+            }
 
             // 3) 재사용 캐시. 영속 기록이 끝난 뒤에 한다 — 연결고리를 읽으면서
             //    지우기 때문에(GETDEL), 앞 단계가 실패해 재처리될 때 이미

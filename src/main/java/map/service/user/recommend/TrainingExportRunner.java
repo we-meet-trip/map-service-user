@@ -60,6 +60,8 @@ public class TrainingExportRunner implements ApplicationRunner {
     private final TrainingExportService service;
     private final ObjectMapper objectMapper;
     private final ApplicationContext context;
+    @Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
     private final boolean enabled;
     private final String salt;
     private final boolean excludeTestAccounts;
@@ -91,7 +93,7 @@ public class TrainingExportRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (!enabled) {
+        if (!trainingCaptureEnabled || !enabled) {
             return;
         }
         int exitCode = 0;

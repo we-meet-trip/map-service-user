@@ -12,8 +12,8 @@ import java.time.OffsetDateTime;
  */
 public record RoomResponse(
         @JsonProperty("room_id") long roomId,
-        @JsonProperty("schedule_id") long scheduleId,
-        @JsonProperty("owner_id") long ownerId,
+        @JsonProperty("schedule_id") Long scheduleId,
+        @JsonProperty("owner_id") Long ownerId,
         String title,
         @JsonProperty("read_only") boolean readOnly,
         @JsonProperty("expires_at") OffsetDateTime expiresAt,
