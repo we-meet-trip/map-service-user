@@ -5,7 +5,7 @@ package map.service.user.mobility;
  *
  * PmVehicleClient 가 hub 로부터 4xx/5xx 응답을 받았을 때 던지는
  * RuntimeException. 호출자/전역 핸들러가 상태코드와 본문을 검사할 수 있도록
- * 두 값을 보관한다. 기본 메시지에는 본문 앞 200자만 잘라 포함한다.
+ * 두 값을 보관한다. 기본 메시지에는 서비스와 상태 코드만 포함한다.
  *
  * 외부 조회가 실패한 경우는 여기로 오지 않는다. hub 가 그런 경우를 오류가
  * 아니라 응답의 status 로 알려 주기 때문이다. 이 예외는 hub 자체에 닿지
@@ -20,7 +20,7 @@ public class PmVehicleException extends RuntimeException {
     private final String body;
 
     public PmVehicleException(int statusCode, String body) {
-        super("pm vehicles " + statusCode + ": " + truncate(body, 200));
+        super("pm vehicles " + statusCode);
         this.statusCode = statusCode;
         this.body = body;
     }

@@ -406,6 +406,8 @@ nearby:
 #                          (러너가 7일 지난 것을 지운다). 비우면 임시 폴더 아래.
 # - batch-size           : 한 번에 훑는 일정 수.
 training:
+  capture:
+    enabled: ${TRAINING_CAPTURE_ENABLED:false}
   export:
     enabled: ${TRAINING_EXPORT_ENABLED:false}
     user-ref-salt: ${TRAINING_EXPORT_USER_REF_SALT:}
@@ -429,3 +431,8 @@ tester:
   seed:
     enabled: ${TESTER_SEED_ENABLED:false}
     password: ${TESTER_SEED_PASSWORD:}
+
+# 60/day is a GCP validation default; production quota requires an explicit launch setting.
+vision:
+  internal-token: ${VISION_INTERNAL_TOKEN:}
+  daily-limit: ${VISION_DAILY_LIMIT:60}

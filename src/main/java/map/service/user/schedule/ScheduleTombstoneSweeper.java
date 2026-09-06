@@ -34,6 +34,8 @@ public class ScheduleTombstoneSweeper {
     private static final Logger log =
             LoggerFactory.getLogger(ScheduleTombstoneSweeper.class);
 
+    @Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
     private final ScheduleRepository repository;
     private final int retentionDays;
     private final int batchSize;
@@ -52,6 +54,7 @@ public class ScheduleTombstoneSweeper {
             initialDelayString = "${schedule.tombstone-sweep-interval-ms:21600000}")
     @Transactional
     public void sweep() {
+        if (!trainingCaptureEnabled) return;
         OffsetDateTime cutoff = OffsetDateTime.now().minusDays(retentionDays);
         try {
             int purged = repository.deleteTombstonedBefore(cutoff, batchSize);

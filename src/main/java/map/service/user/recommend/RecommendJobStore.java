@@ -13,17 +13,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import map.service.user.domain.auth.service.AuthService;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * RecommendJobStore — 추천 작업 상태/결과의 PostgreSQL write-through 저장소
  *
- * Redis draft(1차·휘발성) 옆에서 추천 작업의 상태/완료 결과를 recommend_jobs
- * 테이블에 함께 기록하고(write-through), Redis 미스 시 완료 결과를 폴백 조회한다.
- *
- * 모든 메서드는 best-effort 이다 — 어떤 예외도 밖으로 던지지 않고 경고 로그만
- * 남긴다. PG 장애가 추천 생성/완료 처리(및 stream ack)를 막아서는 안 되며,
- * 폴백 조회 실패는 곧 "결과 없음"으로만 취급되어 long-poll 흐름을 바꾸지 않는다.
+ * PostgreSQL을 완료 결과와 편집의 기준으로 사용하고 Redis는 복구 가능한 캐시로 둔다.
+ * 사용자 소유권, 완료 기록, 편집 기록의 실패는 호출자에게 전달하며 영속화 전 ACK를
+ * 허용하지 않는다. 일부 옛 내부 helper만 명시적으로 best-effort 동작을 유지한다.
  *
  * repository: RecommendJobRepository. recommend_jobs CRUD.
  * objectMapper: payload JSON ↔ JsonNode 변환.
@@ -41,17 +43,31 @@ public class RecommendJobStore {
     private final RecommendEditRepository editRepository;
     private final PayloadCipher payloadCipher;
     private final ObjectMapper objectMapper;
+    private final RecommendEditRequestRepository editRequestRepository;
+    private final RecommendCancellationRepository cancellations;
+    private final map.service.user.domain.user.repository.UserRepository users;
+    @Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
+    // Match the existing draft retry window; no longer-lived learning snapshot is created.
+    @Value("${redis.draft-ttl-seconds:3600}")
+    private long editReceiptTtlSeconds = 3600;
 
     public RecommendJobStore(RecommendJobRepository repository,
                              RecommendTrainingRepository trainingRepository,
                              RecommendEditRepository editRepository,
                              ObjectMapper objectMapper,
-                             PayloadCipher payloadCipher) {
+                             PayloadCipher payloadCipher,
+                             RecommendEditRequestRepository editRequestRepository,
+                             RecommendCancellationRepository cancellations,
+                             map.service.user.domain.user.repository.UserRepository users) {
+        this.cancellations = cancellations;
+        this.users = users;
         this.repository = repository;
         this.trainingRepository = trainingRepository;
         this.editRepository = editRepository;
         this.payloadCipher = payloadCipher;
         this.objectMapper = objectMapper;
+        this.editRequestRepository = editRequestRepository;
     }
 
     /**
@@ -64,6 +80,7 @@ public class RecommendJobStore {
      * jobId: agent 발급 작업 UUID 문자열.
      * scheduleId: 연관 일정 식별자(nullable).
      */
+    @Transactional(noRollbackFor = CustomException.class)
     public void insertInProgress(String jobId, String scheduleId) {
         insertInProgress(jobId, scheduleId, null);
     }
@@ -78,7 +95,7 @@ public class RecommendJobStore {
      *
      * origin 이 null 이면 출처 없이 접수만 기록한다(옛 호출부 호환).
      */
-    @Transactional
+    @Transactional(noRollbackFor = CustomException.class)
     public void insertInProgress(String jobId, String scheduleId, JobOrigin origin) {
         insertInProgress(jobId, scheduleId, origin, null, null);
     }
@@ -91,18 +108,26 @@ public class RecommendJobStore {
      *
      * province / city: 요청의 광역시도·시군구(nullable).
      */
+    @Transactional(noRollbackFor = CustomException.class)
     public void insertInProgress(
             String jobId, String scheduleId, String province, String city
     ) {
         insertInProgress(jobId, scheduleId, null, province, city);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = CustomException.class)
     public void insertInProgress(String jobId, String scheduleId, JobOrigin origin,
                                  String province, String city) {
         UUID uuid = parseUuid(jobId);
         if (uuid == null) {
             return;
+        }
+        if (cancellations.existsById(uuid)) throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
+        if (origin != null && origin.ownerUserId() != null
+                && users.findByIdForUpdate(origin.ownerUserId()).isEmpty()) {
+            cancellations.save(new RecommendCancellation(uuid));
+            repository.deleteById(uuid);
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
         try {
             if (!repository.existsById(uuid)) {
@@ -131,6 +156,7 @@ public class RecommendJobStore {
                 fillSegmentIfAbsent(uuid, origin.userSegment());
             }
         } catch (RuntimeException e) {
+            if (origin != null && origin.ownerUserId() != null) throw e;
             log.warn("recommend job insert failed job_id={} reason={}", jobId, e.getMessage());
         }
     }
@@ -142,7 +168,7 @@ public class RecommendJobStore {
      * 못 남겼다고 요청을 깨뜨리지 않는다.
      */
     private void fillSegmentIfAbsent(UUID uuid, Map<String, Object> segment) {
-        if (segment == null) {
+        if (!trainingCaptureEnabled || segment == null) {
             return;
         }
         try {
@@ -258,10 +284,8 @@ public class RecommendJobStore {
     /**
      * 완료 상태와 학습 신호를 한 트랜잭션으로 기록한다. **실패하면 예외를 던진다.**
      *
-     * markFinished 와 갈라 둔 이유가 이것 하나다. markFinished 는 어떤 예외도
-     * 삼키는데, stream 소비 경로가 그것을 쓰면 기록이 실패해도 그대로 ack 되어
-     * 메시지가 사라진다. 사용자는 Redis 초안으로 결과를 이미 받았으므로 아무도
-     * 눈치채지 못한 채 학습 신호만 조용히 없어진다.
+     * stream 소비자는 이 영속화가 성공한 뒤 캐시와 ACK를 처리한다. 학습 HOLD에서도
+     * 기능상 완료 기록은 유지하며, 학습 신호는 capture 설정이 켜진 경우에만 기록한다.
      *
      * 여기서 던지면 소비자가 ack 하지 않고, 메시지는 PEL 에 남아 회수 대상이
      * 된다. 재시도가 다 떨어지면 DLQ 로 가므로 본문은 어느 쪽이든 보존된다.
@@ -277,37 +301,108 @@ public class RecommendJobStore {
         if (uuid == null) {
             return;
         }
-        JsonNode payload = parsePayload(payloadJson);
-        String normalized = normalizeStatus(status);
-        try {
-            writeFinished(uuid, normalized, payload);
-        } catch (DataIntegrityViolationException e) {
-            // 행이 없다고 보고 새로 넣는 사이에 접수 기록이 같은 행을 만들었다.
-            writeFinished(uuid, normalized, payload);
+        if (cancellations.existsById(uuid)) return;
+        RecommendJobEntity existing = repository.findByIdForUpdate(uuid).orElse(null);
+        if (existing == null && cancellations.existsById(uuid)) return;
+        // A redelivered completion must not restore the pre-edit itinerary.
+        if (existing == null || !TERMINAL_STATUS.contains(existing.getStatus())) {
+            writeFinished(uuid, normalizeStatus(status), parsePayload(payloadJson));
         }
         writeTraining(uuid, trainingJson);
     }
 
     /**
-     * 잡의 소유자를 돌려준다. 모르면 null — 그때는 막지 않는다.
-     *
-     * 토큰 없이 만든 잡과 이 기능 이전 잡은 소유자가 없다. 모른다는 이유로
-     * 거절하면 인증을 켜기도 전에 기존 사용자가 잠긴다.
+     * 잡의 소유자를 돌려준다. 소유자를 확인할 수 없으면 접근을 허용하지 않는다.
      */
     public Long ownerOf(String jobId) {
         UUID uuid = parseUuid(jobId);
-        if (uuid == null) {
-            return null;
+        return uuid == null ? null : repository.findById(uuid)
+                .map(RecommendJobEntity::getOwnerUserId).orElse(null);
+    }
+
+    /** No owner, unknown job and foreign owner all deny access; DB failures never permit it. */
+    public void requireOwned(String jobId, Long userId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
-        try {
-            return repository.findById(uuid)
-                    .map(RecommendJobEntity::getOwnerUserId)
-                    .orElse(null);
-        } catch (RuntimeException e) {
-            log.warn("recommend job owner lookup failed job_id={} reason={}",
-                    jobId, e.getMessage());
-            return null;
+        if (!userId.equals(ownerOf(jobId))) {
+            throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
         }
+    }
+
+    public boolean isCancelled(String jobId) {
+        UUID id = parseUuid(jobId);
+        return id != null && cancellations.existsById(id);
+    }
+
+    @Transactional
+    public java.util.List<String> eraseOwnedJobs(Long userId) {
+        // Legacy edits can identify an actor on an unowned job. Erase only that actor's copy.
+        editRepository.deleteByActorUserId(userId);
+        java.util.List<RecommendJobEntity> owned = repository.findByOwnerUserId(userId);
+        for (RecommendJobEntity job : owned) {
+            UUID id = job.getJobId();
+            cancellations.save(new RecommendCancellation(id));
+            editRepository.deleteByJobId(id);
+            trainingRepository.deleteById(id);
+            editRequestRepository.deleteByJobId(id);
+        }
+        cancellations.flush();
+        repository.deleteAll(owned);
+        return owned.stream().map(job -> job.getJobId().toString()).toList();
+    }
+
+    public record EditOutcome(String response, String canonical) {}
+
+    /** Serialize edits on the job row. Operational receipts remain available while capture is off. */
+    @Transactional
+    public EditOutcome persistOwnedEdit(String jobId, Long userId, String key,
+                                         String requestJson, java.util.function.UnaryOperator<String> merge) {
+        if (userId == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        UUID uuid = parseUuid(jobId);
+        RecommendJobEntity job = uuid == null ? null : repository.findByIdForUpdate(uuid).orElse(null);
+        if (job == null || !userId.equals(job.getOwnerUserId())) {
+            throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
+        }
+        if (job.getResultPayload() == null) return null;
+        JsonNode current = payloadCipher.decryptNode(job.getResultPayload(), aadFor(uuid));
+        String receiptId = null;
+        String requestHash = AuthService.sha256Hex(requestJson);
+        if (key != null) {
+            if (key.isBlank() || key.length() > 128) throw new IllegalArgumentException("invalid Idempotency-Key");
+            receiptId = AuthService.sha256Hex(uuid + ":" + userId + ":" + key);
+            RecommendEditRequest receipt = editRequestRepository.findById(receiptId).orElse(null);
+            if (receipt != null && receipt.getExpiresAt().isAfter(OffsetDateTime.now())) {
+                if (!requestHash.equals(receipt.getRequestHash())) {
+                    throw new CustomException(ErrorCode.RECOMMEND_EDIT_CONFLICT);
+                }
+                JsonNode accepted = payloadCipher.decryptNode(receipt.getResponsePayload(), receiptAad(receiptId));
+                return new EditOutcome(accepted.toString(), current.toString());
+            }
+        }
+        JsonNode before = current;
+        String merged = merge.apply(current.toString());
+        if (merged == null) return null;
+        JsonNode after = parsePayload(merged);
+        job.setResultPayload(sealed(uuid, after));
+        repository.save(job);
+        if (trainingCaptureEnabled) saveEdit(uuid, userId, null, before, after);
+        if (receiptId != null) {
+            editRequestRepository.save(new RecommendEditRequest(receiptId, uuid, requestHash,
+                    payloadCipher.encryptNode(after, receiptAad(receiptId)),
+                    OffsetDateTime.now().plusSeconds(editReceiptTtlSeconds)));
+        }
+        return new EditOutcome(after.toString(), after.toString());
+    }
+
+    private static String receiptAad(String id) {
+        return PayloadCipher.aad("recommend_edit_requests", "response_payload", id);
+    }
+
+    @Scheduled(fixedDelayString = "${recommend.edit-receipt-sweep-interval-ms:60000}")
+    @Transactional
+    public void expireEditReceipts() {
+        editRequestRepository.deleteExpired(OffsetDateTime.now());
     }
 
     /**
@@ -349,6 +444,7 @@ public class RecommendJobStore {
 
     private void saveEdit(UUID uuid, Long actorUserId, String idempotencyKey,
                           JsonNode before, JsonNode after) {
+        if (!trainingCaptureEnabled) return;
         editRepository.saveAndFlush(new RecommendEditEntity(
                 uuid, editRepository.nextSeq(uuid), actorUserId,
                 idempotencyKey, before, after));
@@ -356,7 +452,7 @@ public class RecommendJobStore {
 
     /** 학습 신호를 보관한다. 이미 있으면 두고, 형태가 아니면 건너뛴다. */
     private void writeTraining(UUID uuid, String trainingJson) {
-        if (trainingJson == null || trainingJson.isBlank()) {
+        if (!trainingCaptureEnabled || trainingJson == null || trainingJson.isBlank()) {
             return;
         }
         JsonNode signal;
@@ -414,20 +510,10 @@ public class RecommendJobStore {
         if (uuid == null) {
             return Optional.empty();
         }
-        try {
-            RecommendJobEntity entity = repository.findById(uuid).orElse(null);
-            if (entity == null
-                    || !TERMINAL_STATUS.contains(entity.getStatus())
-                    || entity.getResultPayload() == null) {
-                return Optional.empty();
-            }
-            return Optional.of(objectMapper.writeValueAsString(
-                    payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid))));
-        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
-            log.warn("recommend job fallback read failed job_id={} reason={}",
-                    jobId, e.getMessage());
+        RecommendJobEntity entity = repository.findById(uuid).orElse(null);
+        if (entity == null || !TERMINAL_STATUS.contains(entity.getStatus()) || entity.getResultPayload() == null)
             return Optional.empty();
-        }
+        return Optional.of(payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid)).toString());
     }
 
     /**

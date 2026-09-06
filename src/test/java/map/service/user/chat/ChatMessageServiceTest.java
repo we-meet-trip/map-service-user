@@ -40,6 +40,7 @@ class ChatMessageServiceTest {
 
     private static final long OWNER = 1L;
 
+    @Autowired private map.service.user.chat.repository.ChatMembershipIntervalRepository intervals;
     @Autowired private ChatRoomRepository roomRepository;
     @Autowired private ChatParticipantRepository participantRepository;
     @Autowired private ChatMessageRepository messageRepository;
@@ -51,7 +52,7 @@ class ChatMessageServiceTest {
 
     @BeforeEach
     void setUp() {
-        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository);
+        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository, intervals);
         messageService = new ChatMessageService(messageRepository, participantRepository, props, access);
     }
 
@@ -65,8 +66,10 @@ class ChatMessageServiceTest {
         ChatRoom room = new ChatRoom(scheduleSeq++, OWNER, "방", OffsetDateTime.now().plusDays(8));
         roomRepository.save(room);
         participantRepository.save(new ChatParticipant(room.getRoomId(), OWNER, ChatParticipant.Role.OWNER));
+        intervals.save(new map.service.user.chat.entity.ChatMembershipInterval(room.getRoomId(), OWNER, 0));
         for (long memberId : memberIds) {
             participantRepository.save(new ChatParticipant(room.getRoomId(), memberId, ChatParticipant.Role.MEMBER));
+            intervals.save(new map.service.user.chat.entity.ChatMembershipInterval(room.getRoomId(), memberId, 0));
         }
         for (int i = 0; i < count; i++) {
             long seq = room.allocateNextSeq();

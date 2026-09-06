@@ -40,6 +40,12 @@ public record RecommendRequest(
         @JsonProperty("schedule_id") @Size(max = 64) String scheduleId,
         @Size(max = 10) String stage,
         @Size(max = 50) List<@Size(max = 64) String> exclude,
-        @Valid @Size(min = 2, max = 10) List<SelectedPlace> places
+        @Valid @Size(min = 2, max = 10) List<SelectedPlace> places,
+        boolean optimize
 ) {
+    public RecommendRequest(DateRange date, Integer budget, List<String> theme, Mobility mobility,
+                            String province, String city, String scheduleId, String stage,
+                            List<String> exclude, List<SelectedPlace> places) {
+        this(date, budget, theme, mobility, province, city, scheduleId, stage, exclude, places, false);
+    }
 }

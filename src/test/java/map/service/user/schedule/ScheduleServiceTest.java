@@ -3,6 +3,7 @@ package map.service.user.schedule;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -139,7 +140,7 @@ class ScheduleServiceTest {
         entity.setRegion("서울특별시", "중구");
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(recommendService.createFreshRecommendation(any()))
+        when(recommendService.createFreshRecommendation(any(), any()))
                 .thenReturn(new JobAccepted("job-9", "in_progress", 3));
 
         JobAccepted accepted = service.replan(5L, 42L);
@@ -147,7 +148,7 @@ class ScheduleServiceTest {
         assertThat(accepted.jobId()).isEqualTo("job-9");
         ArgumentCaptor<RecommendRequest> captor =
                 ArgumentCaptor.forClass(RecommendRequest.class);
-        verify(recommendService).createFreshRecommendation(captor.capture());
+        verify(recommendService).createFreshRecommendation(captor.capture(), eq(42L));
         RecommendRequest sent = captor.getValue();
         assertThat(sent.province()).isEqualTo("서울특별시");
         assertThat(sent.city()).isEqualTo("중구");
@@ -218,7 +219,7 @@ class ScheduleServiceTest {
 
         assertThatThrownBy(() -> service.replan(5L, 42L))
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
-        verify(recommendService, never()).createFreshRecommendation(any());
+        verify(recommendService, never()).createFreshRecommendation(any(), any());
     }
 
     @Test
@@ -294,7 +295,7 @@ class ScheduleServiceTest {
         entity.setRegion("서울특별시", "중구");
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(draftStore.find(newJob)).thenReturn(Optional.of(
+        when(recommendService.findDraft(newJob)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
 
         service.revise(5L, 42L, new ScheduleReviseRequest(newJob, null, null, null));
@@ -320,7 +321,7 @@ class ScheduleServiceTest {
                 null, "walk", 9, 18);
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(draftStore.find(newJob)).thenReturn(Optional.of(
+        when(recommendService.findDraft(newJob)).thenReturn(Optional.of(
                 "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
 
         service.revise(5L, 42L,
@@ -348,7 +349,7 @@ class ScheduleServiceTest {
                 null, "walk", 9, 18);
         when(repository.findByScheduleIdAndUserId(6L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(draftStore.find(newJob)).thenReturn(Optional.empty());
+        when(recommendService.findDraft(newJob)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.revise(
                 6L, 42L, new ScheduleReviseRequest(newJob, null, null, null)))

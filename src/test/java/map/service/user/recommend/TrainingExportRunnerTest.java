@@ -47,8 +47,10 @@ class TrainingExportRunnerTest {
     private TrainingExportRunner runner(TrainingExportService service, Path dir,
                                         boolean enabled, String salt) {
         // 문맥을 주지 않는다 — 주면 뽑고 나서 이 시험 프로세스를 내려 버린다.
-        return new TrainingExportRunner(service, new ObjectMapper(), null, enabled, salt,
+        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(), null, enabled, salt,
                 true, "admin.map,test.com", dir.toString());
+        org.springframework.test.util.ReflectionTestUtils.setField(runner, "trainingCaptureEnabled", true);
+        return runner;
     }
 
     private TrainingExportRow row(Long sessionId, String userRef) {
@@ -65,6 +67,16 @@ class TrainingExportRunnerTest {
 
     private Stream<Path> files(Path dir) throws IOException {
         return Files.exists(dir) ? Files.list(dir) : Stream.empty();
+    }
+
+    @Test
+    void captureHoldBlocksExportEvenWhenExportFlagIsEnabled(@TempDir Path dir) throws IOException {
+        TrainingExportService service = service(List.of(row(1L, "u_a")));
+        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(), null,
+                true, SALT, true, "test.com", dir.toString());
+        runner.run(new DefaultApplicationArguments());
+        verify(service, never()).export(anyBoolean(), any(), anyString());
+        assertThat(files(dir)).isEmpty();
     }
 
     @Test

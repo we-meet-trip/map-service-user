@@ -28,6 +28,10 @@ public record TripRouteRequest(
         @Valid @NotNull Schedule schedule,
         @NotBlank String transport,
         @Valid @NotNull Location location,
-        @Valid @NotNull @Size(min = 2, max = 10) List<SelectedPlace> places
+        @Valid @NotNull @Size(min = 2, max = 10) List<SelectedPlace> places,
+        boolean optimize
 ) {
+    public TripRouteRequest(Schedule schedule, String transport, Location location, List<SelectedPlace> places) {
+        this(schedule, transport, location, places, false);
+    }
 }

@@ -37,6 +37,14 @@ public class UserController {
     private final AccountWithdrawalService withdrawalService;
     private final ChatRealtimeService realtimeService;
 
+    @org.springframework.web.bind.annotation.ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<java.util.Map<String, String>> providerUnavailable(
+            org.springframework.web.server.ResponseStatusException error) {
+        return ResponseEntity.status(error.getStatusCode()).body(java.util.Map.of(
+                "error", "account_operation_unavailable",
+                "message", "연결된 로그인 제공자를 확인하지 못했습니다. 잠시 후 다시 시도해주세요."));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<UserMeResponse> getMe(
             @AuthenticationPrincipal Long userId

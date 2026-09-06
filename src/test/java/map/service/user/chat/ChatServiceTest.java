@@ -58,6 +58,7 @@ class ChatServiceTest {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final long OWNER = 1L;
 
+    @Autowired private map.service.user.chat.repository.ChatMembershipIntervalRepository intervals;
     @Autowired private ChatRoomRepository roomRepository;
     @Autowired private ChatParticipantRepository participantRepository;
     @Autowired private ChatMessageRepository messageRepository;
@@ -75,7 +76,7 @@ class ChatServiceTest {
 
     @BeforeEach
     void setUp() {
-        access = new ChatRoomAccessService(roomRepository, participantRepository);
+        access = new ChatRoomAccessService(roomRepository, participantRepository, intervals);
         roomService = new ChatRoomService(roomRepository, participantRepository, messageRepository,
                 scheduleRepository, props, access);
         inviteService = new ChatInviteService(roomRepository, participantRepository, tokenFactory,

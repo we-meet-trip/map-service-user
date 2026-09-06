@@ -14,6 +14,23 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
+    @org.springframework.data.jpa.repository.Query("select m from ChatMessage m where m.roomId = :room "
+            + "and m.seq < :before and exists (select i.id from ChatMembershipInterval i "
+            + "where i.roomId = m.roomId and i.userId = :uid and m.seq > i.startSeq "
+            + "and (i.endSeq is null or m.seq <= i.endSeq)) order by m.seq desc")
+    List<ChatMessage> findVisible(@org.springframework.data.repository.query.Param("room") Long roomId,
+                                 @org.springframework.data.repository.query.Param("uid") Long userId,
+                                 @org.springframework.data.repository.query.Param("before") long before,
+                                 Pageable page);
+
+    @org.springframework.data.jpa.repository.Query("select count(m) from ChatMessage m where m.roomId = :room "
+            + "and m.seq > :after and exists (select i.id from ChatMembershipInterval i "
+            + "where i.roomId = m.roomId and i.userId = :uid and m.seq > i.startSeq "
+            + "and (i.endSeq is null or m.seq <= i.endSeq))")
+    long countVisibleAfter(@org.springframework.data.repository.query.Param("room") Long roomId,
+                            @org.springframework.data.repository.query.Param("uid") Long userId,
+                            @org.springframework.data.repository.query.Param("after") long after);
+
     /** 첫 페이지: 방의 최신 메시지부터 seq 내림차순. */
     List<ChatMessage> findByRoomIdOrderBySeqDesc(Long roomId, Pageable pageable);
 

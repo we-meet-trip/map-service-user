@@ -24,6 +24,8 @@ public interface ChatParticipantRepository extends JpaRepository<ChatParticipant
     /** 방의 특정 상태 참가자 수. 상한(10명) 검사에 사용. */
     long countByRoomIdAndStatus(Long roomId, ChatParticipant.Status status);
 
+    List<ChatParticipant> findByUserIdAndStatusNot(Long userId, ChatParticipant.Status status);
+
     /** 사용자가 특정 상태로 속한 방 목록(내 채팅방 목록). */
     List<ChatParticipant> findByUserIdAndStatus(Long userId, ChatParticipant.Status status);
 

@@ -5,7 +5,7 @@ package map.service.user.places;
  *
  * PlacePhotosClient 가 hub 로부터 4xx/5xx 응답을 받았을 때 던지는
  * RuntimeException. 호출자/전역 핸들러가 상태코드와 본문을 검사할 수 있도록
- * 두 값을 보관한다. 기본 메시지에는 본문 앞 200자만 잘라 포함한다.
+ * 두 값을 보관한다. 기본 메시지에는 서비스와 상태 코드만 포함한다.
  *
  * statusCode: hub 응답의 HTTP 상태 코드.
  * body: hub 응답 본문 원문. null 가능.
@@ -16,7 +16,7 @@ public class PlacePhotosException extends RuntimeException {
     private final String body;
 
     public PlacePhotosException(int statusCode, String body) {
-        super("place photos " + statusCode + ": " + truncate(body, 200));
+        super("place photos " + statusCode);
         this.statusCode = statusCode;
         this.body = body;
     }

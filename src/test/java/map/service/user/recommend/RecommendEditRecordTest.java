@@ -49,7 +49,10 @@ class RecommendEditRecordTest {
     @BeforeEach
     void setUp() {
         store = new RecommendJobStore(repository, trainingRepository, editRepository,
-                objectMapper, TestPayloadCiphers.enabled());
+                objectMapper, TestPayloadCiphers.enabled(),
+                org.mockito.Mockito.mock(RecommendEditRequestRepository.class),
+                org.mockito.Mockito.mock(RecommendCancellationRepository.class), TestJobOwners.active());
+        org.springframework.test.util.ReflectionTestUtils.setField(store, "trainingCaptureEnabled", true);
     }
 
     private void flushAndClear() {

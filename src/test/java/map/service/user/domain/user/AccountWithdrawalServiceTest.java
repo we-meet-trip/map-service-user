@@ -51,7 +51,11 @@ class AccountWithdrawalServiceTest {
         participantService = mock(ChatParticipantService.class);
         jwtService = mock(JwtService.class);
         service = new AccountWithdrawalService(userRepository, scheduleRepository,
-                participantRepository, participantService, jwtService);
+                participantRepository, participantService, jwtService,
+                mock(map.service.user.recommend.RecommendJobStore.class),
+                mock(map.service.user.recommend.DraftStore.class),
+                mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                mock(map.service.user.domain.auth.apple.AppleAccountService.class));
     }
 
     private User user() {
@@ -71,7 +75,7 @@ class AccountWithdrawalServiceTest {
     @DisplayName("방에서 먼저 빠지고, 일정을 지운 뒤, 사용자를 지운다")
     void removesInOrder() {
         User user = user();
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
         when(participantRepository.findByUserIdAndStatus(1L, ChatParticipant.Status.ACTIVE))
                 .thenReturn(List.of(participantOf(10L)));
 
@@ -86,7 +90,7 @@ class AccountWithdrawalServiceTest {
     @Test
     @DisplayName("소유자로 있던 방만 종료 대상으로 돌려준다")
     void reportsOnlyClosedRooms() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
         when(participantRepository.findByUserIdAndStatus(1L, ChatParticipant.Status.ACTIVE))
                 .thenReturn(List.of(participantOf(10L), participantOf(20L)));
         when(participantService.leave(10L, 1L)).thenReturn(true);
@@ -98,7 +102,7 @@ class AccountWithdrawalServiceTest {
     @Test
     @DisplayName("참가 중인 방이 없어도 탈퇴는 끝난다")
     void withdrawsWithoutRooms() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
         when(participantRepository.findByUserIdAndStatus(1L, ChatParticipant.Status.ACTIVE))
                 .thenReturn(List.of());
 
@@ -109,7 +113,7 @@ class AccountWithdrawalServiceTest {
     @Test
     @DisplayName("지금 들고 온 접근 토큰을 막는다 — 만료 전까지 스스로 무효가 되지 않는다")
     void blocksPresentedAccessToken() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
         when(participantRepository.findByUserIdAndStatus(1L, ChatParticipant.Status.ACTIVE))
                 .thenReturn(List.of());
 
@@ -121,7 +125,7 @@ class AccountWithdrawalServiceTest {
     @Test
     @DisplayName("없는 사용자면 아무것도 지우지 않는다")
     void unknownUserDeletesNothing() {
-        when(userRepository.findById(9L)).thenReturn(Optional.empty());
+        when(userRepository.findByIdForUpdate(9L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.withdraw(9L, "tok"))
                 .isInstanceOf(CustomException.class);
@@ -129,4 +133,15 @@ class AccountWithdrawalServiceTest {
         verify(scheduleRepository, never()).deleteByUserId(any());
         verify(userRepository, never()).delete(any(User.class));
     }
+    @Test
+    void flushesManagedMembershipChangesBeforeErasingDetachedRows() {
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
+        service.withdraw(1L, "token");
+        var order = org.mockito.Mockito.inOrder(userRepository, scheduleRepository);
+        order.verify(userRepository).findByIdForUpdate(1L);
+        order.verify(userRepository).flush();
+        order.verify(scheduleRepository).deleteByUserId(1L);
+        order.verify(userRepository).delete(org.mockito.ArgumentMatchers.any());
+    }
+
 }

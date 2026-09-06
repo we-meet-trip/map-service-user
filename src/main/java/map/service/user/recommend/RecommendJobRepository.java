@@ -17,6 +17,11 @@ import org.springframework.data.repository.query.Param;
  * 식별자 타입은 UUID(job_id)이다. 관리자 통계/목록용 쿼리를 추가한다.
  */
 public interface RecommendJobRepository extends JpaRepository<RecommendJobEntity, UUID> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from RecommendJobEntity j where j.jobId = :jobId")
+    java.util.Optional<RecommendJobEntity> findByIdForUpdate(@Param("jobId") UUID jobId);
+
+    List<RecommendJobEntity> findByOwnerUserId(Long userId);
 
     /** 상태별 건수 집계: [status, count] 행 목록(운영 통계). */
     @Query("SELECT r.status AS status, COUNT(r) AS cnt "

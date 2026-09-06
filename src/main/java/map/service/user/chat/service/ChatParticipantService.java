@@ -85,8 +85,9 @@ public class ChatParticipantService {
      */
     @Transactional
     public boolean leave(Long roomId, Long userId) {
-        ChatRoom room = access.requireRoom(roomId);
+        ChatRoom room = access.requireRoomForUpdate(roomId);
         ChatParticipant participant = access.requireActiveParticipant(roomId, userId);
+        access.closeInterval(roomId, userId, room.getNextSeq());
         participant.leave();
         if (participant.isOwner()) {
             room.close();
@@ -104,13 +105,14 @@ public class ChatParticipantService {
      */
     @Transactional
     public void kick(Long roomId, Long ownerId, Long targetUserId) {
-        access.requireRoom(roomId);
+        ChatRoom room = access.requireRoomForUpdate(roomId);
         access.requireOwner(roomId, ownerId);
         ChatParticipant target = participantRepository.findByRoomIdAndUserId(roomId, targetUserId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT));
         if (target.isOwner()) {
             throw new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT);
         }
+        access.closeInterval(roomId, targetUserId, room.getNextSeq());
         target.kick();
     }
 }

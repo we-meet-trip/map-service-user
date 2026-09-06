@@ -85,6 +85,16 @@ public class ChatWebSocketConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(new org.springframework.messaging.support.ChannelInterceptor() {
+            @Override public org.springframework.messaging.Message<?> preSend(
+                    org.springframework.messaging.Message<?> message, org.springframework.messaging.MessageChannel channel) {
+                return authChannelInterceptor.authorizeOutbound(message);
+            }
+        });
+    }
+
+    @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(authChannelInterceptor);
     }

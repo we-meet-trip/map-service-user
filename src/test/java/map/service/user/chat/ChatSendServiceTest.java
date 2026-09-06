@@ -50,7 +50,7 @@ class ChatSendServiceTest {
 
     @BeforeEach
     void setUp() {
-        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository);
+        ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository, org.mockito.Mockito.mock(map.service.user.chat.repository.ChatMembershipIntervalRepository.class));
         messageService = new ChatMessageService(messageRepository, participantRepository, props, access);
     }
 

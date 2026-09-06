@@ -42,6 +42,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
     private final JwtService jwtService;
     private final ChatRoomAccessService access;
+    private final java.util.Map<String, String> sessionTokens = new java.util.concurrent.ConcurrentHashMap<>();
 
     public StompAuthChannelInterceptor(JwtService jwtService, ChatRoomAccessService access) {
         this.jwtService = jwtService;
@@ -58,8 +59,13 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         StompCommand command = accessor.getCommand();
         if (StompCommand.CONNECT.equals(command)) {
             authenticateConnect(accessor);
-        } else if (StompCommand.SUBSCRIBE.equals(command)) {
-            authorizeSubscribe(accessor);
+        } else if (StompCommand.SUBSCRIBE.equals(command) || StompCommand.SEND.equals(command)) {
+            validateSession(accessor.getSessionId());
+            if (StompCommand.SUBSCRIBE.equals(command)) authorizeSubscribe(accessor);
+            else if (accessor.getDestination() == null || !accessor.getDestination().startsWith("/app/"))
+                throw new MessagingException("unsupported destination");
+        } else if (StompCommand.DISCONNECT.equals(command) && accessor.getSessionId() != null) {
+            sessionTokens.remove(accessor.getSessionId());
         }
         return message;
     }
@@ -78,6 +84,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             throw new MessagingException("invalid authorization token");
         }
         accessor.setUser(new StompPrincipal(userId.toString()));
+        if (accessor.getSessionId() != null) sessionTokens.put(accessor.getSessionId(), token);
     }
 
     /**
@@ -103,7 +110,8 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             throw new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT);
         }
         if (!destination.startsWith(ROOM_TOPIC_PREFIX)) {
-            return; // 방 토픽이 아니면 인가 대상이 아니다(수신할 브로드캐스트도 없다).
+            if (destination.startsWith("/user/queue/")) return;
+            throw new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT);
         }
         Long roomId = parseRoomId(destination);
         if (roomId == null) {
@@ -119,6 +127,35 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         }
     }
 
+    private Long validateSession(String sessionId) {
+        String token = sessionId == null ? null : sessionTokens.get(sessionId);
+        if (token == null) throw new MessagingException("unauthenticated session");
+        return jwtService.extractUserId(jwtService.validateAccessToken(token));
+    }
+
+    /** Recheck membership and token for each delivery, including subscriptions opened before leaving. */
+    public Message<?> authorizeOutbound(Message<?> message) {
+        var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.wrap(message);
+        if (headers.getMessageType() != org.springframework.messaging.simp.SimpMessageType.MESSAGE) return message;
+        try {
+            Long uid = validateSession(headers.getSessionId());
+            String destination = headers.getDestination();
+            if (destination != null && destination.startsWith(ROOM_TOPIC_PREFIX)) {
+                Long room = parseRoomId(destination);
+                if (room == null) return null;
+                access.requireActiveParticipant(room, uid);
+            }
+            return message;
+        } catch (RuntimeException denied) {
+            return null;
+        }
+    }
+
+    @org.springframework.context.event.EventListener
+    public void disconnected(org.springframework.web.socket.messaging.SessionDisconnectEvent event) {
+        sessionTokens.remove(event.getSessionId());
+    }
+
     /** "Bearer <token>" 에서 토큰만 떼어낸다. 형식이 아니면 null. */
     private String extractBearer(String header) {
         if (header != null && header.startsWith(BEARER_PREFIX)) {
@@ -132,9 +169,8 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         if (destination == null || !destination.startsWith(ROOM_TOPIC_PREFIX)) {
             return null;
         }
-        String rest = destination.substring(ROOM_TOPIC_PREFIX.length());
-        int slash = rest.indexOf('/');
-        String idPart = (slash >= 0) ? rest.substring(0, slash) : rest;
+        String idPart = destination.substring(ROOM_TOPIC_PREFIX.length());
+        if (!idPart.matches("[0-9]+")) return null;
         try {
             return Long.parseLong(idPart);
         } catch (NumberFormatException e) {

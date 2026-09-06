@@ -24,9 +24,15 @@ public class HubNearbyClient {
     private static final Logger log = LoggerFactory.getLogger(HubNearbyClient.class);
 
     private final RestClient client;
+    private final map.service.user.global.crypto.LocationSeal seal;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    public HubNearbyClient(@Qualifier("hubRestClient") RestClient client) {
+    public HubNearbyClient(@Qualifier("hubRestClient") RestClient client,
+                           map.service.user.global.crypto.LocationSeal seal,
+                           com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.client = client;
+        this.seal = seal;
+        this.objectMapper = objectMapper;
     }
 
     /** hub 응답 봉투. 필요한 칸만 받는다. */
@@ -43,16 +49,18 @@ public class HubNearbyClient {
     public List<NearbyPlace> find(double lat, double lng, String category,
                                   int radiusMeters, int size) {
         try {
-            Response res = client.get()
-                    .uri(b -> b.path("/v1/places/nearby")
-                            .queryParam("lat", lat)
-                            .queryParam("lng", lng)
-                            .queryParam("category", category)
-                            .queryParam("radius", radiusMeters)
-                            .queryParam("size", size)
-                            .build())
+            com.fasterxml.jackson.databind.JsonNode body = client.get()
+                    .uri(b -> {
+                        b.path("/v1/places/nearby");
+                        if (seal.isEnabled()) b.queryParam("loc", seal.seal(lat, lng));
+                        else b.queryParam("lat", lat).queryParam("lng", lng);
+                        return b.queryParam("category", category)
+                                .queryParam("radius", radiusMeters).queryParam("size", size).build();
+                    })
                     .retrieve()
-                    .body(Response.class);
+                    .body(com.fasterxml.jackson.databind.JsonNode.class);
+            if (body != null && seal.isEnabled()) body = seal.open(body.path("loc").asText());
+            Response res = body == null ? null : objectMapper.convertValue(body, Response.class);
             return res == null || res.places() == null ? List.of() : res.places();
         } catch (RestClientResponseException e) {
             log.warn("hub /v1/places/nearby failed category={} status={}",

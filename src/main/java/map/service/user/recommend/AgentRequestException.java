@@ -5,7 +5,7 @@ package map.service.user.recommend;
  *
  * AgentClient 가 4xx/5xx 응답을 받았을 때 던지는 RuntimeException.
  * 호출자가 상태코드와 본문을 검사해 후속 처리를 할 수 있도록 두 값을 보관한다.
- * 기본 메시지에는 본문 앞 200자만 truncate 하여 포함된다.
+ * 기본 메시지에는 서비스와 상태 코드만 포함한다.
  *
  * statusCode: agent 응답의 HTTP 상태 코드.
  * body: agent 응답 본문 전체. null 가능.
@@ -18,13 +18,13 @@ public class AgentRequestException extends RuntimeException {
     /**
      * 상태코드와 응답 본문으로 예외를 생성.
      *
-     * 슈퍼클래스 메시지는 "agent {statusCode}: {본문 앞 200자}" 형식이다.
+     * 슈퍼클래스 메시지는 "agent {statusCode}" 형식이며 본문은 포함하지 않는다.
      *
      * statusCode: agent 응답 HTTP 상태 코드.
      * body: 응답 본문 원문. null 가능.
      */
     public AgentRequestException(int statusCode, String body) {
-        super("agent " + statusCode + ": " + truncate(body, 200));
+        super("agent " + statusCode);
         this.statusCode = statusCode;
         this.body = body;
     }

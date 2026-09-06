@@ -67,6 +67,8 @@ public class RecommendService {
     private static final int THEME_MERGE_MAX = 6;
 
     private final AgentClient agentClient;
+    @Value("${training.capture.enabled:false}")
+    private boolean trainingCaptureEnabled;
     private final DraftStore draftStore;
     private final ObjectMapper objectMapper;
     private final ResearchLimitService researchLimitService;
@@ -76,6 +78,7 @@ public class RecommendService {
     private final ProfileThemeProvider profileThemeProvider;
     private final Executor cacheRefreshExecutor;
     private final long refreshEveryHits;
+    private final map.service.user.schedule.ScheduleRepository schedules;
 
     public RecommendService(
             AgentClient agentClient,
@@ -87,8 +90,10 @@ public class RecommendService {
             RecommendCacheKey cacheKeyBuilder,
             ProfileThemeProvider profileThemeProvider,
             @Qualifier("recommendCacheRefreshExecutor") Executor cacheRefreshExecutor,
-            @Value("${recommend.cache-refresh-every-hits:3}") long refreshEveryHits
+            @Value("${recommend.cache-refresh-every-hits:3}") long refreshEveryHits,
+            map.service.user.schedule.ScheduleRepository schedules
     ) {
+        this.schedules = schedules;
         this.agentClient = agentClient;
         this.draftStore = draftStore;
         this.objectMapper = objectMapper;
@@ -195,7 +200,6 @@ public class RecommendService {
         // 들고 있는 원본 잡을 잇는 유일한 끈이다.
         String origin = originJobId(cached.get());
         String payload = withJobId(cached.get(), jobId);
-        draftStore.save(jobId, payload);
         // 캐시 히트는 agent job 이 없어 완료 이벤트가 영영 오지 않는다. 즉시 완료로
         // 기록해야 findDraft 의 PG 폴백(Redis draft TTL 만료 이후)과 admin 콘솔
         // 추천작업 목록·통계에서 누락되지 않는다. insertInProgress 가 먼저
@@ -204,7 +208,8 @@ public class RecommendService {
                 RecommendJobStore.JobOrigin.cacheHit(origin).ownedBy(userId)
                         .withSegment(segmentOf(userId, false)),
                 normalized.province(), normalized.city());
-        jobStore.markFinished(jobId, "done", payload);
+        jobStore.recordCompletion(jobId, "done", payload, null);
+        cacheDraft(jobId, payload);
         maybeTriggerBackgroundRefresh(normalized, hash);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
     }
@@ -227,7 +232,7 @@ public class RecommendService {
      * 두 번 세게 된다 — 그것을 갈라 보려면 표시가 있어야 한다.
      */
     private Map<String, Object> segmentOf(Long userId, boolean themeMerged) {
-        return profileThemeProvider.segmentFor(userId, themeMerged);
+        return trainingCaptureEnabled ? profileThemeProvider.segmentFor(userId, themeMerged) : null;
     }
 
     /**
@@ -351,17 +356,30 @@ public class RecommendService {
      *
      * jobId: 조회 대상 작업 식별자. 유효 UUID 가 아니면 PG 폴백은 자연히 empty.
      */
+    public Optional<String> findOwnedDraft(String jobId, Long userId) {
+        jobStore.requireOwned(jobId, userId);
+        return findDraft(jobId);
+    }
+
     public Optional<String> findDraft(String jobId) {
-        Optional<String> hit = draftStore.find(jobId);
-        if (hit.isPresent()) {
-            return hit;
+        // PG is authoritative after edits. A stale/failed Redis write must never undo an edit.
+        Optional<String> durable = jobStore.findFinishedPayload(jobId);
+        if (durable.isPresent()) return durable;
+        try {
+            Optional<String> hit = draftStore.find(jobId);
+            return hit.isPresent() ? hit : resolveWaiting(jobId);
+        } catch (RuntimeException e) {
+            log.warn("recommend draft cache unavailable job_id={} cause={}", jobId, e.getClass().getSimpleName());
+            return Optional.empty();
         }
-        Optional<String> fallback = jobStore.findFinishedPayload(jobId);
-        if (fallback.isPresent()) {
-            fallback.ifPresent(payload -> draftStore.save(jobId, payload));
-            return fallback;
+    }
+
+    private void cacheDraft(String jobId, String payload) {
+        try {
+            draftStore.save(jobId, payload);
+        } catch (RuntimeException e) {
+            log.warn("recommend draft cache write unavailable job_id={} cause={}", jobId, e.getClass().getSimpleName());
         }
-        return resolveWaiting(jobId);
     }
 
     /**
@@ -407,12 +425,12 @@ public class RecommendService {
         // 잡으로 저장된 일정은 후보를 되짚을 수 없다.
         String origin = originJobId(produced.get());
         String payload = withJobId(produced.get(), jobId);
-        draftStore.save(jobId, payload);
         if (origin != null) {
             jobStore.insertInProgress(jobId, null,
                     RecommendJobStore.JobOrigin.joined(origin));
         }
-        jobStore.markFinished(jobId, "done", payload);
+        jobStore.recordCompletion(jobId, "done", payload, null);
+        cacheDraft(jobId, payload);
         reuseCacheStore.clearWaiting(jobId);
         log.info("in-flight join resolved job_id={}", jobId);
         return Optional.of(payload);
@@ -433,53 +451,32 @@ public class RecommendService {
         return applyEdit(jobId, edit, null, null);
     }
 
-    /**
-     * 초안을 고친다. 소유자 확인과 기록을 함께 한다.
-     *
-     * 소유자: 잡에 소유자가 적혀 있고 그 사람이 아니면 거절한다. 적혀 있지
-     * 않으면(토큰 없이 만든 잡, 이전 잡) 모르는 것이므로 막지 않는다 —
-     * 모른다는 이유로 잠그면 인증을 켜기도 전에 기능이 멈춘다.
-     *
-     * 기록: 고치기 전후를 남기고 PG 의 완료 결과도 함께 맞춘다. 예전에는
-     * Redis 초안만 바꿔서, 초안이 만료된 뒤 PG 로 물으면 고치기 이전 결과가
-     * 되살아났다 — 사용자가 뺀 장소가 다시 나타난다.
-     *
-     * userId: 인증된 사용자. 토큰이 없으면 null.
-     * idempotencyKey: 같은 요청의 재시도를 가려내는 키. 없으면 매번 새 기록.
-     */
+    /** Apply the patch under a PG row lock and replay the original accepted response on retry. */
     public Optional<String> applyEdit(String jobId, EditRequest edit,
                                       Long userId, String idempotencyKey) {
-        Long owner = jobStore.ownerOf(jobId);
-        if (owner != null && !owner.equals(userId)) {
-            throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
-        }
-        Optional<String> current = draftStore.find(jobId);
-        if (current.isEmpty()) {
-            return Optional.empty();
-        }
+        jobStore.requireOwned(jobId, userId);
         try {
-            JsonNode root = objectMapper.readTree(current.get());
-            if (!(root instanceof ObjectNode obj)) {
-                return Optional.empty();
-            }
+            String requestJson = objectMapper.writeValueAsString(edit);
+            RecommendJobStore.EditOutcome outcome = jobStore.persistOwnedEdit(
+                    jobId, userId, idempotencyKey, requestJson, current -> mergeEdit(current, edit));
+            if (outcome == null) return Optional.empty();
+            cacheDraft(jobId, outcome.canonical());
+            return Optional.of(outcome.response());
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("edit json serialization failed", e);
+        }
+    }
+
+    private String mergeEdit(String current, EditRequest edit) {
+        try {
+            JsonNode root = objectMapper.readTree(current);
+            if (!(root instanceof ObjectNode obj)) return null;
             JsonNode editNode = objectMapper.valueToTree(edit);
-            if (edit.places() != null) {
-                obj.set("places", editNode.get("places"));
-            }
-            if (edit.visitOrder() != null) {
-                obj.set("visit_order", editNode.get("visit_order"));
-            }
-            if (edit.legs() != null) {
-                obj.set("legs", editNode.get("legs"));
-            }
+            if (edit.places() != null) obj.set("places", editNode.get("places"));
+            if (edit.visitOrder() != null) obj.set("visit_order", editNode.get("visit_order"));
+            if (edit.legs() != null) obj.set("legs", editNode.get("legs"));
             requireConsistent(obj);
-            String merged = objectMapper.writeValueAsString(obj);
-            // 기록을 먼저 한다. 여기서 실패하면 초안도 바꾸지 않는다 —
-            // 바꾼 뒤 기록에 실패하면 무엇이 바뀌었는지 알 길이 영영 없다.
-            // PG 의 완료 결과도 이 안에서 함께 맞춘다.
-            jobStore.recordEdit(jobId, userId, idempotencyKey, current.get(), merged);
-            draftStore.save(jobId, merged);
-            return Optional.of(merged);
+            return objectMapper.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("draft json parse failed", e);
         }
@@ -590,6 +587,14 @@ public class RecommendService {
     public JobAccepted research(
             String jobId, RecommendRequest request,
             List<String> extraExclude, List<SelectedPlace> keep, Long userId) {
+        jobStore.requireOwned(jobId, userId);
+        if (userId != null && request.scheduleId() != null && !request.scheduleId().isBlank()) {
+            Long schedule;
+            try { schedule = Long.valueOf(request.scheduleId()); }
+            catch (NumberFormatException invalid) { throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER); }
+            if (schedules.findByScheduleIdAndUserId(schedule, userId).isEmpty())
+                throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
+        }
         String limitKey = (request.scheduleId() != null && !request.scheduleId().isBlank())
                 ? "sched:" + request.scheduleId()
                 : "job:" + jobId;
@@ -604,7 +609,6 @@ public class RecommendService {
                 }
             }
         }
-        draftStore.delete(jobId);
         List<SelectedPlace> pinned =
                 (keep == null || keep.isEmpty()) ? null : List.copyOf(keep);
         JobAccepted accepted = agentClient.requestRecommend(
@@ -694,7 +698,7 @@ public class RecommendService {
                 request.scheduleId(),
                 stage,
                 exclude,
-                places);
+                places, "route".equals(stage) && request.optimize());
     }
 
     /**
@@ -715,7 +719,7 @@ public class RecommendService {
                 request.scheduleId(),
                 request.stage(),
                 request.exclude(),
-                request.places());
+                request.places(), request.optimize());
     }
 
     /**
@@ -799,9 +803,14 @@ public class RecommendService {
      * 아니라 바뀐 날씨로 처음부터 다시 짜는 것이다.
      */
     public JobAccepted createFreshRecommendation(RecommendRequest request) {
+        return createFreshRecommendation(request, null);
+    }
+
+    public JobAccepted createFreshRecommendation(RecommendRequest request, Long userId) {
         RecommendRequest normalized = withStage(request, "init", List.of());
         JobAccepted accepted = agentClient.requestRecommend(normalized);
         jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
+                RecommendJobStore.JobOrigin.agent("init").ownedBy(userId),
                 normalized.province(), normalized.city());
         return accepted;
     }

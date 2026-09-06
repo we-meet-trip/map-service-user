@@ -60,7 +60,7 @@ class TripResearchServiceTest {
                 recommendService, hubWeatherClient, stopsAssembler,
                 mock(ReviewSummaryService.class), new ObjectMapper(),
                 mock(map.service.user.schedule.ScheduleService.class), 1L, 10L);
-        when(recommendService.research(anyString(), any(), any(), any()))
+        when(recommendService.research(anyString(), any(), any(), any(), any()))
                 .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
     }
 
@@ -101,7 +101,7 @@ class TripResearchServiceTest {
         SelectedPlace keep = new SelectedPlace(
                 "속초해변", "강원 속초시", 38.19, 128.60, 1, "kakao:1", "해변");
 
-        service.research(request(List.of("kakao:1", "kakao:2"), List.of(keep), null));
+        service.research(request(List.of("kakao:1", "kakao:2"), List.of(keep), null), 7L);
 
         ArgumentCaptor<RecommendRequest> req =
                 ArgumentCaptor.forClass(RecommendRequest.class);
@@ -110,7 +110,7 @@ class TripResearchServiceTest {
         ArgumentCaptor<List<SelectedPlace>> pinned =
                 ArgumentCaptor.forClass(List.class);
         verify(recommendService).research(
-                eq(PREV_ID), req.capture(), exclude.capture(), pinned.capture());
+                eq(PREV_ID), req.capture(), exclude.capture(), pinned.capture(), eq(7L));
 
         assertThat(exclude.getValue()).containsExactly("kakao:1", "kakao:2");
         assertThat(pinned.getValue()).hasSize(1);
@@ -133,7 +133,7 @@ class TripResearchServiceTest {
         ArgumentCaptor<RecommendRequest> req =
                 ArgumentCaptor.forClass(RecommendRequest.class);
         verify(recommendService).research(
-                eq(PREV_ID), req.capture(), any(), any());
+                eq(PREV_ID), req.capture(), any(), any(), any());
         assertThat(req.getValue().scheduleId()).isEqualTo("42");
     }
 
@@ -154,7 +154,7 @@ class TripResearchServiceTest {
     @Test
     @DisplayName("하루 한도를 넘기면 409 로 끝나고 결과를 기다리지 않는다")
     void propagatesLimitExceeded() {
-        when(recommendService.research(anyString(), any(), any(), any()))
+        when(recommendService.research(anyString(), any(), any(), any(), any()))
                 .thenThrow(new CustomException(ErrorCode.RESEARCH_LIMIT_EXCEEDED));
 
         assertThatThrownBy(() -> service.research(request(null, null, null)))

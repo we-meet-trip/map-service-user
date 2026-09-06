@@ -71,7 +71,36 @@ public class TripStopsAssembler {
     ) {
         List<Place> ordered = orderPlaces(result);
         List<Route> routes = fetchRoutes(transport, ordered);
-        return toStops(ordered, result.legs(), transport, startHour, endHour, routes);
+        List<TripStop> stops = toStops(ordered, result.legs(), transport, startHour, endHour, routes);
+        requireTimelineConsistency(stops, startHour, endHour);
+        return stops;
+    }
+
+    /** Preserve verified visits only if the final travel durations still fit their original windows. */
+    static void requireTimelineConsistency(List<TripStop> stops, int startHour, int endHour) {
+        // Legacy/unverified payloads have no end times; do not invent a stay or claim validation.
+        if (stops.stream().noneMatch(stop -> hasText(stop.endTime()))) return;
+        for (int i = 0; i < stops.size(); i++) {
+            TripStop stop = stops.get(i);
+            int start = minutes(stop.time());
+            int end = minutes(stop.endTime());
+            if (start < startHour * 60 || end < start || end > endHour * 60)
+                throw new TripTimelineException();
+            if (i + 1 < stops.size() && stop.day() == stops.get(i + 1).day()) {
+                TransportToNext travel = stop.transportToNext();
+                if (travel == null || travel.durationMinutes() < 0
+                        || end + travel.durationMinutes() > minutes(stops.get(i + 1).time()))
+                    throw new TripTimelineException();
+            }
+        }
+    }
+
+    private static int minutes(String value) {
+        if (value == null || !value.matches("[0-2][0-9]:[0-5][0-9]")) throw new TripTimelineException();
+        int hours = Integer.parseInt(value.substring(0, 2));
+        int minutes = Integer.parseInt(value.substring(3));
+        if (hours > 24 || (hours == 24 && minutes != 0)) throw new TripTimelineException();
+        return hours * 60 + minutes;
     }
 
     /**

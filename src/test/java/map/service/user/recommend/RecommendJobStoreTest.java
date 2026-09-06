@@ -49,7 +49,9 @@ class RecommendJobStoreTest {
     @BeforeEach
     void setUp() {
         store = new RecommendJobStore(repository, trainingRepository, editRepository,
-                objectMapper, TestPayloadCiphers.enabled());
+                objectMapper, TestPayloadCiphers.enabled(),
+                org.mockito.Mockito.mock(RecommendEditRequestRepository.class),
+                org.mockito.Mockito.mock(RecommendCancellationRepository.class), TestJobOwners.active());
     }
 
     /** 보류 중인 변경을 DB 로 flush 하고 영속성 컨텍스트를 비워 진짜 DB 재조회를 강제한다. */

@@ -60,7 +60,7 @@ class AuthServiceTest {
                 .emailVerified(false)
                 .build();
 
-        when(jwtService.generateAccessToken(any())).thenReturn("mock.access.token");
+        when(jwtService.generateAccessToken(any(), anyString())).thenReturn("mock.access.token");
         when(jwtService.generateRawRefreshToken()).thenReturn("mock-raw-refresh");
         when(jwtService.getAccessTokenExpirySeconds()).thenReturn(3600L);
         when(jwtService.getRefreshTokenExpirySeconds()).thenReturn(2592000L);
@@ -151,6 +151,9 @@ class AuthServiceTest {
                 .expiresAt(OffsetDateTime.now().plusDays(7))
                 .build();
 
+        org.springframework.test.util.ReflectionTestUtils.setField(testUser, "id", 7L);
+        when(refreshTokenRepository.findUserIdByTokenHash(hash)).thenReturn(Optional.of(7L));
+        when(userRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(testUser));
         when(refreshTokenRepository.findByTokenHash(hash)).thenReturn(Optional.of(stored));
 
         TokenRefreshRequest request = makeRefreshRequest(rawToken);

@@ -55,6 +55,7 @@ public class TripController {
             @Valid @RequestBody TripGenerateRequest request,
             @AuthenticationPrincipal Long userId
     ) {
+        if (userId == null) throw new map.service.user.global.exception.CustomException(map.service.user.global.exception.ErrorCode.INVALID_TOKEN);
         return service.generate(request, userId);
     }
 
@@ -72,6 +73,7 @@ public class TripController {
             @Valid @RequestBody TripRouteRequest request,
             @AuthenticationPrincipal Long userId
     ) {
+        if (userId == null) throw new map.service.user.global.exception.CustomException(map.service.user.global.exception.ErrorCode.INVALID_TOKEN);
         return service.route(request, userId);
     }
 
@@ -89,9 +91,11 @@ public class TripController {
      */
     @PostMapping("/research")
     public TripGenerateResponse research(
-            @Valid @RequestBody TripResearchRequest request
+            @Valid @RequestBody TripResearchRequest request,
+            @AuthenticationPrincipal Long userId
     ) {
-        return service.research(request);
+        if (userId == null) throw new map.service.user.global.exception.CustomException(map.service.user.global.exception.ErrorCode.INVALID_TOKEN);
+        return service.research(request, userId);
     }
 
     /**

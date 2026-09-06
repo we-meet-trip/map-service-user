@@ -20,7 +20,7 @@ public class TransitRouteException extends RuntimeException {
     private final String body;
 
     public TransitRouteException(int statusCode, String body) {
-        super("transit routes " + statusCode + ": " + truncate(body, 200));
+        super("transit routes " + statusCode);
         this.statusCode = statusCode;
         this.body = body;
     }

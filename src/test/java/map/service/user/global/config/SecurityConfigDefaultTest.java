@@ -89,8 +89,8 @@ class SecurityConfigDefaultTest {
     }
 
     @Test
-    @DisplayName("익명 POST /recommend — principal 이 null 로 들어가고 202 로 접수된다")
-    void anonymousRecommendCreateReachesControllerWithNullPrincipal()
+    @DisplayName("익명 POST /recommend — auth.enforced와 무관하게 소유자 없는 접수 거절")
+    void anonymousRecommendCreateIsDeniedWithoutCallingAgent()
             throws Exception {
         // 추천 접수는 인증을 요구하지 않는 공개 경로다. 익명 principal 은
         // "anonymousUser" 문자열이라 Long 파라미터로 캐스팅되지 않는데,
@@ -107,11 +107,8 @@ class SecurityConfigDefaultTest {
                                 + "\"time_start\":\"09:00:00\","
                                 + "\"time_end\":\"18:00:00\"},"
                                 + "\"province\":\"서울특별시\",\"city\":\"강남구\"}"))
-                .andExpect(status().isAccepted());
+                .andExpect(status().isUnauthorized());
 
-        ArgumentCaptor<Long> userId = ArgumentCaptor.forClass(Long.class);
-        verify(recommendService).createRecommendationDetailed(
-                any(), userId.capture());
-        assertThat(userId.getValue()).isNull();
+        verify(recommendService, never()).createRecommendationDetailed(any(), any());
     }
 }

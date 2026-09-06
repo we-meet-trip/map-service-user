@@ -120,4 +120,16 @@ class UserMeSecurityTest {
 
         Mockito.verify(withdrawalService).withdraw(7L, "tok");
     }
+    @Test
+    void appleWithdrawalUnavailableRemains503OutsideAppleController() throws Exception {
+        Claims claims = Mockito.mock(Claims.class);
+        when(jwtService.validateAccessToken("tok")).thenReturn(claims);
+        when(jwtService.extractUserId(claims)).thenReturn(7L);
+        when(withdrawalService.withdraw(7L, "tok")).thenThrow(
+                new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        mockMvc.perform(delete("/api/v1/users/me").header("Authorization", "Bearer tok"))
+                .andExpect(status().isServiceUnavailable());
+        Mockito.verifyNoInteractions(realtimeService);
+    }
+
 }
