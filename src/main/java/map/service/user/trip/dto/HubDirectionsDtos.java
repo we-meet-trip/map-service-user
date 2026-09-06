@@ -56,7 +56,12 @@ public final class HubDirectionsDtos {
     public record Route(
             List<List<Double>> path,
             @JsonProperty("distance_m") int distanceM,
-            @JsonProperty("duration_s") int durationS
+            @JsonProperty("duration_s") int durationS,
+            String source,
+            @JsonProperty("route_profile") String routeProfile
     ) {
+        public Route(List<List<Double>> path, int distanceM, int durationS) {
+            this(path, distanceM, durationS, "UNKNOWN", null);
+        }
     }
 }

@@ -2,6 +2,7 @@ package map.service.user.trip.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 
 /**
  * HubWeatherDaily — hub /v1/weather 응답의 daily 원소 (역직렬화용)
@@ -21,6 +22,12 @@ public record HubWeatherDaily(
         @JsonProperty("temp_max") Integer tempMax,
         @JsonProperty("precipitation_prob") Integer precipitationProb,
         @JsonProperty("sky_condition") String skyCondition,
-        String source
+        String source,
+        @JsonProperty("source_at") OffsetDateTime sourceAt,
+        @JsonProperty("captured_at") OffsetDateTime capturedAt,
+        @JsonProperty("expires_at") OffsetDateTime expiresAt
 ) {
+    public HubWeatherDaily(LocalDate date, Integer min, Integer max, Integer pop, String sky, String source) {
+        this(date, min, max, pop, sky, source, null, null, null);
+    }
 }

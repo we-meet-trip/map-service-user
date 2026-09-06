@@ -47,7 +47,7 @@ class TripStopsAssemblerModeCaseTest {
         return new Route(
                 List.of(List.of(37.50, 127.0), List.of(37.505, 127.0),
                         List.of(37.51, 127.0)),
-                1420, 1230);
+                1420, 1230, "OSRM", "foot");
     }
 
     @Test

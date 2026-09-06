@@ -27,7 +27,7 @@ class TripStopsAssemblerMeasuredTest {
     void replacesWithMeasured() {
         List<List<Double>> path =
                 List.of(List.of(37.5, 127.0), List.of(37.6, 127.1));
-        Route route = new Route(path, 1420, 1230);
+        Route route = new Route(path, 1420, 1230, "OSRM", "foot");
 
         TransportToNext out = TripStopsAssembler.withMeasured(base(), route);
 
@@ -36,12 +36,14 @@ class TripStopsAssemblerMeasuredTest {
         assertThat(out.durationMinutes()).isEqualTo(21); // ceil(1230/60)
         assertThat(out.distanceKm()).isEqualTo(1.42); // round(1420/10)/100
         assertThat(out.path()).isEqualTo(path);
+        assertThat(out.source()).isEqualTo("OSRM");
+        assertThat(out.routeProfile()).isEqualTo("foot");
     }
 
     @Test
     @DisplayName("짧은 구간도 최소 1분 보장")
     void clampsDurationToAtLeastOneMinute() {
-        Route route = new Route(List.of(List.of(37.5, 127.0)), 40, 30);
+        Route route = new Route(List.of(List.of(37.5, 127.0), List.of(37.5001, 127.0001)), 40, 30, "OSRM", "foot");
 
         TransportToNext out = TripStopsAssembler.withMeasured(base(), route);
 
@@ -64,7 +66,7 @@ class TripStopsAssemblerMeasuredTest {
     void appliesKickboardDurationFactor() {
         // OSRM 은 킥보드 전용 프로파일이 없어 bicycle 값을 돌려준다.
         // 가 정한 0.7 보정을 BFF 가 적용해야 카드에 킥보드 속도가 반영된다.
-        Route route = new Route(List.of(List.of(37.5, 127.0)), 1420, 1200);
+        Route route = new Route(List.of(List.of(37.5, 127.0), List.of(37.501, 127.001)), 1420, 1200, "OSRM", "bicycle");
 
         TransportToNext out = TripStopsAssembler.withMeasured(base(), route, "scooter");
 
@@ -77,13 +79,44 @@ class TripStopsAssemblerMeasuredTest {
     @Test
     @DisplayName("킥보드가 아니면 보정하지 않는다")
     void doesNotApplyFactorForOtherTransports() {
-        Route route = new Route(List.of(List.of(37.5, 127.0)), 1420, 1200);
+        Route route = new Route(List.of(List.of(37.5, 127.0), List.of(37.501, 127.001)), 1420, 1200, "OSRM", "bicycle");
 
         assertThat(TripStopsAssembler.withMeasured(base(), route, "bicycle")
                 .durationMinutes()).isEqualTo(20); // ceil(1200/60)
-        assertThat(TripStopsAssembler.withMeasured(base(), route, "walk")
+        assertThat(TripStopsAssembler.withMeasured(base(), new Route(route.path(), 1420, 1200, "OSRM", "foot"), "walk")
                 .durationMinutes()).isEqualTo(20);
-        assertThat(TripStopsAssembler.withMeasured(base(), route, null)
+        assertThat(TripStopsAssembler.withMeasured(base(), new Route(route.path(), 1420, 1200, "OSRM", "foot"), null)
                 .durationMinutes()).isEqualTo(20);
     }
+    @Test
+    void refusesUnprovenMalformedOrWrongProfileRoutes() {
+        List<List<Double>> path = List.of(List.of(37.5, 127.0), List.of(37.51, 127.01));
+        for (Route invalid : List.of(
+                new Route(path, 1400, 900),
+                new Route(path, 1400, 900, "OSRM", "bicycle"),
+                new Route(path, -1, 900, "OSRM", "foot"),
+                new Route(path, 1400, 0, "OSRM", "foot"),
+                new Route(List.of(List.of(37.5, 127.0)), 1400, 900, "OSRM", "foot"),
+                new Route(List.of(List.of(Double.NaN, 127.0), List.of(37.51, 127.01)),
+                        1400, 900, "OSRM", "foot"))) {
+            TransportToNext result = TripStopsAssembler.withMeasured(base(), invalid);
+            assertThat(result.source()).isEqualTo("ESTIMATED");
+            assertThat(result.path()).isNull();
+            assertThat(result.durationMinutes()).isEqualTo(9);
+        }
+    }
+
+    @Test
+    void provenanceSurvivesSerializationAndLegacyPayloadIsUnknown() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var road = TripStopsAssembler.withMeasured(base(), new Route(
+                List.of(List.of(37.5, 127.0), List.of(37.51, 127.01)),
+                1400, 900, "OSRM", "foot"));
+        assertThat(mapper.readValue(mapper.writeValueAsBytes(road), TransportToNext.class))
+                .isEqualTo(road);
+        var legacy = mapper.readValue("{\"type\":\"walk\",\"duration_minutes\":9,\"distance_km\":0.9}",
+                TransportToNext.class);
+        assertThat(legacy.source()).isEqualTo("UNKNOWN");
+    }
+
 }

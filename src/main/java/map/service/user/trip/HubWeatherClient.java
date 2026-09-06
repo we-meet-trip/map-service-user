@@ -2,6 +2,8 @@ package map.service.user.trip;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import map.service.user.trip.dto.HubWeatherResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,20 +55,22 @@ public class HubWeatherClient {
                     .retrieve()
                     .body(HubWeatherResponse.class);
             if (res == null) {
-                return empty(province, city);
+                return empty(province, city, start, end);
             }
             return res;
         } catch (RuntimeException e) {
             // region 미해석(404) · hub 다운 · 타임아웃 등. 추천은 이미 성공했을 수 있으므로
             // 날씨만 비우고 진행한다(서버 로그에만 원인 기록).
-            log.warn("hub /v1/weather failed province={} city={} reason={}",
-                    province, city, e.getMessage());
-            return empty(province, city);
+            log.warn("hub /v1/weather failed reason={}", e.getClass().getSimpleName());
+            return empty(province, city, start, end);
         }
     }
 
     /** 날씨 데이터가 없을 때의 빈 응답(daily/missing_dates 비어 있음). */
-    private static HubWeatherResponse empty(String province, String city) {
-        return new HubWeatherResponse(province, city, List.of(), List.of());
+    private static HubWeatherResponse empty(String province, String city, LocalDate start, LocalDate end) {
+        List<LocalDate> missing = start == null || end == null || end.isBefore(start)
+                ? List.of() : start.datesUntil(end.plusDays(1)).toList();
+        return new HubWeatherResponse(province, city, List.of(), missing, false, null,
+                missing.stream().collect(Collectors.toMap(LocalDate::toString, day -> "unavailable")));
     }
 }
