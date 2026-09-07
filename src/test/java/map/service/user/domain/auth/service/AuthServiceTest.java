@@ -79,6 +79,19 @@ class AuthServiceTest {
         verifyNoInteractions(passwordEncoder);
     }
 
+    @Test
+    void futureAndTodayBirthdayAreDistinguishedBeforeAccountCreation() {
+        for (int offset : new int[] {0, 1}) {
+            EmailSignUpRequest request = makeSignUpRequest("synthetic@example.invalid", "password123!", "synthetic");
+            org.springframework.test.util.ReflectionTestUtils.setField(request, "birthDate",
+                    java.time.LocalDate.now(map.service.user.policy.BirthDatePolicy.KST).plusDays(offset));
+            assertThatThrownBy(() -> authService.signUp(request)).isInstanceOf(CustomException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", offset == 0 ? ErrorCode.AGE_RESTRICTED : ErrorCode.BIRTH_DATE_INVALID);
+        }
+        verify(userRepository, never()).save(any());
+        verifyNoInteractions(passwordEncoder);
+    }
+
     // ── signUp ──────────────────────────────────────────────────────────────
 
     @Test

@@ -38,15 +38,24 @@ class ServicePolicyServiceTest {
     @Test void existingUserHasNoFabricatedAcceptance() {
         assertThat(service.status(7L).accepted()).isFalse();
         assertThat(service.status(7L).ageEligible()).isNull();
-        assertCode(() -> service.requireEligible(7L), ErrorCode.SERVICE_POLICY_REQUIRED);
+        assertCode(() -> service.requireEligible(7L), ErrorCode.AGE_INFORMATION_REQUIRED);
         verify(records, never()).save(any());
     }
-    @Test void optionalBirthdayAllowsExplicitAdultDeclarationWithoutInventedBirthDate() {
-        var result = service.accept(7L, request());
-        assertThat(result.accepted()).isTrue();
-        assertThat(result.ageEligible()).isNull();
-        assertThat(result.acceptedAt().toInstant()).isEqualTo(clock.instant());
-        assertThat(user.getBirthDate()).isNull();
+    @Test void missingBirthdayCannotBeReplacedByAnAdultCheckbox() {
+        assertCode(() -> service.accept(7L, request()), ErrorCode.AGE_INFORMATION_REQUIRED);
+        assertThat(service.status(7L).accepted()).isFalse();
+        assertThat(service.status(7L).ageEligible()).isNull();
+        verify(records, never()).save(any());
+    }
+    @Test void previouslyAcceptedMissingBirthdayIsBlockedOnEveryNewRequest() {
+        when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user,
+                "2026-09-07", "2026-09-07", OffsetDateTime.now(clock))));
+        assertThat(service.status(7L).accepted()).isFalse();
+        assertCode(() -> service.requireEligible(7L), ErrorCode.AGE_INFORMATION_REQUIRED);
+        birthday("2000-01-01");
+        service.requireEligible(7L);
+        birthday("2012-01-01");
+        assertCode(() -> service.requireEligible(7L), ErrorCode.AGE_RESTRICTED);
     }
     @Test void kstEighteenthBirthdayIsEligibleWhileUtcDateIsStillYesterday() {
         birthday("2008-09-07");
@@ -75,6 +84,7 @@ class ServicePolicyServiceTest {
         verify(records, never()).save(any());
     }
     @Test void repeatedAcceptancePreservesOriginalTimestampAndRequiresAccountLock() {
+        birthday("2000-01-01");
         OffsetDateTime original = OffsetDateTime.now(clock).minusHours(1);
         when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user, "2026-09-07", "2026-09-07", original)));
         assertThat(service.accept(7L, request()).acceptedAt()).isEqualTo(original);
@@ -82,6 +92,7 @@ class ServicePolicyServiceTest {
         verify(records, never()).save(any());
     }
     @Test void previousPolicyRequiresNewExplicitAcceptance() {
+        birthday("2000-01-01");
         when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user, "old", "old", OffsetDateTime.now(clock).minusDays(1))));
         assertCode(() -> service.requireEligible(7L), ErrorCode.SERVICE_POLICY_REQUIRED);
         assertThat(service.accept(7L, request()).accepted()).isTrue();

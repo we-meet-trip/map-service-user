@@ -9,6 +9,9 @@ import map.service.user.domain.auth.dto.request.TokenRefreshRequest;
 import map.service.user.domain.auth.dto.response.AuthResponse;
 import map.service.user.domain.auth.service.AuthService;
 import map.service.user.domain.auth.service.KakaoOAuthService;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
+import org.springframework.util.MultiValueMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
@@ -40,8 +43,8 @@ public class AuthController {
      * 주고, 앱은 이 URL 을 커스텀탭으로 열어 로그인·동의를 진행한다. REST 키는 서버에만 존재한다.
      */
     @GetMapping("/kakao")
-    public ResponseEntity<Map<String, String>> kakaoLoginUrl(@RequestParam String state) {
-        return ResponseEntity.ok(Map.of("authorizeUrl", kakaoOAuthService.buildAuthorizeUrl(state)));
+    public ResponseEntity<Map<String, String>> kakaoLoginUrl(@RequestParam MultiValueMap<String, String> params) {
+        return ResponseEntity.ok(Map.of("authorizeUrl", kakaoOAuthService.buildAuthorizeUrl(single(params, "state", true))));
     }
 
     /**
@@ -50,13 +53,20 @@ public class AuthController {
      * 필요하다. 리다이렉트 대상 스킴은 설정값으로 고정되어 open-redirect 위험이 없다.
      */
     @GetMapping("/kakao/callback")
-    public ResponseEntity<Void> kakaoCallbackBounce(
-            @RequestParam(required = false) String code,
-            @RequestParam(required = false) String state,
-            @RequestParam(required = false) String error,
-            @RequestParam(name = "error_description", required = false) String errorDescription) {
-        String location = kakaoOAuthService.buildAppCallbackLocation(code, state, error, errorDescription);
+    public ResponseEntity<Void> kakaoCallbackBounce(@RequestParam MultiValueMap<String, String> params) {
+        String location = kakaoOAuthService.buildAppCallbackLocation(
+                single(params, "code", false), single(params, "state", true),
+                single(params, "error", false), single(params, "error_description", false));
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(location)).build();
+    }
+
+    private static String single(MultiValueMap<String, String> params, String name, boolean required) {
+        var values = params.get(name);
+        if (values == null && !required) return null;
+        if (values == null || values.size() != 1 || (required && values.get(0).isBlank())) {
+            throw new CustomException(ErrorCode.KAKAO_CALLBACK_INVALID);
+        }
+        return values.get(0);
     }
 
     @PostMapping("/kakao/callback")

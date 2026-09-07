@@ -84,7 +84,7 @@ class UserProfileServiceTest {
     @Test
     @DisplayName("보내지 않은 항목은 그대로 둔다")
     void updateLeavesOmittedFieldsUntouched() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
 
         // 관심사 설정 화면은 관심사만 보낸다.
         UserMeResponse out = service.updateMe(1L, new UserUpdateRequest(
@@ -100,7 +100,7 @@ class UserProfileServiceTest {
     @Test
     @DisplayName("빈 목록을 보내면 비운다")
     void updateWithEmptyListClearsIt() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
 
         UserMeResponse out = service.updateMe(1L, new UserUpdateRequest(
                 null, null, null, null, List.of(), null));
@@ -111,7 +111,7 @@ class UserProfileServiceTest {
     @Test
     @DisplayName("프로필 편집이 생년월일·성별까지 반영한다")
     void updateAppliesProfileFields() {
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
 
         UserMeResponse out = service.updateMe(1L, new UserUpdateRequest(
                 "새이름", "http://x/img.png",
@@ -140,4 +140,24 @@ class UserProfileServiceTest {
                 .isInstanceOf(CustomException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_FOUND);
     }
+    @Test
+    void firstBirthdayEntryAndLaterCorrectionUseLockedCurrentAccount() {
+        User stored = User.builder().nickname("synthetic").authProvider(AuthProvider.KAKAO).build();
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(stored));
+        assertThat(service.updateMe(1L, new UserUpdateRequest(null, null,
+                LocalDate.of(2000, 1, 1), null, null, null)).birthDate()).isEqualTo(LocalDate.of(2000, 1, 1));
+        assertThat(service.updateMe(1L, new UserUpdateRequest(null, null,
+                LocalDate.of(2012, 1, 1), null, null, null)).birthDate()).isEqualTo(LocalDate.of(2012, 1, 1));
+        assertThat(service.updateMe(1L, new UserUpdateRequest(null, null,
+                null, null, null, null)).birthDate()).isEqualTo(LocalDate.of(2012, 1, 1));
+        org.mockito.Mockito.verify(userRepository, org.mockito.Mockito.times(3)).findByIdForUpdate(1L);
+    }
+    @Test
+    void futureBirthdayFailsBeforeAnyProfileFieldIsChanged() {
+        assertThatThrownBy(() -> service.updateMe(1L, new UserUpdateRequest("must-not-save", null,
+                LocalDate.now(map.service.user.policy.BirthDatePolicy.KST).plusDays(1), null, null, null)))
+                .isInstanceOf(CustomException.class).hasFieldOrPropertyWithValue("errorCode", ErrorCode.BIRTH_DATE_INVALID);
+        org.mockito.Mockito.verifyNoInteractions(userRepository);
+    }
+
 }

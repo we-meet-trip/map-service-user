@@ -13,15 +13,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest(properties = "spring.jpa.properties.hibernate.hbm2ddl.create_namespaces=true")
 @ActiveProfiles("test")
-@Import(ServicePolicyService.class)
+@Import({ServicePolicyService.class, map.service.user.domain.user.service.UserProfileService.class})
 class ServicePolicyPersistenceTest {
     @Autowired UserRepository users;
     @Autowired ServicePolicyAcceptanceRepository records;
     @Autowired ServicePolicyService service;
     @Autowired EntityManager entityManager;
+    @Autowired map.service.user.domain.user.service.UserProfileService profiles;
     @Test void explicitAcceptancePersistsOnceAndWithdrawalCascadesOnlyItsOwnRecord() {
-        User first = users.saveAndFlush(User.builder().nickname("synthetic-consent-first").authProvider(AuthProvider.EMAIL).build());
-        User second = users.saveAndFlush(User.builder().nickname("synthetic-consent-second").authProvider(AuthProvider.EMAIL).build());
+        User first = users.saveAndFlush(User.builder().nickname("synthetic-consent-first").authProvider(AuthProvider.EMAIL).birthDate(java.time.LocalDate.of(2000, 1, 1)).build());
+        User second = users.saveAndFlush(User.builder().nickname("synthetic-consent-second").authProvider(AuthProvider.EMAIL).birthDate(java.time.LocalDate.of(2000, 1, 1)).build());
         var request = new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07", true, true, true);
         var original = service.accept(first.getId(), request);
         service.accept(first.getId(), request);
@@ -39,4 +40,26 @@ class ServicePolicyPersistenceTest {
         assertThat(records.findById(first.getId())).isEmpty();
         assertThat(service.status(second.getId()).accepted()).isTrue();
     }
+    @Test void existingReceiptCannotBypassMissingBirthdayAndCorrectionIsReevaluated() {
+        User user = users.saveAndFlush(User.builder().nickname("synthetic-dob-required")
+                .authProvider(AuthProvider.KAKAO).build());
+        records.saveAndFlush(new ServicePolicyAcceptance(user, "2026-09-07", "2026-09-07",
+                java.time.OffsetDateTime.now()));
+        entityManager.clear();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.requireEligible(user.getId()))
+                .hasFieldOrPropertyWithValue("errorCode", map.service.user.global.exception.ErrorCode.AGE_INFORMATION_REQUIRED);
+        assertThat(service.status(user.getId()).accepted()).isFalse();
+        profiles.updateMe(user.getId(), new map.service.user.domain.user.dto.UserUpdateRequest(null, null,
+                java.time.LocalDate.of(2000, 1, 1), null, null, null));
+        entityManager.flush(); entityManager.clear();
+        service.requireEligible(user.getId());
+        profiles.updateMe(user.getId(), new map.service.user.domain.user.dto.UserUpdateRequest(null, null,
+                java.time.LocalDate.of(2012, 1, 1), null, null, null));
+        entityManager.flush(); entityManager.clear();
+        assertThat(service.status(user.getId()).accepted()).isFalse();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.requireEligible(user.getId()))
+                .hasFieldOrPropertyWithValue("errorCode", map.service.user.global.exception.ErrorCode.AGE_RESTRICTED);
+        assertThat(records.count()).isEqualTo(1);
+    }
+
 }

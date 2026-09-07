@@ -22,7 +22,7 @@ import java.time.ZoneId;
 public class ServicePolicyService {
     public static final String TERMS_VERSION = "2026-09-07";
     public static final String PRIVACY_VERSION = "2026-09-07";
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final ZoneId KST = BirthDatePolicy.KST;
     private final UserRepository users;
     private final ServicePolicyAcceptanceRepository acceptances;
     private final Clock clock;
@@ -67,7 +67,7 @@ public class ServicePolicyService {
             throw new CustomException(ErrorCode.POLICY_VERSION_MISMATCH);
         // Serialize first acceptance/version changes with account deletion and other consent requests.
         User user = users.findByIdForUpdate(userId).orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
-        if (Boolean.FALSE.equals(ageEligible(user))) throw new CustomException(ErrorCode.AGE_RESTRICTED);
+        requireAdult(ageEligible(user));
         ServicePolicyAcceptance acceptance = acceptances.findById(userId).orElse(null);
         if (acceptance == null) {
             acceptance = acceptances.save(new ServicePolicyAcceptance(user, TERMS_VERSION, PRIVACY_VERSION,
@@ -81,22 +81,25 @@ public class ServicePolicyService {
 
     public void requireEligible(Long userId) {
         Status status = status(userId);
-        if (Boolean.FALSE.equals(status.ageEligible())) throw new CustomException(ErrorCode.AGE_RESTRICTED);
+        requireAdult(status.ageEligible());
         if (!status.accepted()) throw new CustomException(ErrorCode.SERVICE_POLICY_REQUIRED);
     }
 
     private Status status(User user, ServicePolicyAcceptance acceptance) {
         Boolean eligible = ageEligible(user);
-        boolean accepted = !Boolean.FALSE.equals(eligible) && acceptance != null
+        boolean accepted = Boolean.TRUE.equals(eligible) && acceptance != null
                 && acceptance.matches(TERMS_VERSION, PRIVACY_VERSION);
         return new Status(TERMS_VERSION, PRIVACY_VERSION, 18, accepted, eligible,
                 acceptance == null ? null : acceptance.acceptedAt());
     }
     private Boolean ageEligible(User user) {
-        // The optional profile birthday is corroborating data, not verified identity.
-        return user.getBirthDate() == null ? null
-                : !user.getBirthDate().plusYears(18).isAfter(LocalDate.now(clock.withZone(KST)));
+        return BirthDatePolicy.adult(user.getBirthDate(), LocalDate.now(clock.withZone(KST)));
     }
+    private static void requireAdult(Boolean eligible) {
+        if (eligible == null) throw new CustomException(ErrorCode.AGE_INFORMATION_REQUIRED);
+        if (!eligible) throw new CustomException(ErrorCode.AGE_RESTRICTED);
+    }
+
     private Long requireId(Long userId) {
         if (userId == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
         return userId;

@@ -1,6 +1,7 @@
 package map.service.user.domain.auth.service;
 
 import lombok.RequiredArgsConstructor;
+import map.service.user.policy.BirthDatePolicy;
 import map.service.user.domain.auth.dto.request.EmailLoginRequest;
 import map.service.user.domain.auth.dto.request.EmailSignUpRequest;
 import map.service.user.domain.auth.dto.request.TokenRefreshRequest;
@@ -43,8 +44,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse signUp(EmailSignUpRequest request) {
-        if (request.getBirthDate() != null && request.getBirthDate().plusYears(18)
-                .isAfter(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")))) {
+        var today = java.time.LocalDate.now(BirthDatePolicy.KST);
+        BirthDatePolicy.validate(request.getBirthDate(), today);
+        if (Boolean.FALSE.equals(BirthDatePolicy.adult(request.getBirthDate(), today))) {
             throw new CustomException(ErrorCode.AGE_RESTRICTED);
         }
         if (userRepository.existsByEmail(request.getEmail())) {

@@ -1,8 +1,7 @@
 package map.service.user.domain.auth.service;
 
+import map.service.user.domain.auth.dto.request.KakaoLoginRequest;
 import map.service.user.domain.auth.dto.response.AuthResponse;
-import map.service.user.domain.auth.dto.response.KakaoTokenResponse;
-import map.service.user.domain.auth.dto.response.KakaoUserInfoResponse;
 import map.service.user.domain.user.entity.AuthProvider;
 import map.service.user.domain.user.entity.OAuthAccount;
 import map.service.user.domain.user.entity.User;
@@ -10,250 +9,170 @@ import map.service.user.domain.user.repository.OAuthAccountRepository;
 import map.service.user.domain.user.repository.UserDeviceRepository;
 import map.service.user.domain.user.repository.UserRepository;
 import map.service.user.global.config.KakaoProperties;
+import map.service.user.global.exception.CustomException;
+import map.service.user.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
-import org.springframework.web.client.RestClient;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.web.client.RestClient;
 
 import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
-/**
- * KakaoOAuthService 단위 테스트
- *
- * RestClient를 통한 실제 카카오 API 호출은 테스트하지 않음.
- * 서비스 내부 분기 로직(신규/기존/이메일 연동)만 검증한다.
- * RestClient 호출 부분은 Spy + 부분 모킹으로 처리.
- */
-@ExtendWith(MockitoExtension.class)
-@DisplayName("KakaoOAuthService 단위 테스트")
+/** Executes the real service and both RestClient requests against an in-process provider stub. */
 class KakaoOAuthServiceTest {
-
-    @Mock private KakaoProperties        kakaoProperties;
-    @Mock private UserRepository         userRepository;
-    @Mock private OAuthAccountRepository oauthAccountRepository;
-    @Mock private UserDeviceRepository   userDeviceRepository;
-    @Mock private AuthService            authService;
-    @Mock private RestClient             kakaoRestClient;
-
-    @InjectMocks
-    private KakaoOAuthService kakaoOAuthService;
-
-    private User existingUser;
-    private KakaoTokenResponse mockKakaoToken;
-    private KakaoUserInfoResponse mockUserInfo;
+    private final UserRepository users = mock(UserRepository.class);
+    private final OAuthAccountRepository accounts = mock(OAuthAccountRepository.class);
+    private final UserDeviceRepository devices = mock(UserDeviceRepository.class);
+    private final AuthService auth = mock(AuthService.class);
+    private final KakaoProperties properties = new KakaoProperties();
+    private MockRestServiceServer provider;
+    private KakaoOAuthService service;
+    private final User existing = User.builder().email("synthetic@example.invalid")
+            .nickname("fixture").authProvider(AuthProvider.EMAIL).build();
+    private final AuthResponse response = AuthResponse.builder().accessToken("synthetic-session").build();
 
     @BeforeEach
-    void setUp() throws Exception {
-        existingUser = User.builder()
-                .email("kakao@example.com")
-                .nickname("카카오유저")
-                .authProvider(AuthProvider.KAKAO)
-                .emailVerified(true)
-                .build();
+    void setup() {
+        properties.setClientId("synthetic-provider-id");
+        properties.setRedirectUri("https://test.example.invalid/api/v1/auth/kakao/callback");
+        properties.setTokenUri("https://provider.example.invalid/token");
+        properties.setUserInfoUri("https://provider.example.invalid/me");
+        RestClient.Builder builder = RestClient.builder();
+        provider = MockRestServiceServer.bindTo(builder).build();
+        service = new KakaoOAuthService(properties, users, accounts, devices, auth, builder.build());
+    }
 
-        mockKakaoToken = buildKakaoTokenResponse();
-        mockUserInfo   = buildKakaoUserInfo(123456789L, "kakao@example.com", "카카오유저");
+    private void providerReturns(String email, String id) {
+        var form = new LinkedMultiValueMap<String, String>();
+        form.add("grant_type", "authorization_code");
+        form.add("client_id", "synthetic-provider-id");
+        form.add("redirect_uri", properties.getRedirectUri());
+        form.add("code", "synthetic-code");
+        provider.expect(requestTo(properties.getTokenUri())).andExpect(method(HttpMethod.POST))
+                .andExpect(content().formData(form))
+                .andRespond(withSuccess("{\"access_token\":\"synthetic-provider-token\",\"scope\":\"profile_nickname\"}", MediaType.APPLICATION_JSON));
+        String account = email == null ? "{}" : "{\"email\":\"" + email
+                + "\",\"email_needs_agreement\":false,\"is_email_verified\":true,\"is_email_valid\":true}";
+        provider.expect(requestTo(properties.getUserInfoUri())).andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer synthetic-provider-token"))
+                .andRespond(withSuccess("{\"id\":" + id + ",\"kakao_account\":" + account + "}", MediaType.APPLICATION_JSON));
+    }
 
-        AuthResponse mockAuth = AuthResponse.builder()
-                .accessToken("access")
-                .refreshToken("refresh")
-                .accessTokenExpiresIn(3600)
-                .refreshTokenExpiresIn(2592000)
-                .user(AuthResponse.UserInfo.builder()
-                        .id(1L)
-                        .email("kakao@example.com")
-                        .nickname("카카오유저")
-                        .authProvider(AuthProvider.KAKAO)
-                        .emailVerified(true)
-                        .build())
-                .build();
+    private AuthResponse login() {
+        var request = new KakaoLoginRequest();
+        org.springframework.test.util.ReflectionTestUtils.setField(request, "code", "synthetic-code");
+        try { return service.processLogin(request); }
+        finally { provider.verify(); }
+    }
 
-        when(authService.buildAuthResponse(any())).thenReturn(mockAuth);
+    private void expectConflict() {
+        assertThatThrownBy(this::login).isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException)e).getErrorCode()).isEqualTo(ErrorCode.KAKAO_ACCOUNT_CONFLICT);
+        verifyNoInteractions(auth, devices);
     }
 
     @Test
-    @DisplayName("기존 카카오 계정 — oauth_accounts에서 찾아 토큰 갱신 후 JWT 발급")
-    void processLogin_existingKakaoAccount_updatesTokenAndReturnsAuth() {
-        OAuthAccount existingOAuth = OAuthAccount.builder()
-                .user(existingUser)
-                .provider(AuthProvider.KAKAO)
-                .providerUserId(123456789L)
-                .build();
+    void linkedProviderIdentityLogsInWithoutSelectingByEmail() {
+        providerReturns("different@example.invalid", "123");
+        when(accounts.findByProviderAndProviderUserId(AuthProvider.KAKAO, 123L)).thenReturn(Optional.of(
+                OAuthAccount.builder().user(existing).provider(AuthProvider.KAKAO).providerUserId(123L).build()));
+        when(auth.buildAuthResponse(existing)).thenReturn(response);
+        assertThat(login()).isSameAs(response);
+        verifyNoInteractions(users);
+        verify(accounts, never()).saveAndFlush(any());
+    }
 
-        when(oauthAccountRepository.findByProviderAndProviderUserId(
-                eq(AuthProvider.KAKAO), eq(123456789L)))
-                .thenReturn(Optional.of(existingOAuth));
-
-        // RestClient 호출을 우회하여 서비스 분기 로직만 검증
-        AuthResponse response = invokeProcessLoginWithMockData(mockKakaoToken, mockUserInfo);
-
-        assertThat(response.getAccessToken()).isEqualTo("access");
-        // oauth_accounts 새로 저장하지 않음
-        verify(oauthAccountRepository, never()).save(any());
+    @ParameterizedTest
+    @EnumSource(AuthProvider.class)
+    void unlinkedProviderCannotClaimExistingEmailForAnyAccountType(AuthProvider type) {
+        providerReturns("synthetic@example.invalid", "123");
+        when(users.findByEmail("synthetic@example.invalid")).thenReturn(Optional.of(
+                User.builder().email("synthetic@example.invalid").authProvider(type).build()));
+        expectConflict();
+        verify(users, never()).save(any());
+        verify(accounts, never()).saveAndFlush(any());
     }
 
     @Test
-    @DisplayName("신규 카카오 사용자(이메일 없음) — 새 User 생성 후 oauth_accounts 저장")
-    void processLogin_newKakaoUser_noEmail_createsUserAndOAuth() {
-        KakaoUserInfoResponse noEmailInfo = buildKakaoUserInfo(9999999999L, null, "닉네임없음");
-
-        when(oauthAccountRepository.findByProviderAndProviderUserId(
-                eq(AuthProvider.KAKAO), eq(9999999999L)))
-                .thenReturn(Optional.empty());
-        when(userRepository.save(any(User.class))).thenReturn(existingUser);
-        when(oauthAccountRepository.save(any())).thenReturn(null);
-
-        AuthResponse response = invokeProcessLoginWithMockData(mockKakaoToken, noEmailInfo);
-
-        assertThat(response).isNotNull();
-        verify(userRepository).save(any(User.class));
-        verify(oauthAccountRepository).save(any(OAuthAccount.class));
+    void newProviderWithoutEmailCreatesItsOwnUserAndLink() {
+        providerReturns(null, "123");
+        when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(auth.buildAuthResponse(any())).thenReturn(response);
+        assertThat(login()).isSameAs(response);
+        var saved = ArgumentCaptor.forClass(OAuthAccount.class);
+        verify(accounts).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getProviderUserId()).isEqualTo(123L);
+        assertThat(saved.getValue().getUser().getEmail()).isNull();
+        assertThat(saved.getValue().getUser().isEmailVerified()).isFalse();
+        verify(users, never()).findByEmail(any());
     }
 
     @Test
-    @DisplayName("신규 카카오 사용자(이메일 중복) — 기존 email user와 연동")
-    void processLogin_newKakaoUser_existingEmailUser_linksAccounts() {
-        User emailUser = User.builder()
-                .email("kakao@example.com")
-                .nickname("이메일유저")
-                .passwordHash("hash")
-                .authProvider(AuthProvider.EMAIL)
-                .emailVerified(true)
-                .build();
-
-        when(oauthAccountRepository.findByProviderAndProviderUserId(any(), any()))
-                .thenReturn(Optional.empty());
-        when(userRepository.findByEmail("kakao@example.com"))
-                .thenReturn(Optional.of(emailUser));
-        when(oauthAccountRepository.save(any())).thenReturn(null);
-
-        AuthResponse response = invokeProcessLoginWithMockData(mockKakaoToken, mockUserInfo);
-
-        assertThat(response).isNotNull();
-        // 기존 이메일 사용자와 연동 — 새 User 생성 안 함
-        verify(userRepository, never()).save(any());
-        verify(oauthAccountRepository).save(any(OAuthAccount.class));
+    void newUniqueEmailIsStoredWithoutReusingAnotherAccount() {
+        providerReturns("synthetic@example.invalid", "123");
+        when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(auth.buildAuthResponse(any())).thenReturn(response);
+        assertThat(login()).isSameAs(response);
+        var saved = ArgumentCaptor.forClass(User.class);
+        verify(users).save(saved.capture());
+        assertThat(saved.getValue().getEmail()).isEqualTo("synthetic@example.invalid");
+        verify(accounts).saveAndFlush(any());
     }
 
-    // ── 헬퍼: RestClient 호출을 spy로 우회 ──────────────────────────────────
-
-    /**
-     * KakaoOAuthService 내부의 exchangeCodeForToken / fetchUserInfo를
-     * 직접 호출하는 대신, processLogin 로직 중 분기만 검증하기 위해
-     * 서비스를 spy로 감싸고 두 private 메서드를 stubbing한다.
-     */
-    private AuthResponse invokeProcessLoginWithMockData(
-            KakaoTokenResponse token, KakaoUserInfoResponse userInfo) {
-
-        KakaoOAuthService spy = spy(kakaoOAuthService);
-
-        // private 메서드를 직접 mock할 수 없으므로 Mockito의 doReturn + reflection 활용
-        try {
-            var exchangeMethod = KakaoOAuthService.class
-                    .getDeclaredMethod("exchangeCodeForToken", String.class);
-            exchangeMethod.setAccessible(true);
-
-            var fetchMethod = KakaoOAuthService.class
-                    .getDeclaredMethod("fetchUserInfo", String.class);
-            fetchMethod.setAccessible(true);
-
-            doReturn(token).when(spy).processLogin(any());
-        } catch (Exception ignored) {}
-
-        // 직접 내부 메서드 경로를 타는 대신, repository 계층만 검증
-        // (실제 RestClient 호출 없이 분기 로직 검증)
-        simulateProcessLogin(userInfo, token);
-        return authService.buildAuthResponse(existingUser);
+    @Test
+    void concurrentEmailCollisionRollsBackInsteadOfLookingUpTheWinner() {
+        providerReturns("synthetic@example.invalid", "123");
+        when(users.save(any())).thenThrow(new DataIntegrityViolationException("synthetic collision"));
+        expectConflict();
+        verify(users, times(1)).findByEmail("synthetic@example.invalid");
+        verify(accounts, never()).saveAndFlush(any());
     }
 
-    /** processLogin 내부 분기 로직만 직접 시뮬레이션 */
-    private void simulateProcessLogin(KakaoUserInfoResponse userInfo, KakaoTokenResponse token) {
-        var existing = oauthAccountRepository
-                .findByProviderAndProviderUserId(AuthProvider.KAKAO, userInfo.getId());
-
-        if (existing.isPresent()) {
-            // 기존 OAuth 계정 발견 — 토큰 미보관, 바로 JWT 발급
-        } else {
-            User user = userInfo.getEmail() != null
-                    ? userRepository.findByEmail(userInfo.getEmail()).orElseGet(() -> {
-                        User newUser = User.builder()
-                                .email(userInfo.getEmail())
-                                .nickname(userInfo.getNickname() != null ? userInfo.getNickname() : "kakao_default")
-                                .authProvider(AuthProvider.KAKAO)
-                                .emailVerified(true)
-                                .build();
-                        return userRepository.save(newUser);
-                    })
-                    : userRepository.save(User.builder()
-                            .nickname("kakao_" + userInfo.getId().toString().substring(0, 8))
-                            .authProvider(AuthProvider.KAKAO)
-                            .emailVerified(false)
-                            .build());
-
-            oauthAccountRepository.save(OAuthAccount.builder()
-                    .user(user)
-                    .provider(AuthProvider.KAKAO)
-                    .providerUserId(userInfo.getId())
-                    .build());
-        }
+    @Test
+    void noEmailConstraintFailureNeverLooksUpNullEmail() {
+        providerReturns(null, "123");
+        when(users.save(any())).thenThrow(new DataIntegrityViolationException("synthetic collision"));
+        expectConflict();
+        verify(users, never()).findByEmail(any());
     }
 
-    // ── 픽스처 ──────────────────────────────────────────────────────────────
-
-    private KakaoTokenResponse buildKakaoTokenResponse() throws Exception {
-        var r = new KakaoTokenResponse();
-        setField(r, "accessToken", "kakao-access-token");
-        setField(r, "refreshToken", "kakao-refresh-token");
-        setField(r, "expiresIn", 21599);
-        setField(r, "refreshTokenExpiresIn", 5183999);
-        setField(r, "scope", "profile_nickname account_email");
-        return r;
+    @Test
+    void concurrentProviderCollisionReturnsConflictWithoutQueryingAbortedTransaction() {
+        providerReturns(null, "123");
+        when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(accounts.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("synthetic collision"));
+        expectConflict();
+        verify(accounts, times(1)).findByProviderAndProviderUserId(AuthProvider.KAKAO, 123L);
+        verify(users, never()).findByEmail(any());
     }
 
-    private KakaoUserInfoResponse buildKakaoUserInfo(Long id, String email, String nickname) {
-        try {
-            var response = new KakaoUserInfoResponse();
-            setField(response, "id", id);
-            setField(response, "connectedAt", "2024-01-01T00:00:00Z");
-
-            var account = new KakaoUserInfoResponse.KakaoAccount();
-            setField(account, "emailNeedsAgreement", email == null);
-            setField(account, "emailVerified", email != null);
-            setField(account, "emailValid", email != null);
-            setField(account, "email", email);
-            setField(account, "profileNicknameNeedsAgreement", false);
-
-            var profile = new KakaoUserInfoResponse.KakaoAccount.Profile();
-            setField(profile, "nickname", nickname);
-            setField(profile, "profileImageUrl", "https://example.com/profile.jpg");
-
-            setField(account, "profile", profile);
-            setField(response, "kakaoAccount", account);
-            return response;
-        } catch (Exception e) { throw new RuntimeException(e); }
+    @Test
+    void providerWithoutIdentityDoesNotCreateUserOrSession() {
+        providerReturns(null, "null");
+        assertThatThrownBy(this::login).isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException)e).getErrorCode()).isEqualTo(ErrorCode.KAKAO_USER_INFO_FAILED);
+        verifyNoInteractions(users, accounts, auth, devices);
     }
 
-    private void setField(Object target, String name, Object value) throws Exception {
-        Class<?> clazz = target.getClass();
-        while (clazz != null) {
-            try {
-                var field = clazz.getDeclaredField(name);
-                field.setAccessible(true);
-                field.set(target, value);
-                return;
-            } catch (NoSuchFieldException e) {
-                clazz = clazz.getSuperclass();
-            }
-        }
-        throw new NoSuchFieldException(name + " not found in " + target.getClass());
+    @Test
+    void productionTokenExchangeUsesTheSameExactConfiguredRedirect() {
+        properties.setRedirectUri("https://prod.example.invalid/api/v1/auth/kakao/callback");
+        providerReturns(null, "123");
+        when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(auth.buildAuthResponse(any())).thenReturn(response);
+        assertThat(login()).isSameAs(response);
     }
 }

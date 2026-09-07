@@ -2,7 +2,6 @@ package map.service.user.domain.auth.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.util.List;
@@ -47,8 +46,7 @@ public class EmailSignUpRequest {
     @Size(min = 1, max = 50, message = "닉네임은 1자 이상 50자 이하입니다.")
     private String nickname;
 
-    /** 생년월일. 오늘 이후 날짜는 받지 않는다. */
-    @Past(message = "생년월일은 오늘 이전이어야 합니다.")
+    /** 생년월일. 서비스가 KST 미래 날짜와 만 18세 미만을 별도로 거절한다. */
     private LocalDate birthDate;
 
     @Size(max = 16, message = "성별은 16자 이하입니다.")

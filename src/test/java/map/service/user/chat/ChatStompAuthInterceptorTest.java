@@ -92,6 +92,18 @@ class ChatStompAuthInterceptorTest {
         assertThat(interceptor.authorizeOutbound(MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders()))).isNull();
     }
 
+    @Test
+    void missingBirthdayAlsoBlocksAnAlreadyConnectedSessionAndDelivery() {
+        StompAuthChannelInterceptor interceptor = interceptor();
+        org.mockito.Mockito.doThrow(new CustomException(ErrorCode.AGE_INFORMATION_REQUIRED)).when(policy).requireEligible(7L);
+        assertThatThrownBy(() -> interceptor.preSend(frame(StompCommand.SEND, "/app/rooms/10/send",
+                null, new StompPrincipal("7")), null)).isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.AGE_INFORMATION_REQUIRED);
+        StompHeaderAccessor headers = StompHeaderAccessor.create(StompCommand.MESSAGE);
+        headers.setSessionId("test-session"); headers.setDestination("/topic/rooms/10");
+        assertThat(interceptor.authorizeOutbound(MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders()))).isNull();
+    }
+
     // ── CONNECT ─────────────────────────────────────────────────────────────
 
     @Test
