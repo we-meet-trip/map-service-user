@@ -99,8 +99,8 @@ by Infra; default local Compose does not claim TLS deployment validation.
    new private login credentials and enable only the runtime/migrator logins. Do
    not change the existing shared account/password or grant runtime owner access.
 4. Run the candidate exact image's `check-config`, then `validate` on an already
-   migrated existing DB, and `migrate`. For a truly empty precreated User schema,
-   run `migrate` directly (validate may reject pending migrations). Flyway uses the
+   migrated existing DB, and `migrate`. The normal runner requires a successful
+   V004 history row and rejects an empty/unbootstrapped schema before DDL. Flyway uses the
    owner role, fixed schema, no schema creation, baseline disabled, no future-ignore,
    validation enabled and bounded DB lock retries. V001–V028 are unmodified.
 5. Start User with runtime-only credentials. The startup guard checks effective
@@ -131,6 +131,18 @@ by Infra; default local Compose does not claim TLS deployment validation.
 - CI launcher results are not sufficient to enable this role boundary in GCP.
 
 ## Rollback limits
+
+An empty-host bootstrap is a separate **unimplemented/unverified gate**. Applied
+V004 contains `CREATE SCHEMA IF NOT EXISTS user_service`; PostgreSQL checks database
+CREATE **before** it checks whether that schema exists ([official PostgreSQL 17
+source](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/commands/schemacmds.c)).
+Changing V004 or silently granting the regular owner database CREATE is forbidden.
+The production-transition path assumes the genuine existing V004 history from the
+old release, then transfers owners/ACLs. A fresh-host path needs a separately
+reviewed, isolated, one-time bootstrap of the unchanged early migrations and
+removal of bootstrap privileges before this regular runner can be used. Do not
+substitute Flyway baseline/repair or synthetic history entries. The proposal SQL
+may precreate an empty schema, but that alone does not bootstrap V004.
 
 Role/owner transfer is a forward security transition, not a volume replacement.
 No down migration, old SQL rewrite or schema-history deletion is permitted. An R3

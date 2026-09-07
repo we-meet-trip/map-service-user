@@ -53,6 +53,10 @@ public final class UserDatabasePrivileges {
         checks.put("migration_membership", "SELECT COUNT(*)=1 AND bool_and(pg_get_userbyid(roleid)='map_user_owner' AND NOT admin_option AND NOT inherit_option AND set_option) FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=current_user)");
         checks.put("owner_membership", "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='map_user_owner'))");
         checks.put("schema_owner", "SELECT pg_get_userbyid(nspowner)='map_user_owner' FROM pg_namespace WHERE nspname='user_service'");
+        // V004's CREATE SCHEMA IF NOT EXISTS still needs database CREATE, even for an existing schema.
+        // Bootstrap is a separate reviewed step, never an implicit privilege escalation here.
+        checks.put("legacy_bootstrap_history_required", "SELECT to_regclass('user_service.flyway_schema_history') IS NOT NULL");
+        checks.put("legacy_bootstrap_v004_required", "SELECT EXISTS (SELECT 1 FROM user_service.flyway_schema_history WHERE success AND version ~ '^0*4$')");
         return checks;
     }
 
