@@ -53,6 +53,18 @@ jobs:
       - name: launch isolated exporter artifact
         run: python3 scripts/verify-training-export-launch.py
 
+      - name: verify standalone migration entrypoint without database access
+        run: python3 scripts/verify-user-migration-launch.py
+
+      - name: preserve migration launcher evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-migration-launch-verification
+          path: build/user-migration-launch-verification.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       # 실패한 것을 눈으로 볼 수 있어야 한다. 로그만 남기면 어느 단언이
       # 깨졌는지 확인하러 다시 돌려야 한다.
       - name: upload report
