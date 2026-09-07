@@ -307,7 +307,8 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        prewarmSummaries(stops);
+        // Manual routes and explicit route optimization must not enqueue
+        // generative review summaries: this flow requires no external AI consent.
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());

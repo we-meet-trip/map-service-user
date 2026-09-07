@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,13 +21,18 @@ import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
 import map.service.user.recommend.dto.SelectedPlace;
 import map.service.user.trip.dto.Location;
+import map.service.user.trip.dto.BudgetRange;
 import map.service.user.trip.dto.Schedule;
+import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripResearchRequest;
 import map.service.user.trip.dto.TripRouteRequest;
 import map.service.user.trip.dto.TripStop;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -165,6 +171,74 @@ class TripRouteServiceTest {
         service.route(request());
 
         verify(recommendService, never()).createRecommendationDetailed(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("수동 동선과 명시적 최적화는 외부 AI 장소 요약을 예약하지 않는다")
+    void routeNeverPrewarmsGenerativeSummaries(boolean optimize) {
+        draftIsDone();
+        List<TripStop> stops = List.of(stop(1, 15), stop(2, null));
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(stops);
+        TripRouteRequest original = request();
+        // false case exercises the default constructor used by manual ordering.
+        TripRouteRequest input = optimize
+                ? new TripRouteRequest(original.schedule(), original.transport(),
+                        original.location(), original.places(), true)
+                : original;
+
+        TripGenerateResponse out = service.route(input, 7L);
+
+        verifyNoInteractions(reviewSummaryService);
+        ArgumentCaptor<RecommendRequest> sent = ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(recommendService).createRouteJob(sent.capture(), org.mockito.ArgumentMatchers.eq(7L));
+        assertThat(sent.getValue().optimize()).isEqualTo(optimize);
+        assertThat(sent.getValue().places()).containsExactlyElementsOf(original.places());
+        assertThat(out.stops()).containsExactlyElementsOf(stops);
+        assertThat(out.totalDurationMinutes()).isEqualTo(15);
+        verify(hubWeatherClient).fetchWeather("강원특별자치도", "속초시",
+                original.schedule().startDate(), original.schedule().endDate());
+    }
+
+    @Test
+    @DisplayName("자동 추천은 기존 장소 요약 예약을 유지한다")
+    void generateStillPrewarmsSummaries() {
+        draftIsDone();
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 15), stop(2, null)));
+        when(recommendService.createRecommendationDetailed(any(), any()))
+                .thenReturn(new RecommendService.RecommendationResult(
+                        new JobAccepted(JOB_ID, "in_progress", 3), false));
+        TripRouteRequest original = request();
+
+        service.generate(new TripGenerateRequest(original.schedule(),
+                new BudgetRange(50000, 150000), List.of("nature"),
+                original.transport(), original.location()), 7L);
+
+        verify(reviewSummaryService).prewarm(List.of(
+                new ReviewSummaryService.PrewarmPlace("장소1", null),
+                new ReviewSummaryService.PrewarmPlace("장소2", null)));
+    }
+
+    @Test
+    @DisplayName("재탐색은 기존 장소 요약 예약을 유지한다")
+    void researchStillPrewarmsSummaries() {
+        draftIsDone();
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 15), stop(2, null)));
+        when(recommendService.research(anyString(), any(), any(), any(), any()))
+                .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
+        TripRouteRequest original = request();
+
+        service.research(new TripResearchRequest(original.schedule(),
+                new BudgetRange(50000, 150000), List.of("nature"),
+                original.transport(), original.location(), JOB_ID,
+                List.of(), List.of(), null), 7L);
+
+        verify(reviewSummaryService).prewarm(List.of(
+                new ReviewSummaryService.PrewarmPlace("장소1", null),
+                new ReviewSummaryService.PrewarmPlace("장소2", null)));
     }
 
     @Test
