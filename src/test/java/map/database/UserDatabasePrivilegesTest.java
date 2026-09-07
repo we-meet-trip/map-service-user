@@ -15,6 +15,7 @@ class UserDatabasePrivilegesTest {
     void everyRuntimeAndMigratorGuardRejectsAnEffectivePrivilegeViolation() throws Exception {
         Map<String, String> checks = new LinkedHashMap<>(UserDatabasePrivileges.runtimeChecks());
         checks.putAll(UserDatabasePrivileges.migratorChecks());
+        checks.putAll(UserDatabasePrivileges.ownerChecks());
         for (var check : checks.entrySet()) {
             var connection = mock(Connection.class);
             var statement = mock(Statement.class);

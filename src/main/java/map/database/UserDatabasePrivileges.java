@@ -53,10 +53,6 @@ public final class UserDatabasePrivileges {
         checks.put("migration_membership", "SELECT COUNT(*)=1 AND bool_and(pg_get_userbyid(roleid)='map_user_owner' AND NOT admin_option AND NOT inherit_option AND set_option) FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=current_user)");
         checks.put("owner_membership", "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='map_user_owner'))");
         checks.put("schema_owner", "SELECT pg_get_userbyid(nspowner)='map_user_owner' FROM pg_namespace WHERE nspname='user_service'");
-        // V004's CREATE SCHEMA IF NOT EXISTS still needs database CREATE, even for an existing schema.
-        // Bootstrap is a separate reviewed step, never an implicit privilege escalation here.
-        checks.put("legacy_bootstrap_history_required", "SELECT to_regclass('user_service.flyway_schema_history') IS NOT NULL");
-        checks.put("legacy_bootstrap_v004_required", "SELECT EXISTS (SELECT 1 FROM user_service.flyway_schema_history WHERE success AND version ~ '^0*4$')");
         return checks;
     }
 
@@ -70,13 +66,21 @@ public final class UserDatabasePrivileges {
             statement.setQueryTimeout(5);
             statement.execute("SET ROLE map_user_owner");
         }
+        check(connection, ownerChecks());
+    }
+
+    static Map<String, String> ownerChecks() {
         Map<String, String> checks = new LinkedHashMap<>();
         checks.put("migration_set_role", "SELECT current_user='map_user_owner' AND session_user='map_user_migrator'");
         checks.put("migration_owner_database", "SELECT NOT has_database_privilege(current_database(),'CREATE') AND NOT has_database_privilege(current_database(),'TEMP')");
         checks.put("migration_owner_cross_schema", "SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname<>'user_service' AND has_schema_privilege(oid,'CREATE'))");
         checks.putAll(crossSchemaChecks());
         checks.put("migration_objects_owned", "SELECT NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='user_service' AND c.relkind IN ('r','p','v','m','S','f') AND pg_get_userbyid(c.relowner)<>'map_user_owner')");
-        check(connection, checks);
+        // Access history only AFTER SET ROLE: the login intentionally has no inherited schema access.
+        // V004's CREATE SCHEMA IF NOT EXISTS still needs DB CREATE. Bootstrap stays a separate step.
+        checks.put("legacy_bootstrap_history_required", "SELECT to_regclass('user_service.flyway_schema_history') IS NOT NULL");
+        checks.put("legacy_bootstrap_v004_required", "SELECT EXISTS (SELECT 1 FROM user_service.flyway_schema_history WHERE success AND version ~ '^0*4$')");
+        return checks;
     }
 
     static void check(Connection connection, Map<String, String> checks) throws SQLException {
