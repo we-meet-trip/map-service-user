@@ -66,6 +66,20 @@ class UserMigrationApplicationTest {
     }
 
     @Test
+    void onlyBoundedPrivilegeFailureCodesReachOutput() {
+        var output = new ArrayList<String>();
+        assertThat(UserMigrationApplication.run(new String[]{"migrate"}, safeEnvironment(), config -> {
+            throw new IllegalStateException("database_privilege_migration_membership");
+        }, output::add)).isOne();
+        assertThat(output).containsExactly("{\"status\":\"migration_failed\",\"code\":\"database_privilege_migration_membership\"}");
+        output.clear();
+        UserMigrationApplication.run(new String[]{"migrate"}, safeEnvironment(), config -> {
+            throw new IllegalStateException("database_privilege_invalid password=synthetic-never-print");
+        }, output::add);
+        assertThat(output).containsExactly("{\"status\":\"migration_failed\"}");
+    }
+
+    @Test
     void directFlywayConfigurationCannotCleanBaselineOrIgnoreFutureMigrations() {
         var config = UserMigrationApplication.flywayConfiguration(UserMigrationApplication.Configuration.parse(new String[]{"migrate"}, safeEnvironment()));
         assertThat(config.isCleanDisabled()).isTrue();

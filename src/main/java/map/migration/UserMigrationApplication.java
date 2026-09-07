@@ -110,7 +110,11 @@ public final class UserMigrationApplication {
                     + "\",\"migrations_executed\":" + count + "}");
             return 0;
         } catch (RuntimeException error) {
-            output.accept("{\"status\":\"migration_failed\"}");
+            String code = error.getMessage();
+            // Allow only our own bounded guard codes; arbitrary Flyway/JDBC messages stay private.
+            String detail = code != null && code.matches("(?:database_privilege_[a-z0-9_]+|migration_database_verification_failed|migration_history_grant_failed)")
+                    ? ",\"code\":\"" + code + "\"" : "";
+            output.accept("{\"status\":\"migration_failed\"" + detail + "}");
             return 1;
         }
     }

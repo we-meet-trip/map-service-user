@@ -259,6 +259,8 @@ try:
     proof = json.loads((ROOT / "build/user-migration-launch-verification.json").read_text())
     check("candidate_exact_artifact", hashlib.sha256(candidate.read_bytes()).hexdigest() == proof["sha256"])
     check("legacy_exact_source", command(["git", "-C", str(ROOT / "legacy-source"), "rev-parse", "HEAD"]) == LEGACY_SHA)
+    check("all_applied_migrations_unmodified", all(p.read_bytes() == (ROOT / "legacy-source/src/main/resources/db/migration" / p.name).read_bytes()
+          for p in (ROOT / "src/main/resources/db/migration").glob("*.sql")))
     result.update(candidate_jar_sha256=proof["sha256"], legacy_jar_sha256=hashlib.sha256(legacy.read_bytes()).hexdigest())
     check("empty_disposable_database", sql("SELECT count(*) FROM pg_namespace WHERE nspname IN ('user_service','hub_data','admin_service')") == "0")
     result["postgres_version"] = sql("SHOW server_version")
@@ -270,6 +272,7 @@ try:
     command(["openssl", "pkey", "-in", str(PRIVATE / "jwt.pem"), "-pubout", "-out", str(PRIVATE / "jwt.pub")])
     serving = {**os_environment(), "POSTGRES_HOST": "127.0.0.1", "POSTGRES_PORT": "5432", "POSTGRES_DB": DB,
         "REDIS_HOST": "127.0.0.1", "REDIS_PORT": "6379", "REDIS_PASSWORD": "", "AUTH_ENFORCED": "true",
+        "CORS_ALLOWED_ORIGINS": "http://localhost:3000",
         "TRAINING_CAPTURE_ENABLED": "false", "TRAINING_EXPORT_ENABLED": "false", "TESTER_SEED_ENABLED": "false",
         "APPLE_ENABLED": "false", "WEATHER_WATCH_ENABLED": "false", "REVIEWS_PREWARM_ENABLED": "false",
         "AGENT_BASE_URL": "http://127.0.0.1:1", "HUB_BASE_URL": "http://127.0.0.1:1",
