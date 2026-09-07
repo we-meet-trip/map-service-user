@@ -5,8 +5,13 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import map.service.user.places.dto.ReviewSearchResponse;
 import map.service.user.places.dto.ReviewSummaryResponse;
+import map.service.user.places.dto.ReviewSummaryRequest;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,12 +36,15 @@ public class ReviewSearchController {
 
     private final ReviewSearchClient client;
     private final ReviewSummaryService summaryService;
+    private final ReviewSummaryGenerationService generationService;
 
     public ReviewSearchController(
-            ReviewSearchClient client, ReviewSummaryService summaryService
+            ReviewSearchClient client, ReviewSummaryService summaryService,
+            ReviewSummaryGenerationService generationService
     ) {
         this.client = client;
         this.summaryService = summaryService;
+        this.generationService = generationService;
     }
 
     /**
@@ -73,6 +81,14 @@ public class ReviewSearchController {
     public ReviewSummaryResponse summary(
             @RequestParam @NotBlank @Size(max = 60) String query
     ) {
-        return summaryService.summarize(query);
+        return summaryService.cachedSummary(query);
+    }
+
+    /** Only an explicit, consented action may create a new generative summary. */
+    @PostMapping("/summary")
+    public ReviewSummaryResponse generateSummary(
+            @Valid @RequestBody ReviewSummaryRequest request,
+            @AuthenticationPrincipal Long userId) {
+        return generationService.generate(userId, request);
     }
 }

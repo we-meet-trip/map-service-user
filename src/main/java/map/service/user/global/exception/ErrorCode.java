@@ -28,6 +28,8 @@ public enum ErrorCode {
 
     // Rate Limit
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "RATE_001", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    REVIEW_SUMMARY_CONFLICT(HttpStatus.CONFLICT, "REVIEW_SUMMARY_CONFLICT", "요약 생성이 진행 중이거나 요청 식별자가 이미 사용되었습니다."),
+    REVIEW_SUMMARY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "REVIEW_SUMMARY_UNAVAILABLE", "요약 생성을 안전하게 요청할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // Recommend
     RESEARCH_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "RECOMMEND_001", "재추천 한도(일 3회)를 초과했습니다. KST 자정 이후 다시 시도해주세요."),

@@ -90,7 +90,7 @@ public class AgentSummaryClient {
         } catch (RuntimeException e) {
             // 한도 초과(429)·모델 실패(502)·타임아웃 전부 여기로 온다.
             // 요약이 없다고 장소 상세를 못 그리는 것은 아니므로 흡수한다.
-            log.warn("agent reviews summary failed reason={}", e.getMessage());
+            log.warn("agent reviews summary failed reason={}", e.getClass().getSimpleName());
             return List.of();
         }
     }
@@ -154,7 +154,7 @@ public class AgentSummaryClient {
             return out;
         } catch (RuntimeException e) {
             log.warn("agent reviews batch summary failed reason={}",
-                    e.getMessage());
+                    e.getClass().getSimpleName());
             return Map.of();
         }
     }
