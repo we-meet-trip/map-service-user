@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Entity @Getter @NoArgsConstructor(access=lombok.AccessLevel.PROTECTED)
 @Table(name="moderation_reports", schema="user_service", uniqueConstraints=@UniqueConstraint(columnNames={"reporter_id","client_request_id"}))
 public class ModerationReport {
-    public enum ContentType { CHAT_MESSAGE, TRIP, VISION }
+    public enum ContentType { CHAT_MESSAGE, TRIP, VISION, REVIEW_SUMMARY }
     public enum Reason { HARASSMENT, HATE, SEXUAL_CONTENT, VIOLENCE, DANGEROUS_OR_ILLEGAL, SPAM, PRIVACY, INACCURATE, OTHER }
     public enum Status { OPEN, IN_REVIEW, ACTIONED, DISMISSED }
     @Id @Column(name="report_id") private UUID reportId;

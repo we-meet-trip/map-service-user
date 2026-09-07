@@ -45,4 +45,20 @@ class ModerationContractTest {
         assertThat(policy.prohibited(null)).isFalse();
         assertThat(new ChatContentPolicy(".*").prohibited("ordinary")).isFalse();
     }
+    @Test void reviewSummaryIsDescriptionOnlyAndCannotForgeAnyTarget() {
+        UUID key=UUID.randomUUID();
+        var type=ModerationReport.ContentType.REVIEW_SUMMARY;
+        var reason=ModerationReport.Reason.INACCURATE;
+        assertThatCode(()->ModerationService.validate(new ReportRequest(key,type,reason,"synthetic explanation",null,null,null,null)))
+                .doesNotThrowAnyException();
+        for (ReportRequest invalid:new ReportRequest[]{
+                new ReportRequest(key,type,reason,null,null,null,null,null),
+                new ReportRequest(key,type,reason," ",null,null,null,null),
+                new ReportRequest(key,type,reason,"synthetic",1L,2L,null,null),
+                new ReportRequest(key,type,reason,"synthetic",null,null,1L,null),
+                new ReportRequest(key,type,reason,"synthetic",null,null,null,UUID.randomUUID()),
+                new ReportRequest(key,type,reason,"data:image/png;base64,synthetic",null,null,null,null)}) {
+            assertThatThrownBy(()->ModerationService.validate(invalid)).isInstanceOf(CustomException.class);
+        }
+    }
 }

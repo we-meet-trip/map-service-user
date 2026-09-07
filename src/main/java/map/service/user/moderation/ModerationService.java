@@ -72,7 +72,9 @@ public class ModerationService {
                 if (request.recommendJobId()!=null && jobs.findById(request.recommendJobId())
                         .filter(job->user.equals(job.getOwnerUserId())).isEmpty()) throw notFound();
             }
-            case VISION -> { /* Description-only: there is no durable, owned inference reference yet. */ }
+            case VISION, REVIEW_SUMMARY -> {
+                // Reporter description only; no verified inference/cache snapshot or author reference.
+            }
         }
         if (request.description()!=null && !request.description().isBlank()) {
             // Never silently persist a report containing personal data in plaintext.
@@ -201,9 +203,9 @@ public class ModerationService {
                 || description.matches("(?s).*[A-Za-z0-9+/]{256,}={0,2}.*"))) throw invalid();
         boolean chat=r.roomId()!=null && r.messageSeq()!=null && r.scheduleId()==null && r.recommendJobId()==null;
         boolean trip=r.roomId()==null && r.messageSeq()==null && ((r.scheduleId()!=null) ^ (r.recommendJobId()!=null));
-        boolean vision=r.roomId()==null && r.messageSeq()==null && r.scheduleId()==null && r.recommendJobId()==null
+        boolean descriptionOnly=r.roomId()==null && r.messageSeq()==null && r.scheduleId()==null && r.recommendJobId()==null
                 && description!=null && !description.isBlank();
-        if (!(switch(r.contentType()) { case CHAT_MESSAGE->chat; case TRIP->trip; case VISION->vision; })) throw invalid();
+        if (!(switch(r.contentType()) { case CHAT_MESSAGE->chat; case TRIP->trip; case VISION, REVIEW_SUMMARY->descriptionOnly; })) throw invalid();
     }
     private void lockUser(Long user) {
         if (user==null || users.findByIdForUpdate(user).isEmpty()) throw new CustomException(ErrorCode.USER_NOT_FOUND);

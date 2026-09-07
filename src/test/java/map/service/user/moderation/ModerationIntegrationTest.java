@@ -73,6 +73,38 @@ class ModerationIntegrationTest {
     }
     MessageResponse send(Long sender,String text) { return chat.send(room,sender,text,null); }
 
+    @Test void reviewSummaryReportsEncryptDescriptionAndPermitOnlyReviewActions() {
+        UUID key=UUID.randomUUID();
+        ReportRequest input=new ReportRequest(key,ModerationReport.ContentType.REVIEW_SUMMARY,
+                ModerationReport.Reason.INACCURATE,"synthetic reporter explanation",null,null,null,null);
+        var submission=service.submit(alice,input);
+        UUID id=submission.receipt().reportId();
+        assertThat(submission.created()).isTrue();
+        assertThat(service.submit(alice,input).created()).isFalse();
+        em.flush(); em.clear();
+        ModerationReport row=reports.findById(id).orElseThrow();
+        assertThat(row.getContentType()).isEqualTo(ModerationReport.ContentType.REVIEW_SUMMARY);
+        assertThat(row.getDescription()).contains("\"ct\"").doesNotContain("synthetic reporter explanation");
+        assertThat(row.getReportedUserId()).isNull(); assertThat(row.getMessageId()).isNull();
+        assertThat(service.detail(id).description()).isEqualTo("synthetic reporter explanation");
+        assertThat(service.detail(id).currentMessage()).isNull();
+        assertThat(service.act(id,"operator_17",new ModerationService.ActionRequest(UUID.randomUUID(),ModerationAction.Action.REVIEW,null)).status())
+                .isEqualTo(ModerationReport.Status.IN_REVIEW);
+        for (ModerationAction.Action action:List.of(ModerationAction.Action.HIDE_CHAT_MESSAGE,
+                ModerationAction.Action.RESTRICT_CHAT,ModerationAction.Action.LIFT_CHAT_RESTRICTION)) {
+            assertThatThrownBy(()->service.act(id,"operator_17",new ModerationService.ActionRequest(UUID.randomUUID(),action,
+                    action==ModerationAction.Action.RESTRICT_CHAT ? 24 : null))).isInstanceOf(CustomException.class);
+        }
+        var resolved=service.act(id,"operator_17",new ModerationService.ActionRequest(UUID.randomUUID(),ModerationAction.Action.RESOLVE,null));
+        assertThat(resolved.status()).isEqualTo(ModerationReport.Status.ACTIONED);
+        assertThat(actions.findByReportIdOrderByCreatedAtAsc(id)).hasSize(2);
+        assertThat(messages.count()).isZero(); assertThat(restrictions.count()).isZero();
+        UUID second=service.submit(bob,new ReportRequest(UUID.randomUUID(),ModerationReport.ContentType.REVIEW_SUMMARY,
+                ModerationReport.Reason.OTHER,"synthetic other explanation",null,null,null,null)).receipt().reportId();
+        assertThat(service.act(second,"operator_17",new ModerationService.ActionRequest(UUID.randomUUID(),ModerationAction.Action.DISMISS,null)).status())
+                .isEqualTo(ModerationReport.Status.DISMISSED);
+    }
+
     @Test void reportIsOwnedEncryptedIdempotentAndQuotaCannotFailOpen() {
         var message=send(bob,"synthetic message"); UUID key=UUID.randomUUID();
         var first=service.submit(alice,report(message.seq(),key));
