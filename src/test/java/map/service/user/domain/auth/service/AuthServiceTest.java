@@ -67,6 +67,18 @@ class AuthServiceTest {
         when(refreshTokenRepository.save(any())).thenAnswer(i -> i.getArgument(0));
     }
 
+    @Test
+    void knownMinorCannotCreateAnAccountOrIssueTokens() {
+        EmailSignUpRequest request = makeSignUpRequest("minor@example.test", "password123!", "synthetic-minor");
+        org.springframework.test.util.ReflectionTestUtils.setField(request, "birthDate",
+                java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).minusYears(17));
+        assertThatThrownBy(() -> authService.signUp(request)).isInstanceOf(CustomException.class)
+                .satisfies(error -> assertThat(((CustomException) error).getErrorCode()).isEqualTo(ErrorCode.AGE_RESTRICTED));
+        verify(userRepository, never()).save(any());
+        verify(jwtService, never()).generateAccessToken(any(), any());
+        verifyNoInteractions(passwordEncoder);
+    }
+
     // ── signUp ──────────────────────────────────────────────────────────────
 
     @Test

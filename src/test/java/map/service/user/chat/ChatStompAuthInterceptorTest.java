@@ -42,13 +42,14 @@ class ChatStompAuthInterceptorTest {
 
     @Mock private JwtService jwtService;
     @Mock private ChatRoomAccessService access;
+    @Mock private map.service.user.policy.ServicePolicyService policy;
 
     private final map.service.user.moderation.ChatModerationGuard moderation = org.mockito.Mockito.mock(map.service.user.moderation.ChatModerationGuard.class);
     private StompAuthChannelInterceptor interceptor() {
         Claims claims = org.mockito.Mockito.mock(Claims.class);
         when(jwtService.validateAccessToken("session-token")).thenReturn(claims);
         when(jwtService.extractUserId(claims)).thenReturn(7L);
-        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access, moderation);
+        StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access, moderation, policy);
         interceptor.preSend(frame(StompCommand.CONNECT, null, "Bearer session-token", null), null);
         return interceptor;
     }
@@ -73,6 +74,22 @@ class ChatStompAuthInterceptorTest {
 
     private StompHeaderAccessor accessorOf(Message<?> message) {
         return MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+    }
+
+    @Test
+    void adultPolicyIsCheckedOnConnectAndOnExistingSessionFramesAndDelivery() {
+        StompAuthChannelInterceptor interceptor = interceptor();
+        org.mockito.Mockito.doThrow(new CustomException(ErrorCode.AGE_RESTRICTED)).when(policy).requireEligible(7L);
+        for (StompCommand command : new StompCommand[]{StompCommand.CONNECT, StompCommand.SEND, StompCommand.SUBSCRIBE}) {
+            assertThatThrownBy(() -> interceptor.preSend(frame(command,
+                    command == StompCommand.SEND ? "/app/rooms/10/send" : "/topic/rooms/10",
+                    "Bearer session-token", new StompPrincipal("7")), null))
+                    .isInstanceOf(CustomException.class);
+        }
+        StompHeaderAccessor headers = StompHeaderAccessor.create(StompCommand.MESSAGE);
+        headers.setSessionId("test-session");
+        headers.setDestination("/topic/rooms/10");
+        assertThat(interceptor.authorizeOutbound(MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders()))).isNull();
     }
 
     // ── CONNECT ─────────────────────────────────────────────────────────────

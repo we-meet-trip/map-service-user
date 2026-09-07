@@ -56,6 +56,12 @@ public enum ErrorCode {
     MODERATION_CONFLICT(HttpStatus.CONFLICT, "MODERATION_003", "요청 식별자가 이미 사용되었거나 처리 상태가 변경되었습니다."),
     MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MODERATION_004", "신고를 안전하게 보관할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
+    // Explicit service policy and adult eligibility. Codes are consumed by the app router.
+    SERVICE_POLICY_REQUIRED(HttpStatus.FORBIDDEN, "SERVICE_POLICY_REQUIRED", "서비스 이용 약관과 만 18세 이상 여부를 확인해주세요."),
+    AGE_RESTRICTED(HttpStatus.FORBIDDEN, "AGE_RESTRICTED", "MAP은 만 18세 이상만 이용할 수 있습니다."),
+    POLICY_VERSION_MISMATCH(HttpStatus.CONFLICT, "POLICY_VERSION_MISMATCH", "변경된 약관을 다시 확인해주세요."),
+    POLICY_ACCEPTANCE_INVALID(HttpStatus.BAD_REQUEST, "POLICY_ACCEPTANCE_INVALID", "필수 확인 항목에 명시적으로 동의해주세요."),
+
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다.");
 

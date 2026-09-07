@@ -43,6 +43,10 @@ public class AuthService {
 
     @Transactional
     public AuthResponse signUp(EmailSignUpRequest request) {
+        if (request.getBirthDate() != null && request.getBirthDate().plusYears(18)
+                .isAfter(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")))) {
+            throw new CustomException(ErrorCode.AGE_RESTRICTED);
+        }
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new CustomException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }

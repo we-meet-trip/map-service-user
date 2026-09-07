@@ -61,6 +61,7 @@ public class ChatWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.setErrorHandler(new map.service.user.chat.ws.SafeStompErrorHandler());
         // WebSocket 은 자격증명 여부와 무관하게 allowedOriginPatterns 로 출처를 지정한다.
         List<String> origins = corsProperties.getAllowedOrigins();
         registry.addEndpoint(chatProperties.getWsEndpoint())

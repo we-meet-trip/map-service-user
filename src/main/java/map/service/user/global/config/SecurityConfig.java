@@ -90,7 +90,7 @@ public class SecurityConfig {
                             // 틀리고, 공개로 두면 만료된 토큰이 401 을 못 받아
                             // 클라이언트의 토큰 갱신 흐름이 이 화면에서만 멈춘다.
                             // 아래 시행 분기보다 먼저 두어야 매처가 우선한다.
-                            .requestMatchers("/api/v1/users/me", "/api/v1/moderation/**").authenticated();
+                            .requestMatchers("/api/v1/users/me", "/api/v1/moderation/**", "/api/v1/consents").authenticated();
                     if (authEnforced) {
                         // 인가 시행: 도메인 엔드포인트와 나머지 전부 인증 필수.
                         // JWT 필터가 채운 SecurityContext 가 없으면 401(HttpStatusEntryPoint).
