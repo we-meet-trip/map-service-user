@@ -9,6 +9,15 @@ import java.util.Arrays;
 public final class RuntimeDatabaseGuard {
     private RuntimeDatabaseGuard() {}
 
+    public static void verifyBeforeBeans(org.springframework.beans.factory.config.ConfigurableListableBeanFactory beanFactory,
+                                         Environment environment) {
+        UserDatabaseContract.require(!environment.getProperty("spring.flyway.enabled", Boolean.class, false), "serving_flyway_forbidden");
+        // MVC-only test slices have no database. Type inspection must not instantiate the pool.
+        if (beanFactory.getBeanNamesForType(javax.sql.DataSource.class, false, false).length > 0) {
+            verify(environment);
+        }
+    }
+
     public static void verify(Environment environment) {
         UserDatabaseContract.require(!environment.getProperty("spring.flyway.enabled", Boolean.class, false), "serving_flyway_forbidden");
         String url = environment.getProperty("spring.datasource.url", "");

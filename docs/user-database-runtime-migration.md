@@ -11,8 +11,9 @@ while preparing this code. develop/master integration remains user-confirmation 
 The normal bootJar still starts `ServiceUserApplication`. It excludes Flyway
 auto-configuration and rejects any attempt to re-enable it. A static
 BeanFactoryPostProcessor verifies the serving role before singleton creation, so
-HTTP serving, Redis consumers, schedulers and seed jobs cannot start first. The
-guard reads PostgreSQL catalogs/ACLs only and emits bounded failure codes. It does
+HTTP serving, Redis consumers, schedulers and seed jobs cannot start first. Database-free MVC test slices have no DataSource definition and do not connect;
+the Flyway prohibition still applies. Inspecting DataSource definitions never starts
+the pool before verification. The guard reads PostgreSQL catalogs/ACLs only and emits bounded failure codes. It does
 not repair privileges or query user rows. Only `test` profile plus an in-memory H2
 URL and the test-only H2 driver skips the PostgreSQL check; H2 is absent from the
 release bootJar. Hibernate remains `validate` in serving.

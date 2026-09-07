@@ -41,7 +41,7 @@ public class ServiceUserApplication {
             if (environment.getProperty("training.export.enabled", Boolean.class, false)) {
                 throw new IllegalStateException("training export is forbidden in serving; use the dedicated exporter entrypoint");
             }
-            map.service.user.global.config.RuntimeDatabaseGuard.verify(environment);
+            map.service.user.global.config.RuntimeDatabaseGuard.verifyBeforeBeans(beanFactory, environment);
         };
     }
 

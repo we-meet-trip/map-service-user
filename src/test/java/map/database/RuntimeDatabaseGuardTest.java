@@ -7,6 +7,29 @@ import static org.assertj.core.api.Assertions.*;
 
 class RuntimeDatabaseGuardTest {
     @Test
+    void noDatabaseSliceSkipsConnectionButCannotEnableFlyway() {
+        var beans = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+        var environment = new MockEnvironment();
+        assertThatCode(() -> RuntimeDatabaseGuard.verifyBeforeBeans(beans, environment)).doesNotThrowAnyException();
+        environment.setProperty("spring.flyway.enabled", "true");
+        assertThatThrownBy(() -> RuntimeDatabaseGuard.verifyBeforeBeans(beans, environment)).hasMessage("serving_flyway_forbidden");
+    }
+
+    @Test
+    void databaseDefinitionTriggersGuardWithoutInstantiatingThePool() {
+        var beans = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        beans.registerBeanDefinition("dataSource", org.springframework.beans.factory.support.BeanDefinitionBuilder
+                .genericBeanDefinition(javax.sql.DataSource.class, () -> {
+                    calls.incrementAndGet();
+                    throw new AssertionError("pool initialized before guard");
+                }).getBeanDefinition());
+        var environment = new MockEnvironment();
+        assertThatThrownBy(() -> RuntimeDatabaseGuard.verifyBeforeBeans(beans, environment)).hasMessage("serving_ddl_forbidden");
+        assertThat(calls).hasValue(0);
+    }
+
+    @Test
     void servingCannotOptBackIntoFlywayEvenInTests() {
         var environment = new MockEnvironment().withProperty("spring.flyway.enabled", "true");
         assertThatThrownBy(() -> RuntimeDatabaseGuard.verify(environment)).hasMessage("serving_flyway_forbidden");
