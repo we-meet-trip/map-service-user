@@ -121,12 +121,13 @@ hub:
 # map-service-admin(운영 콘솔)이 회원/추천작업/DLQ 를 위임 조회·조작할 때 통과하는
 # CIDR 화이트리스트 + 공유 토큰 가드. hub 의 internal_guard 규약을 미러링한다.
 # - trusted-cidrs : 허용 사설 CIDR 목록(map-net 컨테이너 네트워크 한정)
-# - token         : X-Internal-Token 기대값. INTERNAL_SERVICE_TOKEN 재사용.
+# - token         : Admin→User 전용 값. 일반 서비스 토큰 재사용/미설정은 fail-closed.
 #                   비우면 fail-closed(헤더가 있어도 일치 불가 → 접근 차단).
 internal:
   admin:
+    service-token: ${INTERNAL_SERVICE_TOKEN:}
     trusted-cidrs: ${USER_INTERNAL_TRUSTED_CIDRS:172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
-    token: ${INTERNAL_SERVICE_TOKEN:}
+    token: ${USER_ADMIN_INTERNAL_TOKEN:}
 
 # ---- ratelimit : 인증 라우트 호출 한도의 클라이언트 식별 ----
 # RateLimitFilter 가 본 섹션을 참조한다.

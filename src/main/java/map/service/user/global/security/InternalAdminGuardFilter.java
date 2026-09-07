@@ -45,9 +45,12 @@ public class InternalAdminGuardFilter extends OncePerRequestFilter {
                 .map(String::trim)
                 .map(IpAddressMatcher::new)
                 .toList();
-        this.expectedToken = props.getToken() == null
+        String token = props.getToken();
+        // A compromised ordinary serving peer must never inherit administrator access.
+        this.expectedToken = token == null || token.isBlank()
+                || token.equals(props.getServiceToken())
                 ? new byte[0]
-                : props.getToken().getBytes(StandardCharsets.UTF_8);
+                : token.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override

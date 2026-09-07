@@ -78,3 +78,6 @@ there is no application retry. Multiple batches are sequential, so their total
 budget can exceed 20 seconds. Cold OSRM must be budgeted inside Hub below the User
 batch timeout. An actual local delayed HTTP endpoint verifies a 20-leg batch gets
 one timeout and one HTTP request; timeouts still yield unavailable route metadata.
+
+## Dedicated management credential
+`USER_ADMIN_INTERNAL_TOKEN` is required for every `/internal/**` request, in addition to the trusted network check. It must differ from `INTERNAL_SERVICE_TOKEN`; absent, blank, or reused credentials deny all internal admin requests while ordinary serving remains available. Provision an independent random value (at least 32 characters) only to User and the selected Admin target. Never forward it to Agent, Hub, YOLO, Client, or a learning worker. Rotate User and the matching Admin target together; keep rollback images/config paired. The header remains `X-Internal-Token` for wire compatibility.
