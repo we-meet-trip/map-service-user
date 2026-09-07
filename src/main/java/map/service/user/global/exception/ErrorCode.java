@@ -62,6 +62,7 @@ public enum ErrorCode {
     MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MODERATION_004", "신고를 안전하게 보관할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // Explicit service policy and adult eligibility. Codes are consumed by the app router.
+    SERVICE_POLICY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_POLICY_UNAVAILABLE", "서비스 이용 권한을 확인할 수 없습니다. 잠시 후 다시 시도해주세요."),
     SERVICE_POLICY_REQUIRED(HttpStatus.FORBIDDEN, "SERVICE_POLICY_REQUIRED", "서비스 이용 약관과 만 18세 이상 여부를 확인해주세요."),
     AGE_INFORMATION_REQUIRED(HttpStatus.FORBIDDEN, "AGE_INFORMATION_REQUIRED", "서비스 이용 전에 생년월일을 입력해주세요."),
     BIRTH_DATE_INVALID(HttpStatus.BAD_REQUEST, "BIRTH_DATE_INVALID", "생년월일은 미래 날짜일 수 없습니다."),

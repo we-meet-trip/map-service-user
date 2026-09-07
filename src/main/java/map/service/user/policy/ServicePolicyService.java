@@ -85,6 +85,19 @@ public class ServicePolicyService {
         if (!status.accepted()) throw new CustomException(ErrorCode.SERVICE_POLICY_REQUIRED);
     }
 
+    /** Read fresh scalar values immediately before returning protected content. */
+    @Transactional(readOnly = true, propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public void requireCurrentEligible(Long userId) {
+        var current = acceptances.findCurrentEligibility(requireId(userId))
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
+        requireAdult(BirthDatePolicy.adult(current.getBirthDate(), LocalDate.now(clock.withZone(KST))));
+        if (!Boolean.TRUE.equals(current.getAdultDeclaration())
+                || !TERMS_VERSION.equals(current.getTermsVersion())
+                || !PRIVACY_VERSION.equals(current.getPrivacyVersion()))
+            throw new CustomException(ErrorCode.SERVICE_POLICY_REQUIRED);
+    }
+
     private Status status(User user, ServicePolicyAcceptance acceptance) {
         Boolean eligible = ageEligible(user);
         boolean accepted = Boolean.TRUE.equals(eligible) && acceptance != null

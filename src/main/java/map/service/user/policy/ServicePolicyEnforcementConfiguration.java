@@ -14,6 +14,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class ServicePolicyEnforcementConfiguration {
+    static final String PROTECTED_USER_ATTRIBUTE = "map.policy.protected-user";
     @Bean
     WebMvcConfigurer servicePolicyEnforcement(ServicePolicyService service) {
         return new WebMvcConfigurer() {
@@ -37,6 +38,7 @@ public class ServicePolicyEnforcementConfiguration {
             if (auth == null || !auth.isAuthenticated() || !(auth.getPrincipal() instanceof Long userId))
                 throw new CustomException(ErrorCode.INVALID_TOKEN);
             service.requireEligible(userId);
+            request.setAttribute(PROTECTED_USER_ATTRIBUTE, userId);
             return true;
         }
     }
