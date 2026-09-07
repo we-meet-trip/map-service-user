@@ -167,6 +167,24 @@ def launch(jar, environment, *, expected_guard=None, args=()):
             # Keep only controlled guard codes, never the original log/exception/body.
             codes = re.findall(r"\b(?:database_privilege_[a-z0-9_]+|runtime_[a-z0-9_]+|serving_[a-z0-9_]+)\b", contents)
             result["startup_guard_codes"] = sorted(set(codes))
+            result["startup_exit_code"] = app.returncode
+            result["startup_exception_classes"] = sorted(set(re.findall(
+                r"\b((?:[a-zA-Z_$][a-zA-Z0-9_$]*\.)+[a-zA-Z_$][a-zA-Z0-9_$]*(?:Exception|Error))\b", contents)))
+            result["startup_bean_names"] = sorted(set(re.findall(r"Error creating bean with name '([A-Za-z0-9_.-]+)'", contents)))
+            result["startup_sqlstates"] = sorted(set(re.findall(r"SQL\s*State\s*:\s*([0-9A-Z]{5})\b", contents)))
+            result["startup_migration_files"] = sorted(set(re.findall(r"\b(V[0-9]{3}__[A-Za-z0-9_]+\.sql)\b", contents)))
+            result["startup_schema_validation"] = sorted(set(re.findall(
+                r"Schema-validation: (?:missing|wrong column type encountered in) [a-z ]+\[[A-Za-z0-9_.]+\]", contents)))
+            result["startup_unresolved_properties"] = sorted(set(re.findall(r"Could not resolve placeholder '([A-Za-z0-9_.-]+)'", contents)))
+            result["startup_known_causes"] = [label for label, marker in {
+                "pg_authentication": "password authentication failed", "connection_refused": "Connection refused",
+                "missing_jdbc_driver": "No suitable driver", "flyway_database_unsupported": "Unsupported Database:",
+                "migration_checksum": "Checksum mismatch", "jdbc_connection": "Unable to obtain connection",
+                "missing_role": "role does not exist", "not_enough_memory": "OutOfMemoryError",
+            }.items() if marker in contents]
+            result["startup_schema_created"] = sql("SELECT to_regclass('user_service.flyway_schema_history') IS NOT NULL")
+            if result["startup_schema_created"] == "t":
+                result["startup_migration_version"] = sql("SELECT COALESCE(max(version::int),0) FROM user_service.flyway_schema_history WHERE success")
             raise FixtureFailure("serving_exited_before_readiness")
         try:
             with urllib.request.urlopen(BASE + "/actuator/health", timeout=1) as response:
@@ -214,7 +232,7 @@ def job(owner, *, role="postgres", stay=60):
     ident = str(uuid.uuid4())
     payload = {"job_id": ident, "status": "done", "places": [{"place_id": 1, "day": 1,
                "name": "Synthetic fixture place", "address": "Synthetic only", "lat": 37.5, "lng": 127.0,
-               "visit_start": "09:00", "visit_end": "10:00", "stay_minutes": stay, "grounded": True}],
+               "visit_start": "09:00", "visit_end": f"{9 + stay // 60:02d}:{stay % 60:02d}", "stay_minutes": stay, "grounded": True}],
                "visit_order": [1], "legs": [], "timeline_status": "ok"}
     sql("INSERT INTO user_service.recommend_jobs(job_id,owner_user_id,status,result_payload,finished_at) VALUES "
         f"('{ident}',{int(owner)},'done','{json.dumps(payload)}'::jsonb,NOW())", role=role)
@@ -314,6 +332,7 @@ try:
     denials = {
         "schema_ddl": "CREATE TABLE user_service.must_not_exist(id int)",
         "alter_table": "ALTER TABLE user_service.users ADD COLUMN must_not_exist int",
+        "drop_table": "DROP TABLE user_service.schedules CASCADE",
         "truncate": "TRUNCATE user_service.users CASCADE",
         "create_schema": "CREATE SCHEMA must_not_exist",
         "create_temp": "CREATE TEMP TABLE must_not_exist(id int)",
@@ -384,6 +403,11 @@ try:
     api("DELETE", f"/api/v1/schedules/{new_schedule}", token=token, status=204)
     api("GET", f"/api/v1/schedules/{new_schedule}", token=token, status=404)
     check("runtime_schedule_delete")
+    extra = api("POST", "/api/v1/auth/signup", body={"email": uuid.uuid4().hex + "@map.test",
+                "password": account_password, "nickname": "Synthetic disposable account"}, status=201)
+    consent(extra["accessToken"])
+    api("DELETE", "/api/v1/users/me", token=extra["accessToken"], status=204)
+    check("runtime_account_insert_and_delete", sql("SELECT count(*) FROM user_service.users") == "1")
     api("POST", "/api/v1/moderation/reports", token=token, status=201,
         body={"client_request_id": str(uuid.uuid4()), "content_type": "REVIEW_SUMMARY", "reason": "OTHER",
               "description": "Synthetic new report after forward migration"})
