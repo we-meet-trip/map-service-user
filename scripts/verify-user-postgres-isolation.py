@@ -415,7 +415,7 @@ try:
     api("GET", f"/api/v1/schedules/{new_schedule}", token=token, status=404)
     check("runtime_schedule_delete")
     extra = api("POST", "/api/v1/auth/signup", body={"email": uuid.uuid4().hex + "@map.test",
-                "password": account_password, "nickname": "Synthetic disposable account"}, status=201)
+                "password": account_password, "nickname": "Synthetic disposable account", "birthDate": "2000-01-01"}, status=201)
     consent(extra["accessToken"])
     api("DELETE", "/api/v1/users/me", token=extra["accessToken"], status=204)
     check("runtime_account_insert_and_delete", sql("SELECT count(*) FROM user_service.users") == "1")
