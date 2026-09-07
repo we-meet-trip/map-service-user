@@ -52,7 +52,7 @@ class ServicePolicyCurrentReadTest {
     @Test void currentAdultIsAllowedAndMissingBirthdayIsStillRejected() {
         seed(null);
         rejected(ErrorCode.AGE_INFORMATION_REQUIRED);
-        jdbc.update("update user_service.users set birth_date=? where id=?",
+        jdbc.update("update users set birth_date=? where id=?",
                 java.sql.Date.valueOf("2000-01-01"), ownUserId);
         policy.requireCurrentEligible(ownUserId);
     }
@@ -65,7 +65,7 @@ class ServicePolicyCurrentReadTest {
             assertThat(cached.getBirthDate()).isEqualTo(LocalDate.of(2000, 1, 1));
             var correction = new TransactionTemplate(transactionManager);
             correction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-            correction.executeWithoutResult(other -> jdbc.update("update user_service.users set birth_date=? where id=?",
+            correction.executeWithoutResult(other -> jdbc.update("update users set birth_date=? where id=?",
                     java.sql.Date.valueOf("2012-01-01"), ownUserId));
             assertThat(users.findById(ownUserId).orElseThrow()).isSameAs(cached);
             assertThat(cached.getBirthDate()).isEqualTo(LocalDate.of(2000, 1, 1));
@@ -76,7 +76,7 @@ class ServicePolicyCurrentReadTest {
     @Test void latestReceiptAndAccountExistenceAreRequired() {
         seed(LocalDate.of(2000, 1, 1));
         policy.requireCurrentEligible(ownUserId);
-        jdbc.update("update user_service.service_policy_acceptances set terms_version='old' where user_id=?", ownUserId);
+        jdbc.update("update service_policy_acceptances set terms_version='old' where user_id=?", ownUserId);
         rejected(ErrorCode.SERVICE_POLICY_REQUIRED);
         records.deleteById(ownUserId);
         rejected(ErrorCode.SERVICE_POLICY_REQUIRED);
