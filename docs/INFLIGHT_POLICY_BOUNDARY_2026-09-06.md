@@ -22,3 +22,7 @@ Server-persisted service policy is distinct from optional per-feature AI sharing
 - Unchanged eligibility still returns the original successful body. Exempt profile correction and original upstream error bodies keep their behavior.
 - A real JPA fixture loads a cached adult User, commits a DOB correction in a separate transaction and proves the scalar current-policy check sees the new minor value. Current/missing policy and deleted-account cases are separate assertions.
 - Whole User Java and hosted PostgreSQL checks must pass on the exact feature SHA. Local heavy JVM/Docker builds, production/GCP changes, real-user mutation and paid provider requests remain prohibited for this worktree.
+
+## Privacy revision for required DOB
+
+Terms remain `2026-09-07`; privacy is `2026-09-07.1` because DOB changed from optional profile data to required service age checking. Existing adult accounts with the old receipt must explicitly accept the revised notice too. The original receipt remains unchanged until that action; old-version POST returns `409 POLICY_VERSION_MISMATCH`, and protected use returns `403 SERVICE_POLICY_REQUIRED`. Existing DB varchar(32), entity length 32 and string DTO contracts accept the revision without a migration. Hosted PostgreSQL begins with the unchanged R3 receipt, verifies denial and explicit revision, then continues encrypted serving CRUD.

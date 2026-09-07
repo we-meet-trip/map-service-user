@@ -401,6 +401,21 @@ try:
     check("runtime_login", session["user"]["id"] == owner)
     check("runtime_profile_update", api("PATCH", "/api/v1/users/me", token=token,
           body={"nickname": "Synthetic updated owner", "birthDate": "2000-01-01"})["nickname"] == "Synthetic updated owner")
+    policy_state = api("GET", "/api/v1/consents", token=token)
+    check("new_privacy_revision_requires_existing_adult_reacceptance",
+          policy_state["terms_version"] == "2026-09-07" and policy_state["privacy_version"] == "2026-09-07.1"
+          and policy_state["age_eligible"] is True and policy_state["accepted"] is False)
+    check("old_privacy_receipt_preserved_until_explicit_acceptance",
+          sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}") == "2026-09-07")
+    denied = api("GET", f"/api/v1/schedules/{schedule}", token=token, status=403)
+    check("old_privacy_receipt_cannot_read_protected_schedule", denied["code"] == "SERVICE_POLICY_REQUIRED")
+    stale = api("POST", "/api/v1/consents", token=token, status=409, body={
+        "terms_version": "2026-09-07", "privacy_version": "2026-09-07",
+        "is_18_or_older": True, "terms_accepted": True, "privacy_accepted": True})
+    check("old_privacy_post_rejected", stale["code"] == "POLICY_VERSION_MISMATCH")
+    consent(token)
+    check("explicit_privacy_revision_persisted",
+          sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}") == "2026-09-07.1")
     detail = api("GET", f"/api/v1/schedules/{schedule}", token=token)
     check("old_encrypted_schedule_decrypts", detail["stops"][0]["name"] == "Synthetic fixture place")
     history = api("GET", f"/api/v1/chat/rooms/{room}/messages?limit=100", token=token)

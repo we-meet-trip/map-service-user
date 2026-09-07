@@ -28,7 +28,7 @@ class ServicePolicyServiceTest {
         when(records.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
     private ServicePolicyService.AcceptRequest request() {
-        return new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07", true, true, true);
+        return new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07.1", true, true, true);
     }
     private void birthday(String date) { ReflectionTestUtils.setField(user, "birthDate", LocalDate.parse(date)); }
     private void assertCode(Runnable action, ErrorCode code) {
@@ -49,7 +49,7 @@ class ServicePolicyServiceTest {
     }
     @Test void previouslyAcceptedMissingBirthdayIsBlockedOnEveryNewRequest() {
         when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user,
-                "2026-09-07", "2026-09-07", OffsetDateTime.now(clock))));
+                "2026-09-07", "2026-09-07.1", OffsetDateTime.now(clock))));
         assertThat(service.status(7L).accepted()).isFalse();
         assertCode(() -> service.requireEligible(7L), ErrorCode.AGE_INFORMATION_REQUIRED);
         birthday("2000-01-01");
@@ -72,21 +72,21 @@ class ServicePolicyServiceTest {
     }
     @Test void knownMinorIsRejectedEvenAfterPreviousAcceptance() {
         when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user,
-                "2026-09-07", "2026-09-07", OffsetDateTime.now(clock))));
+                "2026-09-07", "2026-09-07.1", OffsetDateTime.now(clock))));
         birthday("2012-01-01");
         assertCode(() -> service.requireEligible(7L), ErrorCode.AGE_RESTRICTED);
     }
     @Test void staleVersionAndMissingOrFalseConfirmationDoNotWrite() {
-        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("old", "2026-09-07", true, true, true)), ErrorCode.POLICY_VERSION_MISMATCH);
-        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07", null, true, true)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
-        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07", true, false, true)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
-        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07", true, true, false)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
+        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("old", "2026-09-07.1", true, true, true)), ErrorCode.POLICY_VERSION_MISMATCH);
+        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07.1", null, true, true)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
+        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07.1", true, false, true)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
+        assertCode(() -> service.accept(7L, new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07.1", true, true, false)), ErrorCode.POLICY_ACCEPTANCE_INVALID);
         verify(records, never()).save(any());
     }
     @Test void repeatedAcceptancePreservesOriginalTimestampAndRequiresAccountLock() {
         birthday("2000-01-01");
         OffsetDateTime original = OffsetDateTime.now(clock).minusHours(1);
-        when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user, "2026-09-07", "2026-09-07", original)));
+        when(records.findById(7L)).thenReturn(Optional.of(new ServicePolicyAcceptance(user, "2026-09-07", "2026-09-07.1", original)));
         assertThat(service.accept(7L, request()).acceptedAt()).isEqualTo(original);
         verify(users).findByIdForUpdate(7L);
         verify(records, never()).save(any());

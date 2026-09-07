@@ -65,18 +65,18 @@ class ServicePolicyHttpTest {
     }
     @Test void missingBirthdayStatusAndConsentPostHaveAnExplicitContract() throws Exception {
         authenticate();
-        when(service.status(7L)).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07", 18, false, null, null));
+        when(service.status(7L)).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07.1", 18, false, null, null));
         when(service.accept(eq(7L), any())).thenThrow(new CustomException(ErrorCode.AGE_INFORMATION_REQUIRED));
         mvc.perform(get("/api/v1/consents").header("Authorization", "Bearer synthetic-token"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.accepted").value(false))
                 .andExpect(jsonPath("$.age_eligible").doesNotExist());
         mvc.perform(post("/api/v1/consents").header("Authorization", "Bearer synthetic-token")
-                .contentType("application/json").content("{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07\",\"is_18_or_older\":true,\"terms_accepted\":true,\"privacy_accepted\":true}"))
+                .contentType("application/json").content("{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07.1\",\"is_18_or_older\":true,\"terms_accepted\":true,\"privacy_accepted\":true}"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("AGE_INFORMATION_REQUIRED"));
     }
     @Test void refusalStillAllowsStatusProfileAndDeletion() throws Exception {
         authenticate();
-        when(service.status(7L)).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07", 18, false, false, null));
+        when(service.status(7L)).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07.1", 18, false, false, null));
         mvc.perform(get("/api/v1/consents").header("Authorization", "Bearer synthetic-token"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.minimum_age").value(18))
                 .andExpect(jsonPath("$.age_eligible").value(false));
@@ -86,16 +86,16 @@ class ServicePolicyHttpTest {
     }
     @Test void missingOrFalseConfirmationsAreRejectedBeforeServiceCall() throws Exception {
         authenticate();
-        for (String body : new String[]{"{}", "{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07\",\"is_18_or_older\":true,\"terms_accepted\":false,\"privacy_accepted\":true}"})
+        for (String body : new String[]{"{}", "{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07.1\",\"is_18_or_older\":true,\"terms_accepted\":false,\"privacy_accepted\":true}"})
             mvc.perform(post("/api/v1/consents").header("Authorization", "Bearer synthetic-token")
                     .contentType("application/json").content(body)).andExpect(status().isBadRequest());
         verify(service, never()).accept(any(), any());
     }
     @Test void explicitConsentUsesAuthenticatedIdentity() throws Exception {
         authenticate();
-        when(service.accept(eq(7L), any())).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07", 18, true, true, null));
+        when(service.accept(eq(7L), any())).thenReturn(new ServicePolicyService.Status("2026-09-07", "2026-09-07.1", 18, true, true, null));
         mvc.perform(post("/api/v1/consents").header("Authorization", "Bearer synthetic-token")
-                .contentType("application/json").content("{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07\",\"is_18_or_older\":true,\"terms_accepted\":true,\"privacy_accepted\":true}"))
+                .contentType("application/json").content("{\"terms_version\":\"2026-09-07\",\"privacy_version\":\"2026-09-07.1\",\"is_18_or_older\":true,\"terms_accepted\":true,\"privacy_accepted\":true}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.accepted").value(true));
         verify(service).accept(eq(7L), any());
     }

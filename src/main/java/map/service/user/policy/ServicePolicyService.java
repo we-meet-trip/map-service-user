@@ -21,7 +21,7 @@ import java.time.ZoneId;
 @Transactional(readOnly = true)
 public class ServicePolicyService {
     public static final String TERMS_VERSION = "2026-09-07";
-    public static final String PRIVACY_VERSION = "2026-09-07";
+    public static final String PRIVACY_VERSION = "2026-09-07.1";
     private static final ZoneId KST = BirthDatePolicy.KST;
     private final UserRepository users;
     private final ServicePolicyAcceptanceRepository acceptances;
