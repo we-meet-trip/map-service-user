@@ -207,11 +207,15 @@ def migrate(operation="migrate", *, database=DB, expected=0, extra=None):
     run = execute(["strace", "-f", "-qq", "-e", "trace=bind,listen,connect", "-o", str(trace),
                    "java", "-Xmx192m", "-Dloader.main=map.migration.UserMigrationApplication", "-cp", str(candidate),
                    "org.springframework.boot.loader.launch.PropertiesLauncher", operation], env=env, timeout=120)
-    require(run.returncode == expected, "migrator_exit_expected_" + str(expected) + "_got_" + str(run.returncode))
     try:
         body = json.loads(run.stdout)
     except ValueError:
         raise FixtureFailure("migrator_output_not_bounded_json") from None
+    if run.returncode != expected:
+        code = body.get("code")
+        if isinstance(code, str) and re.fullmatch(r"(?:database_privilege_[a-z0-9_]+|migration_database_verification_failed|migration_history_grant_failed)", code):
+            result["migrator_failure_code"] = code
+        raise FixtureFailure("migrator_exit_expected_" + str(expected) + "_got_" + str(run.returncode))
     require(not run.stderr.strip(), "migrator_unexpected_stderr")
     calls = trace.read_text()
     require("listen(" not in calls and "htons(6379)" not in calls, "migrator_started_serving_or_redis")
@@ -383,6 +387,10 @@ try:
     check("security_definer_is_real_elevation", sql("SELECT hub_data.read_hidden()", role="map_user_runtime") == "synthetic-other-service")
     launch(candidate, runtime, expected_guard="database_privilege_security_definer")
     sql("REVOKE EXECUTE ON FUNCTION hub_data.read_hidden() FROM map_user_runtime")
+    sql("CREATE TABLE public.spatial_ref_sys(id integer); GRANT SELECT ON public.spatial_ref_sys TO PUBLIC")
+    launch(candidate, runtime, expected_guard="database_privilege_cross_schema_data")
+    sql("REVOKE SELECT ON public.spatial_ref_sys FROM PUBLIC")
+    check("fake_postgis_metadata_name_not_exempt")
     check("guard_failures_preserved_synthetic_rows", fingerprint() == before)
 
     phase = "runtime_real_http_encrypted_crud"
@@ -415,7 +423,8 @@ try:
         body={"client_request_id": str(uuid.uuid4()), "content_type": "REVIEW_SUMMARY", "reason": "OTHER",
               "description": "Synthetic new report after forward migration"})
     check("new_v028_type_encrypted", sql("SELECT bool_and(description::jsonb ? 'ct') FROM user_service.moderation_reports WHERE content_type='REVIEW_SUMMARY'") == "t")
-    check("serving_connections_use_runtime_role", sql("SELECT count(*)>0 AND bool_and(usename='map_user_runtime') FROM pg_stat_activity WHERE datname='user_runtime_fixture' AND backend_type='client backend' AND pid<>pg_backend_pid()") == "t")
+    # Container pg_isready uses a Unix socket; count real TCP serving pools, excluding this psql observer.
+    check("serving_connections_use_runtime_role", sql("SELECT count(*)>0 AND bool_and(usename='map_user_runtime') FROM pg_stat_activity WHERE datname='user_runtime_fixture' AND backend_type='client backend' AND client_addr IS NOT NULL AND pid<>pg_backend_pid()") == "t")
     stop(app)
     check("training_hold", sql("SELECT (SELECT count(*) FROM user_service.recommend_training)+(SELECT count(*) FROM user_service.recommend_edits)") == "0")
     check("other_service_rows_unchanged", sql("SELECT md5((SELECT row_to_json(t)::text FROM hub_data.sentinel t)||(SELECT row_to_json(t)::text FROM admin_service.sentinel t))") == foreign_before)

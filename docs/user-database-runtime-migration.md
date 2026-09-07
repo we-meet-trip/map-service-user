@@ -4,7 +4,9 @@ R4 work branch only, based on R3 `1d4f394b51f471319eb9403f6e926a8d0a511c72`.
 This is a **deployment-blocking credential/ownership contract change**. Do not put
 this image into the R3 release or start it with the old shared PostgreSQL account.
 No GCP privileges, credentials, existing rows or applied migrations were changed
-while preparing this code. develop/master integration remains user-confirmation HOLD.
+while preparing this code. A later GitHub-hosted disposable PostgreSQL fixture now
+executes the proposed ownership transition and real runtime checks below.
+develop/master integration remains user-confirmation HOLD.
 
 ## Execution boundary
 
@@ -95,7 +97,8 @@ by Infra; default local Compose does not claim TLS deployment validation.
    expected old schema owner. It targets `user_service` only, takes a transaction
    advisory lock, rejects unsupported extension/foreign/routine/type ownership and
    transfers known tables/sequences/views. It never uses REASSIGN OWNED, DROP,
-   TRUNCATE or copies rows. The script is a **proposal pending PG17 execution**.
+   TRUNCATE or copies rows. The script has passed a hosted PG17 synthetic transition;
+   it remains a **proposal pending actual GCP ACL inventory and coordinated application**.
 3. Resolve shared PUBLIC privilege findings explicitly after impact review. Create
    new private login credentials and enable only the runtime/migrator logins. Do
    not change the existing shared account/password or grant runtime owner access.
@@ -159,13 +162,59 @@ application rollback and must preserve security/schema/data invariants.
 
 ## Verification status
 
-This document is a source implementation record, not a PG/GCP completion claim.
-New unit tests exercise configuration rejection, safe diagnostics, guard failures
-and Flyway configuration. CI launches the exact bootJar for no-DB configuration and
-forbidden-secret/command checks; it also runs the existing full test suite. No local
-Docker, Gradle, Java test process, fixture or build is started under the current
-memory constraint. **Actual PG17 owner transfer, SQL catalog compatibility, runtime
-login/encrypted CRUD, deny-privilege probes, fingerprints and rollback execution
-remain required, unexecuted, and must be scheduled with root before deployment.**
+Unit tests cover configuration rejection, bounded diagnostics, guard failures and
+Flyway configuration. CI also launches the exact bootJar for 16 no-DB entrypoint
+checks and runs the existing full User tests/exporter smoke. The migration CLI
+prints only whitelisted `database_privilege_*` or fixed verification/grant failure
+codes; JDBC/Flyway exception bodies are never printed.
+
+The subsequent `database-isolation` CI job uses a brand-new GitHub-hosted PostgreSQL
+17 service pinned to Linux/amd64 digest
+`sha256:7456ef82e5f5bc43d997f4781bbd7c0d6389bff397564649a356e206ba473aee`.
+It observed **PostgreSQL 17.11 and Redis 7.4.11** in
+[CI 34083196686](https://github.com/we-meet-trip/map-service-user/actions/runs/34083196686)
+at source `4c305a0e2dbac602c5827c36cebf358155b6ef93`: **75 checks passed**, alongside
+the full test/build job. The fixture re-builds immutable R3 User
+`1d4f394b51f471319eb9403f6e926a8d0a511c72` and boots it through genuine V027 history,
+then creates a synthetic account, encrypted schedule/report and chat message.
+It stops that app, applies the owner-transfer proposal twice, runs the exact
+candidate plain migrator to apply V028 once and validate/no-op subsequently, and
+starts the candidate with runtime-only credentials. Five original table row
+fingerprints and ciphertext bytes survive transfer/migration/startup.
+
+Actual PostgreSQL statements reject schema/table DDL (including DROP), TRUNCATE,
+TEMP/CREATE, foreign table/control data, Flyway history writes, sequence setval,
+role membership and elevation with SQLSTATE 42501. The dedicated migrator cannot
+read User tables before SET ROLE or foreign service data after SET ROLE; a
+superuser or inherited-owner migrator is rejected. Deliberately adding public
+CREATE, database TEMP, column-only foreign SELECT or executable SECURITY DEFINER
+access causes the candidate to stop before HTTP serving/Redis consumers. A real
+SECURITY DEFINER function is shown to elevate access when granted, then rejected
+by the guard. The follow-up adds a public table named `spatial_ref_sys` without a
+PostGIS extension membership to ensure the shared-reference exception cannot be
+obtained by naming alone. These faults are injected only into the disposable CI DB.
+
+Runtime HTTP login, profile update, decrypting the old schedule, old chat/report
+receipt, encrypted schedule create/update/delete, account create/delete and the
+new REVIEW_SUMMARY encrypted report type are exercised. Held training tables remain
+empty and the other-service sentinel rows remain unchanged. `strace` observes the
+actual standalone JVM: no listen syscall or Redis connection, no Spring startup
+output, and an unchanged Redis-data fingerprint. The empty-database case verifies
+that the normal migrator exits before creating any relation and PostgreSQL denies
+V004's CREATE SCHEMA IF NOT EXISTS without database CREATE. No history is fabricated.
+
+The first two fixture attempts failed at the old R3 authentication startup guard:
+the harness omitted CORS_ALLOWED_ORIGINS under AUTH_ENFORCED=true. The fixture now
+supplies a loopback origin; no application security check was weakened. Redacted
+artifacts contain phase, safe exception/bean/SQLSTATE metadata and checksums, never
+JWTs, passwords, plaintext test bodies or full JVM logs.
+
+No local Docker/Gradle/Java process or database was started. **Still unverified:**
+actual GCP/PostGIS ACL compatibility (including public SECURITY DEFINER functions),
+existing GCP data fingerprints after role transfer, runtime/one-shot Compose and
+receiver ordering, least-privilege rollback image/tuple, and a standalone new-host
+legacy bootstrap. The fixture's prior R3 serving bootstrap is test preparation,
+not a production bootstrap design or permission to restore shared-superuser serving.
+No GCP grant/secret/data change or develop/master merge has occurred.
 
 Primary specification checks (2026-09-07): PostgreSQL 17 [role membership](https://www.postgresql.org/docs/17/role-membership.html), [GRANT](https://www.postgresql.org/docs/17/sql-grant.html), and [default privileges](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html). SET ROLE determines the new object owner; role-scoped defaults apply to that creating role, and per-schema REVOKE does not cancel global defaults. Flyway 11.7.2 configuration APIs were checked against the resolved official source JAR in the Gradle cache.
