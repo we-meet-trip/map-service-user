@@ -6,6 +6,7 @@ On failure leave them for runner-scoped diagnosis; never point this at GCP/local
 """
 import datetime as dt
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -68,6 +69,8 @@ def sql(statement, *, db=None, role='postgres', expected=None):
     if run.returncode:
         state = re.search(r'ERROR:\s+([0-9A-Z]{5})\b', run.stderr)
         report['sql_failure_state'] = state.group(1) if state else 'unclassified'
+        caller = inspect.currentframe().f_back
+        report['sql_failure_callsite'] = {'function': caller.f_code.co_name, 'line': caller.f_lineno}
         report['sql_failure_statement_sha256'] = hashlib.sha256(statement.encode()).hexdigest()
         # Private synthetic SQL diagnostic retained only on runner, never uploaded or printed.
         (PRIVATE / 'sql-error.txt').write_text(run.stderr)
@@ -84,6 +87,8 @@ def operator(filename, expected=0, extra=''):
     if (run.returncode == 0) != (expected == 0):
         (PRIVATE / 'operator-error.txt').write_text(run.stderr)
         report['operator_file'] = filename
+        state = re.search(r'ERROR:\s+([0-9A-Z]{5})\b', run.stderr)
+        report['operator_failure_state'] = state.group(1) if state else 'unclassified'
         raise Failure('operator_expected_'+str(expected))
     return run
 
@@ -123,7 +128,7 @@ def launch(operation='bootstrap', *, env=None, expected=0, main='map.bootstrap.U
     return body
 
 def snapshot():
-    return sql("SELECT md5(COALESCE(string_agg(n.nspname||'.'||c.relname||':'||c.relkind||':'||pg_get_userbyid(c.relowner),',' ORDER BY n.nspname,c.relname),'')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='user_service'")
+    return sql("SELECT md5(COALESCE(string_agg(n.nspname||'.'||c.relname||':'||c.relkind::text||':'||pg_get_userbyid(c.relowner),',' ORDER BY n.nspname,c.relname),'')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='user_service'")
 
 def prepare(suffix):
     global database, marker
