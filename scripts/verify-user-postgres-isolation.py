@@ -263,8 +263,11 @@ try:
     proof = json.loads((ROOT / "build/user-migration-launch-verification.json").read_text())
     check("candidate_exact_artifact", hashlib.sha256(candidate.read_bytes()).hexdigest() == proof["sha256"])
     check("legacy_exact_source", command(["git", "-C", str(ROOT / "legacy-source"), "rev-parse", "HEAD"]) == LEGACY_SHA)
-    check("all_applied_migrations_unmodified", all(p.read_bytes() == (ROOT / "legacy-source/src/main/resources/db/migration" / p.name).read_bytes()
-          for p in (ROOT / "src/main/resources/db/migration").glob("*.sql")))
+    # Every migration the prior source shipped must still exist unchanged; the
+    # candidate may only add new versions on top of them.
+    applied = {p.name: p.read_bytes() for p in (ROOT / "legacy-source/src/main/resources/db/migration").glob("*.sql")}
+    current = {p.name: p.read_bytes() for p in (ROOT / "src/main/resources/db/migration").glob("*.sql")}
+    check("all_applied_migrations_unmodified", all(current.get(name) == body for name, body in applied.items()))
     result.update(candidate_jar_sha256=proof["sha256"], legacy_jar_sha256=hashlib.sha256(legacy.read_bytes()).hexdigest())
     check("empty_disposable_database", sql("SELECT count(*) FROM pg_namespace WHERE nspname IN ('user_service','hub_data','admin_service')") == "0")
     result["postgres_version"] = sql("SHOW server_version")
