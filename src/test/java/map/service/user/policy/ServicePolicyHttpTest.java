@@ -17,13 +17,14 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(controllers = {ServicePolicyController.class, ServicePolicyHttpTest.ProtectedEndpoints.class})
+@WebMvcTest(controllers = {ServicePolicyController.class, AiConsentController.class, ServicePolicyHttpTest.ProtectedEndpoints.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RateLimitFilter.class,
         ClientIpResolver.class, CorsProperties.class, ServicePolicyEnforcementConfiguration.class,
         ServicePolicyHttpTest.ProtectedEndpoints.class})
 class ServicePolicyHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean ServicePolicyService service;
+    @MockitoBean AiConsentService ai;
     @MockitoBean JwtService jwt;
     @MockitoBean RateLimitService rates;
     @RestController static class ProtectedEndpoints {
@@ -39,7 +40,9 @@ class ServicePolicyHttpTest {
     }
     @Test void anonymousConsentIs401EvenWithAuthEnforcementOff() throws Exception {
         mvc.perform(get("/api/v1/consents")).andExpect(status().isUnauthorized());
-        verifyNoInteractions(service);
+        mvc.perform(get("/api/v1/consents/ai")).andExpect(status().isUnauthorized());
+        mvc.perform(delete("/api/v1/consents/ai/trip?expected_revision=1")).andExpect(status().isUnauthorized());
+        verifyNoInteractions(service, ai);
     }
     @Test void unacceptedUserCannotReachVisionChatOrRecommendation() throws Exception {
         authenticate();
@@ -99,4 +102,13 @@ class ServicePolicyHttpTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.accepted").value(true));
         verify(service).accept(eq(7L), any());
     }
+    @Test void optionalWithdrawalUsesAuthenticatedIdentityAndRemainsAvailableWithoutServicePolicy() throws Exception {
+        authenticate();
+        when(ai.revoke(7L,"trip",1)).thenReturn(new AiConsentService.Status("trip",AiConsentService.VERSION,false,false,2,null));
+        mvc.perform(delete("/api/v1/consents/ai/trip?expected_revision=1").header("Authorization","Bearer synthetic-token"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.accepted").value(false)).andExpect(jsonPath("$.revision").value(2));
+        verify(ai).revoke(7L,"trip",1);
+        verify(service,never()).requireEligible(any());
+    }
+
 }
