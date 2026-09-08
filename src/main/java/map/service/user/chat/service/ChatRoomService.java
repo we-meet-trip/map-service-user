@@ -40,19 +40,21 @@ public class ChatRoomService {
     private final ScheduleRepository scheduleRepository;
     private final ChatProperties chatProperties;
     private final ChatRoomAccessService access;
+    private final map.service.user.moderation.ChatModerationGuard moderation;
 
     public ChatRoomService(ChatRoomRepository roomRepository,
                            ChatParticipantRepository participantRepository,
                            ChatMessageRepository messageRepository,
                            ScheduleRepository scheduleRepository,
                            ChatProperties chatProperties,
-                           ChatRoomAccessService access) {
+                           ChatRoomAccessService access, map.service.user.moderation.ChatModerationGuard moderation) {
         this.roomRepository = roomRepository;
         this.participantRepository = participantRepository;
         this.messageRepository = messageRepository;
         this.scheduleRepository = scheduleRepository;
         this.chatProperties = chatProperties;
         this.access = access;
+        this.moderation = moderation;
     }
 
     /**
@@ -143,7 +145,7 @@ public class ChatRoomService {
                     room.getTitle(),
                     room.isReadOnly() || !membership.isActive(),
                     unread,
-                    latest.map(ChatMessage::getContent).orElse(null),
+                    latest.map(ChatMessage::getContent).map(moderation::visibleText).orElse(null),
                     latest.map(ChatMessage::getCreatedAt).orElse(null),
                     latestSeq,
                     membership.isActive() ? access.activeCount(room.getRoomId()) : 0));

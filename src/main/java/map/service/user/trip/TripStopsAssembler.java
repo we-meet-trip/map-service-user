@@ -341,7 +341,7 @@ public class TripStopsAssembler {
      */
     static TransportToNext withMeasured(
             TransportToNext base, Route route, String transport) {
-        if (route == null) {
+        if (!validRoadRoute(route, transport == null ? base.type() : transport)) {
             return base;
         }
         double durationS = route.durationS();
@@ -351,6 +351,28 @@ public class TripStopsAssembler {
         int durationMinutes = Math.max(1, (int) Math.ceil(durationS / 60.0));
         double distanceKm = Math.round(route.distanceM() / 10.0) / 100.0;
         return new TransportToNext(
-                base.type(), base.label(), durationMinutes, distanceKm, route.path());
+                base.type(), base.label(), durationMinutes, distanceKm, route.path(),
+                "OSRM", route.routeProfile(), route.dataVersion());
+    }
+
+    /** Trust explicit provider provenance and validated geometry, never just a non-null body. */
+    private static boolean validRoadRoute(Route route, String transport) {
+        if (route == null || !"OSRM".equals(route.source())
+                || route.distanceM() <= 0 || route.durationS() <= 0
+                || route.path() == null || route.path().size() < 2) return false;
+        String expected = "walk".equals(normalizeMode(transport)) ? "foot"
+                : ("bicycle".equals(normalizeMode(transport))
+                   || "scooter".equals(normalizeMode(transport))) ? "bicycle" : null;
+        if (expected == null || !expected.equals(route.routeProfile())) return false;
+        boolean distinct = false;
+        List<Double> first = route.path().get(0);
+        for (List<Double> point : route.path()) {
+            if (point == null || point.size() != 2 || point.get(0) == null
+                    || point.get(1) == null || !Double.isFinite(point.get(0))
+                    || !Double.isFinite(point.get(1)) || Math.abs(point.get(0)) > 90
+                    || Math.abs(point.get(1)) > 180) return false;
+            distinct |= !point.equals(first);
+        }
+        return distinct;
     }
 }

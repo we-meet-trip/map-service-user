@@ -2,6 +2,8 @@ package map.service.user.trip.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -18,6 +20,12 @@ public record HubWeatherResponse(
         String province,
         String city,
         List<HubWeatherDaily> daily,
-        @JsonProperty("missing_dates") List<LocalDate> missingDates
+        @JsonProperty("missing_dates") List<LocalDate> missingDates,
+        @JsonProperty("region_fallback") boolean regionFallback,
+        @JsonProperty("generated_at") OffsetDateTime generatedAt,
+        @JsonProperty("missing_reasons") Map<String, String> missingReasons
 ) {
+    public HubWeatherResponse(String province, String city, List<HubWeatherDaily> daily, List<LocalDate> missingDates) {
+        this(province, city, daily, missingDates, false, null, Map.of());
+    }
 }

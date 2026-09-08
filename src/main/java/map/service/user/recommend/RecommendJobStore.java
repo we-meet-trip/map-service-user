@@ -513,7 +513,14 @@ public class RecommendJobStore {
         RecommendJobEntity entity = repository.findById(uuid).orElse(null);
         if (entity == null || !TERMINAL_STATUS.contains(entity.getStatus()) || entity.getResultPayload() == null)
             return Optional.empty();
-        return Optional.of(payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid)).toString());
+        return Optional.of(readPayload(entity).toString());
+    }
+
+    /** Decode a stored result using its original job AAD, without changing the row.
+     * Callers must establish request ownership or a separately authorized batch context.
+     */
+    public JsonNode readPayload(RecommendJobEntity entity) {
+        return payloadCipher.decryptNode(entity.getResultPayload(), aadFor(entity.getJobId()));
     }
 
     /**
@@ -547,7 +554,7 @@ public class RecommendJobStore {
      * 결과 본문을 묶어 둘 자리 이름. 작업 식별자는 행이 사는 동안 바뀌지 않고
      * 행마다 다르므로, 한 작업의 결과를 다른 작업의 행에 옮겨 넣어도 열리지 않는다.
      */
-    private static String aadFor(UUID uuid) {
+    public static String aadFor(UUID uuid) {
         return PayloadCipher.aad("recommend_jobs", "result_payload", uuid.toString());
     }
 

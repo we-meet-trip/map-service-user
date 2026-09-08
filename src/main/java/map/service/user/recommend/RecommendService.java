@@ -67,6 +67,7 @@ public class RecommendService {
     private static final int THEME_MERGE_MAX = 6;
 
     private final AgentClient agentClient;
+    private final map.service.user.policy.AiConsentService ai;
     @Value("${training.capture.enabled:false}")
     private boolean trainingCaptureEnabled;
     private final DraftStore draftStore;
@@ -91,10 +92,12 @@ public class RecommendService {
             ProfileThemeProvider profileThemeProvider,
             @Qualifier("recommendCacheRefreshExecutor") Executor cacheRefreshExecutor,
             @Value("${recommend.cache-refresh-every-hits:3}") long refreshEveryHits,
-            map.service.user.schedule.ScheduleRepository schedules
+            map.service.user.schedule.ScheduleRepository schedules,
+            map.service.user.policy.AiConsentService ai
     ) {
         this.schedules = schedules;
         this.agentClient = agentClient;
+        this.ai = ai;
         this.draftStore = draftStore;
         this.objectMapper = objectMapper;
         this.researchLimitService = researchLimitService;
@@ -157,6 +160,7 @@ public class RecommendService {
      */
     public RecommendationResult createRecommendationDetailed(
             RecommendRequest request, Long userId) {
+        var permit = ai.open(userId, "trip");
         // 클라이언트가 보낸 stage/exclude 는 신뢰하지 않는다. 캐시 조회·agent 호출·
         // 백그라운드 갱신 모두 정규화된 요청 하나만 사용해 경로 간 해시가 어긋나지 않게 한다.
         // final 로 둔다 — 아래 취향 병합이 이 값을 덮으면 캐시 키와 백그라운드
@@ -171,10 +175,11 @@ public class RecommendService {
             // 값으로 만들어지므로, 취향이 다른 두 사람이 같은 해시를 만든다.
             // 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된 결과를 받는다.
             if (merged == null && !reuseCacheStore.tryBecomeProducer(hash)) {
-                return followProducer(normalized, userId);
+                return followProducer(normalized, userId, permit);
             }
             RecommendRequest outbound =
                     merged == null ? normalized : withTheme(normalized, merged);
+            ai.requireCurrent(permit);
             JobAccepted accepted = agentClient.requestRecommend(outbound);
             if (merged == null) {
                 linkJobSafely(accepted.jobId(), hash);
@@ -187,6 +192,7 @@ public class RecommendService {
                     RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
                             .withSegment(segmentOf(userId, merged != null)),
                     normalized.province(), normalized.city());
+            ai.bindJob(accepted.jobId(), permit);
             return new RecommendationResult(accepted, false);
         }
 
@@ -210,7 +216,8 @@ public class RecommendService {
                 normalized.province(), normalized.city());
         jobStore.recordCompletion(jobId, "done", payload, null);
         cacheDraft(jobId, payload);
-        maybeTriggerBackgroundRefresh(normalized, hash);
+        ai.bindJob(jobId, permit);
+        maybeTriggerBackgroundRefresh(normalized, hash, userId, permit);
         return new RecommendationResult(new JobAccepted(jobId, "in_progress", 3), true);
     }
 
@@ -312,7 +319,7 @@ public class RecommendService {
      * 히트 카운터를 증가시키고, refreshEveryHits 의 배수이면 백그라운드 갱신을 예약한다.
      * 카운터 증가 실패는 갱신을 건너뛸 뿐 응답(이미 만든 히트 응답)에는 영향을 주지 않는다.
      */
-    private void maybeTriggerBackgroundRefresh(RecommendRequest request, String hash) {
+    private void maybeTriggerBackgroundRefresh(RecommendRequest request, String hash, Long userId, map.service.user.policy.AiConsentService.Permit permit) {
         long hits;
         try {
             hits = reuseCacheStore.incrementHits(hash);
@@ -321,7 +328,7 @@ public class RecommendService {
             return;
         }
         if (hits % refreshEveryHits == 0) {
-            cacheRefreshExecutor.execute(() -> refreshCache(request, hash));
+            cacheRefreshExecutor.execute(() -> refreshCache(request, hash, userId, permit));
         }
     }
 
@@ -332,14 +339,16 @@ public class RecommendService {
      * 응답(이미 나간 202)에는 영향 없음 — 로그만 남기고 다음 refreshEveryHits
      * 배수 히트에서 재시도된다.
      */
-    private void refreshCache(RecommendRequest request, String hash) {
+    private void refreshCache(RecommendRequest request, String hash, Long userId, map.service.user.policy.AiConsentService.Permit permit) {
         try {
+            ai.requireCurrent(permit);
             JobAccepted accepted = agentClient.requestRecommend(request);
             reuseCacheStore.linkJob(accepted.jobId(), hash);
             // 이 경로만 접수 기록을 남기지 않아, 뒤에 오는 완료 이벤트가 출처
             // 없는 행을 만들었다. 그러면 통계에서 사용자 요청과 구분되지 않는다.
             jobStore.insertInProgress(accepted.jobId(), request.scheduleId(),
-                    RecommendJobStore.JobOrigin.agent("refresh"));
+                    RecommendJobStore.JobOrigin.agent("refresh").ownedBy(userId));
+            ai.bindJob(accepted.jobId(), permit);
         } catch (RuntimeException e) {
             log.warn("reuse cache background refresh failed hash={} reason={}",
                     hash, e.getMessage());
@@ -358,6 +367,7 @@ public class RecommendService {
      */
     public Optional<String> findOwnedDraft(String jobId, Long userId) {
         jobStore.requireOwned(jobId, userId);
+        ai.requireJob(jobId, userId);
         return findDraft(jobId);
     }
 
@@ -389,12 +399,13 @@ public class RecommendService {
      * 채워지는지는 조회 시점에 확인하므로(resolveWaiting) 여기서 기다리지
      * 않는다 — 기다리면 접수 응답이 그만큼 늦어진다.
      */
-    private RecommendationResult followProducer(RecommendRequest normalized, Long userId) {
+    private RecommendationResult followProducer(RecommendRequest normalized, Long userId, map.service.user.policy.AiConsentService.Permit permit) {
         String jobId = UUID.randomUUID().toString();
         reuseCacheStore.markWaiting(jobId, cacheKeyBuilder.hash(normalized));
         jobStore.insertInProgress(jobId, normalized.scheduleId(),
                 RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
                         .withSegment(segmentOf(userId, false)));
+        ai.bindJob(jobId, permit);
         log.info("joined in-flight recommendation job_id={}", jobId);
         return new RecommendationResult(
                 new JobAccepted(jobId, "in_progress", 3), false);
@@ -455,6 +466,7 @@ public class RecommendService {
     public Optional<String> applyEdit(String jobId, EditRequest edit,
                                       Long userId, String idempotencyKey) {
         jobStore.requireOwned(jobId, userId);
+        ai.requireJob(jobId, userId);
         try {
             String requestJson = objectMapper.writeValueAsString(edit);
             RecommendJobStore.EditOutcome outcome = jobStore.persistOwnedEdit(
@@ -587,7 +599,9 @@ public class RecommendService {
     public JobAccepted research(
             String jobId, RecommendRequest request,
             List<String> extraExclude, List<SelectedPlace> keep, Long userId) {
+        var permit = ai.open(userId, "trip");
         jobStore.requireOwned(jobId, userId);
+        ai.requireJob(jobId, userId);
         if (userId != null && request.scheduleId() != null && !request.scheduleId().isBlank()) {
             Long schedule;
             try { schedule = Long.valueOf(request.scheduleId()); }
@@ -611,6 +625,7 @@ public class RecommendService {
         }
         List<SelectedPlace> pinned =
                 (keep == null || keep.isEmpty()) ? null : List.copyOf(keep);
+        ai.requireCurrent(permit);
         JobAccepted accepted = agentClient.requestRecommend(
                 withStage(request, "mode1", List.copyOf(exclude), pinned));
         // 원본 jobId 를 함께 남긴다. 재탐색은 "앞의 결과를 버렸다" 는 뜻이라,
@@ -619,6 +634,7 @@ public class RecommendService {
                 RecommendJobStore.JobOrigin.research(jobId).ownedBy(userId)
                         .withSegment(segmentOf(userId, false)),
                 request.province(), request.city());
+        ai.bindJob(accepted.jobId(), permit);
         return accepted;
     }
 
@@ -807,11 +823,14 @@ public class RecommendService {
     }
 
     public JobAccepted createFreshRecommendation(RecommendRequest request, Long userId) {
+        var permit = ai.open(userId, "trip");
         RecommendRequest normalized = withStage(request, "init", List.of());
+        ai.requireCurrent(permit);
         JobAccepted accepted = agentClient.requestRecommend(normalized);
         jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
                 RecommendJobStore.JobOrigin.agent("init").ownedBy(userId),
                 normalized.province(), normalized.city());
+        ai.bindJob(accepted.jobId(), permit);
         return accepted;
     }
 

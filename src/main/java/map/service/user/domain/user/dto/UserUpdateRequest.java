@@ -1,6 +1,5 @@
 package map.service.user.domain.user.dto;
 
-import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,7 +23,6 @@ public record UserUpdateRequest(
         @Size(max = 500, message = "프로필 이미지 주소는 500자 이하입니다.")
         String profileImageUrl,
 
-        @Past(message = "생년월일은 오늘 이전이어야 합니다.")
         LocalDate birthDate,
 
         @Size(max = 16, message = "성별은 16자 이하입니다.")

@@ -42,11 +42,17 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
     private final JwtService jwtService;
     private final ChatRoomAccessService access;
+    private final map.service.user.moderation.ChatModerationGuard moderation;
+    private final map.service.user.policy.ServicePolicyService policy;
     private final java.util.Map<String, String> sessionTokens = new java.util.concurrent.ConcurrentHashMap<>();
 
-    public StompAuthChannelInterceptor(JwtService jwtService, ChatRoomAccessService access) {
+    public StompAuthChannelInterceptor(JwtService jwtService, ChatRoomAccessService access,
+            map.service.user.moderation.ChatModerationGuard moderation,
+            map.service.user.policy.ServicePolicyService policy) {
         this.jwtService = jwtService;
         this.access = access;
+        this.moderation = moderation;
+        this.policy = policy;
     }
 
     @Override
@@ -83,6 +89,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         } catch (CustomException e) {
             throw new MessagingException("invalid authorization token");
         }
+        policy.requireEligible(userId);
         accessor.setUser(new StompPrincipal(userId.toString()));
         if (accessor.getSessionId() != null) sessionTokens.put(accessor.getSessionId(), token);
     }
@@ -130,7 +137,9 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     private Long validateSession(String sessionId) {
         String token = sessionId == null ? null : sessionTokens.get(sessionId);
         if (token == null) throw new MessagingException("unauthenticated session");
-        return jwtService.extractUserId(jwtService.validateAccessToken(token));
+        Long userId = jwtService.extractUserId(jwtService.validateAccessToken(token));
+        policy.requireEligible(userId);
+        return userId;
     }
 
     /** Recheck membership and token for each delivery, including subscriptions opened before leaving. */
@@ -144,6 +153,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
                 Long room = parseRoomId(destination);
                 if (room == null) return null;
                 access.requireActiveParticipant(room, uid);
+                if (!moderation.mayDeliver(uid, room, message.getPayload())) return null;
             }
             return message;
         } catch (RuntimeException denied) {

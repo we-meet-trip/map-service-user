@@ -144,7 +144,7 @@ public final class TripMapping {
     /** hub sky_condition(한글) → client condition(sunny/cloudy/rainy/snowy) (R-4). */
     public static String skyToCondition(String sky) {
         if (sky == null || sky.isBlank()) {
-            return "cloudy";
+            return null;
         }
         if (sky.contains("눈")) {
             return "snowy";
@@ -155,13 +155,12 @@ public final class TripMapping {
         if (sky.contains("맑")) {
             return "sunny";
         }
-        return "cloudy"; // 구름많음 · 구름조금 · 흐림 등
+        return sky.contains("구름") || sky.contains("흐림") ? "cloudy" : null;
     }
 
     /**
      * hub 날씨 → client weather_forecast (결정 D-6).
-     * client 가 정수 필드를 엄격 캐스팅하므로 temp/precip 중 하나라도 null 인 항목은
-     * 제외한다(크래시 방지). 데이터가 없으면 빈 리스트.
+     * 항목별 결측은 null로 보존하며 알 수 없는 하늘상태를 정상 값으로 만들지 않는다.
      */
     public static List<WeatherForecastItem> toWeatherForecast(HubWeatherResponse hub) {
         List<WeatherForecastItem> out = new ArrayList<>();
@@ -169,9 +168,7 @@ public final class TripMapping {
             return out;
         }
         for (HubWeatherDaily d : hub.daily()) {
-            if (d == null || d.date() == null
-                    || d.tempMin() == null || d.tempMax() == null
-                    || d.precipitationProb() == null) {
+            if (d == null || d.date() == null) {
                 continue;
             }
             out.add(new WeatherForecastItem(

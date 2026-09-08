@@ -14,8 +14,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
+    String MODERATION_VISIBLE = " and m.moderationHidden = false and not exists (select b.id from UserBlock b "
+            + "where (b.blockerId=:uid and b.blockedUserId=m.senderId) "
+            + "or (b.blockerId=m.senderId and b.blockedUserId=:uid)) ";
+
     @org.springframework.data.jpa.repository.Query("select m from ChatMessage m where m.roomId = :room "
-            + "and m.seq < :before and exists (select i.id from ChatMembershipInterval i "
+            + MODERATION_VISIBLE + "and m.seq < :before and exists (select i.id from ChatMembershipInterval i "
             + "where i.roomId = m.roomId and i.userId = :uid and m.seq > i.startSeq "
             + "and (i.endSeq is null or m.seq <= i.endSeq)) order by m.seq desc")
     List<ChatMessage> findVisible(@org.springframework.data.repository.query.Param("room") Long roomId,
@@ -24,12 +28,21 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
                                  Pageable page);
 
     @org.springframework.data.jpa.repository.Query("select count(m) from ChatMessage m where m.roomId = :room "
-            + "and m.seq > :after and exists (select i.id from ChatMembershipInterval i "
+            + MODERATION_VISIBLE + "and m.seq > :after and exists (select i.id from ChatMembershipInterval i "
             + "where i.roomId = m.roomId and i.userId = :uid and m.seq > i.startSeq "
             + "and (i.endSeq is null or m.seq <= i.endSeq))")
     long countVisibleAfter(@org.springframework.data.repository.query.Param("room") Long roomId,
                             @org.springframework.data.repository.query.Param("uid") Long userId,
                             @org.springframework.data.repository.query.Param("after") long after);
+
+    // A user may report a message after blocking its sender. Membership interval is
+    // still enforced, and no unrelated room/message existence is exposed.
+    @org.springframework.data.jpa.repository.Query("select m from ChatMessage m where m.roomId=:room and m.seq=:seq "
+            + "and exists (select i.id from ChatMembershipInterval i where i.roomId=m.roomId and i.userId=:uid "
+            + "and m.seq>i.startSeq and (i.endSeq is null or m.seq<=i.endSeq))")
+    Optional<ChatMessage> findReportable(@org.springframework.data.repository.query.Param("room") Long room,
+            @org.springframework.data.repository.query.Param("uid") Long user,
+            @org.springframework.data.repository.query.Param("seq") long seq);
 
     /** 첫 페이지: 방의 최신 메시지부터 seq 내림차순. */
     List<ChatMessage> findByRoomIdOrderBySeqDesc(Long roomId, Pageable pageable);

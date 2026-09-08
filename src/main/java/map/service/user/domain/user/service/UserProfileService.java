@@ -1,6 +1,8 @@
 package map.service.user.domain.user.service;
 
 import lombok.RequiredArgsConstructor;
+import java.time.LocalDate;
+import map.service.user.policy.BirthDatePolicy;
 import map.service.user.domain.user.dto.UserMeResponse;
 import map.service.user.domain.user.dto.UserUpdateRequest;
 import map.service.user.domain.user.entity.User;
@@ -42,7 +44,11 @@ public class UserProfileService {
      */
     @Transactional
     public UserMeResponse updateMe(Long userId, UserUpdateRequest request) {
-        User user = requireUser(userId);
+        if (userId == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        BirthDatePolicy.validate(request.birthDate(), LocalDate.now(BirthDatePolicy.KST));
+        // Serialize DOB corrections with consent acceptance and concurrent profile edits.
+        User user = userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
         user.updateDetails(
                 request.nickname(),
                 request.profileImageUrl(),

@@ -77,21 +77,6 @@ public class TripService {
     }
 
     /**
-     * 방문지 목록으로 요약 선작성을 예약한다.
-     *
-     * 제출만 하고 즉시 돌아가므로 응답이 늦어지지 않는다. 이름이 없는
-     * 항목은 캐시 키를 만들 수 없어 건너뛴다.
-     */
-    private void prewarmSummaries(List<TripStop> stops) {
-        List<ReviewSummaryService.PrewarmPlace> places = stops.stream()
-                .filter(s -> s.name() != null && !s.name().isBlank())
-                .map(s -> new ReviewSummaryService.PrewarmPlace(
-                        s.name(), s.category()))
-                .toList();
-        reviewSummaryService.prewarm(places);
-    }
-
-    /**
      * trip 생성 동기 처리. 성공 시 완성된 TripGenerateResponse, 실패 시 예외를 던진다
      * (TripGenerationException→502, TripTimeoutException→504, IllegalArgument→400).
      *
@@ -152,7 +137,7 @@ public class TripService {
         // 5) 장소 요약을 미리 만들어 둔다. 일정에 담긴 장소는 대부분 한 번씩
         //    눌러 보는데, 누를 때 만들면 그 자리에서 모델 응답을 기다려야 한다.
         //    제출만 하고 넘어가므로 이 응답이 늦어지지 않는다.
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         // 6) 날씨(best-effort)
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
@@ -229,7 +214,7 @@ public class TripService {
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result, spec.transport(), startHour, endHour);
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(
                 hubWeatherClient.fetchWeather(
@@ -307,7 +292,8 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        prewarmSummaries(stops);
+        // Manual routes and explicit route optimization must not enqueue
+        // generative review summaries: this flow requires no external AI consent.
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());
@@ -382,7 +368,7 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());

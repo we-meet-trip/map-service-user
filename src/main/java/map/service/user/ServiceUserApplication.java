@@ -29,9 +29,22 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  *   각각 RestClient · ConnectionFactory · StreamMessageListenerContainer 를
  *   빈으로 등록한다.
  */
-@SpringBootApplication(exclude = {RedisRepositoriesAutoConfiguration.class})
+@SpringBootApplication(exclude = {RedisRepositoriesAutoConfiguration.class,
+        org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration.class})
 @ConfigurationPropertiesScan("map.service.user.global.config")
 public class ServiceUserApplication {
+
+    @org.springframework.context.annotation.Bean
+    static org.springframework.beans.factory.config.BeanFactoryPostProcessor servingExportGuard(
+            org.springframework.core.env.Environment environment) {
+        return beanFactory -> {
+            if (environment.getProperty("training.export.enabled", Boolean.class, false)) {
+                throw new IllegalStateException("training export is forbidden in serving; use the dedicated exporter entrypoint");
+            }
+            map.service.user.global.config.RuntimeDatabaseGuard.verifyBeforeBeans(beanFactory, environment);
+        };
+    }
+
 
     /**
      * Spring Boot 애플리케이션을 기동한다.
@@ -42,4 +55,3 @@ public class ServiceUserApplication {
         SpringApplication.run(ServiceUserApplication.class, args);
     }
 }
-

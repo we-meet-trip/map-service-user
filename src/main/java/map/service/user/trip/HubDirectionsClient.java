@@ -27,8 +27,8 @@ import org.springframework.web.client.RestClientResponseException;
  * hub 는 전 구간 실패여도 200 + routes 전부 null 로 응답하므로, 여기서 null 은
  * "배치 호출 자체가 실패"한 경우만을 뜻한다(부분 실패는 routes 원소 null).
  *
- * client: @Qualifier("hubRestClient") RestClient — base URL/타임아웃/
- *         X-Internal-Token 은 HubClientConfig 가 구성(HubWeatherClient 와 동일 빈).
+ * client: @Qualifier("hubDirectionsRestClient") RestClient — base URL/타임아웃/
+ *         X-Internal-Token 은 HubClientConfig 가 구성(경로 전용 요청 시간 예산).
  */
 @Component
 public class HubDirectionsClient {
@@ -50,7 +50,7 @@ public class HubDirectionsClient {
     private final RestClient client;
     private final LocationSeal seal;
 
-    public HubDirectionsClient(@Qualifier("hubRestClient") RestClient client,
+    public HubDirectionsClient(@Qualifier("hubDirectionsRestClient") RestClient client,
             LocationSeal seal) {
         this.seal = seal;
         this.client = client;

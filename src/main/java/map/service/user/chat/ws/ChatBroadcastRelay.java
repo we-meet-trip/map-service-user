@@ -62,7 +62,7 @@ public class ChatBroadcastRelay implements MessageListener {
             messagingTemplate.convertAndSend(ROOM_TOPIC_PREFIX + envelope.roomId(), envelope);
         } catch (Exception e) {
             // 한 건의 역직렬화/전달 실패가 리스너를 죽이지 않도록 삼킨다(다음 메시지 계속 처리).
-            log.warn("chat broadcast relay delivery failed: {}", e.getMessage());
+            log.warn("chat broadcast relay delivery failed cause={}", e.getClass().getSimpleName());
         }
     }
 }

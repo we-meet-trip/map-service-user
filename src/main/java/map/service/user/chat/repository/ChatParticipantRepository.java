@@ -38,6 +38,12 @@ public interface ChatParticipantRepository extends JpaRepository<ChatParticipant
     List<Long> findReadPointers(@Param("roomId") Long roomId,
                                 @Param("status") ChatParticipant.Status status);
 
+    @Query("select p.lastReadMessageSeq from ChatParticipant p where p.roomId=:room and p.status=:status "
+            + "and not exists (select b.id from UserBlock b where (b.blockerId=:viewer and b.blockedUserId=p.userId) "
+            + "or (b.blockerId=p.userId and b.blockedUserId=:viewer))")
+    List<Long> findVisibleReadPointers(@Param("room") Long room, @Param("viewer") Long viewer,
+            @Param("status") ChatParticipant.Status status);
+
     /**
      * 읽음 포인터를 단조(GREATEST) 갱신한다. 주어진 seq 가 현재 값보다 클 때만 전진하므로
      * 순서가 뒤바뀐/동시 읽음이 포인터를 되돌리지 않는다. 참가자별 다른 행이라 락 경합 없음.

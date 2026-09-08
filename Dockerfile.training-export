@@ -1,0 +1,14 @@
+# Source snapshot exporter only; this is not a dataset training worker.
+FROM gradle:8.12.1-jdk17 AS builder
+WORKDIR /workspace
+COPY --chown=gradle:gradle . .
+RUN gradle clean trainingExportJar -x test --no-daemon
+
+FROM eclipse-temurin:17-jre
+RUN rm -f /usr/bin/pebble \
+    && groupadd -r app && useradd -r -g app -u 10001 app
+WORKDIR /app
+COPY --from=builder /workspace/build/libs/*-training-export.jar /app/export.jar
+USER 10001:10001
+HEALTHCHECK NONE
+ENTRYPOINT ["java", "-jar", "/app/export.jar"]

@@ -199,7 +199,10 @@ class ContractFreezeTest {
                 "label", "String",
                 "duration_minutes", "int",
                 "distance_km", "double",
-                "path", "List<List<Double>>"));
+                "path", "List<List<Double>>",
+                "source", "String",
+                "route_profile", "String",
+                "data_version", "String"));
     }
 
     @Test
@@ -207,8 +210,8 @@ class ContractFreezeTest {
         assertThat(shape(WeatherForecastItem.class)).isEqualTo(of(
                 "date", "String",
                 "condition", "String",
-                "temp_high", "int",
-                "temp_low", "int",
-                "precipitation_probability", "int"));
+                "temp_high", "Integer",
+                "temp_low", "Integer",
+                "precipitation_probability", "Integer"));
     }
 }
