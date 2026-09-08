@@ -43,7 +43,7 @@ class AiConsentServiceTest {
     }
     @Test void originalJwtExpiryAndLogoutArePreservedBeforeQueuedProviderWork() {
         for (ErrorCode code : new ErrorCode[]{ErrorCode.EXPIRED_TOKEN, ErrorCode.BLACKLISTED_TOKEN, ErrorCode.INVALID_TOKEN}) {
-            when(jwt.validateAccessToken("synthetic-token")).thenThrow(new CustomException(code));
+            doThrow(new CustomException(code)).when(jwt).validateAccessToken("synthetic-token");
             var permit = new AiConsentService.Permit(7L,"trip",1,false,"synthetic-token");
             assertThatThrownBy(() -> service.requireCurrent(permit)).hasFieldOrPropertyWithValue("errorCode", code);
             assertThat(permit.toString()).doesNotContain("synthetic-token");
