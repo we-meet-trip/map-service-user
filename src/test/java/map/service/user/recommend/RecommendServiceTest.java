@@ -86,7 +86,7 @@ class RecommendServiceTest {
         service = new RecommendService(
                 agentClient, draftStore, objectMapper, researchLimitService, jobStore,
                 reuseCacheStore, cacheKeyBuilder, profileThemeProvider,
-                immediateExecutor, 3L, mock(map.service.user.schedule.ScheduleRepository.class));
+                immediateExecutor, 3L, mock(map.service.user.schedule.ScheduleRepository.class), mock(map.service.user.policy.AiConsentService.class));
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
         // 기본은 "이 요청이 만드는 쪽". 같은 조건이 겹치는 상황은 개별

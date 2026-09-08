@@ -19,10 +19,12 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 public class ServicePolicyResponseGuard implements ResponseBodyAdvice<Object> {
     private final ObjectProvider<ServicePolicyService> policy;
     private final ObjectProvider<JwtService> jwt;
+    private final ObjectProvider<AiConsentService> ai;
 
-    public ServicePolicyResponseGuard(ObjectProvider<ServicePolicyService> policy, ObjectProvider<JwtService> jwt) {
+    public ServicePolicyResponseGuard(ObjectProvider<ServicePolicyService> policy, ObjectProvider<JwtService> jwt, ObjectProvider<AiConsentService> ai) {
         this.policy = policy;
         this.jwt = jwt;
+        this.ai = ai;
     }
 
     @Override
@@ -48,6 +50,10 @@ public class ServicePolicyResponseGuard implements ResponseBodyAdvice<Object> {
             Long currentUser = validator.extractUserId(validator.validateAccessToken(authorization.substring(7)));
             if (!userId.equals(currentUser)) throw new CustomException(ErrorCode.INVALID_TOKEN);
             policy.getObject().requireCurrentEligible(userId);
+            Object permits = servletRequest.getAttribute(AiConsentService.REQUEST_PERMITS);
+            if (permits instanceof java.util.Set<?> set) for (Object saved : set) {
+                if (saved instanceof AiConsentService.Permit permit) ai.getObject().requireCurrent(permit);
+            }
         } catch (CustomException rejected) {
             throw rejected;
         } catch (RuntimeException unavailable) {

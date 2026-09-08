@@ -23,6 +23,7 @@ class ReviewSummaryGenerationServiceTest {
     private StringRedisTemplate redis;
     private ReviewSummaryService summaries;
     private ReviewSummaryGenerationService service;
+    private map.service.user.policy.AiConsentService ai;
     private final ReviewSummaryRequest request = new ReviewSummaryRequest("fixture", true,
             UUID.fromString("22222222-2222-2222-2222-222222222222"));
 
@@ -30,7 +31,9 @@ class ReviewSummaryGenerationServiceTest {
     void setUp() {
         redis = mock(StringRedisTemplate.class);
         summaries = mock(ReviewSummaryService.class);
-        service = new ReviewSummaryGenerationService(redis, summaries, new ObjectMapper());
+        ai = mock(map.service.user.policy.AiConsentService.class);
+        when(ai.open(7L, "review_summary")).thenReturn(new map.service.user.policy.AiConsentService.Permit(7L, "review_summary", 1, false, null));
+        service = new ReviewSummaryGenerationService(redis, summaries, new ObjectMapper(), ai);
     }
 
     @Test
@@ -80,6 +83,24 @@ class ReviewSummaryGenerationServiceTest {
                 .isInstanceOfSatisfying(CustomException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.REVIEW_SUMMARY_UNAVAILABLE));
         verifyNoInteractions(summaries);
+    }
+
+    @Test
+    void revokedPersistentConsentStopsBeforeQuotaOrProvider() {
+        when(ai.open(7L, "review_summary")).thenThrow(new CustomException(ErrorCode.AI_CONSENT_REQUIRED));
+        assertThatThrownBy(() -> service.generate(7L, request)).hasFieldOrPropertyWithValue("errorCode", ErrorCode.AI_CONSENT_REQUIRED);
+        verifyNoInteractions(redis, summaries);
+    }
+
+    @Test
+    void revokeAndRegrantDuringProviderWaitDiscardsResultAndLeavesPendingReceipt() {
+        when(redis.execute(eq(ReviewSummaryGenerationService.CLAIM), anyList(), any(), any())).thenReturn("START");
+        when(summaries.summarize("fixture")).thenAnswer(inv -> {
+            doThrow(new CustomException(ErrorCode.AI_CONSENT_CHANGED)).when(ai).requireCurrent(any());
+            return new ReviewSummaryResponse("fixture", List.of("SYNTHETIC_PROTECTED_RESULT"), 1);
+        });
+        assertThatThrownBy(() -> service.generate(7L, request)).hasFieldOrPropertyWithValue("errorCode", ErrorCode.AI_CONSENT_CHANGED);
+        verify(redis, never()).execute(eq(ReviewSummaryGenerationService.COMPLETE), anyList(), any(), any(), any());
     }
 
     @Test

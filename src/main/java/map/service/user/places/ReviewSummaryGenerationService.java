@@ -44,13 +44,15 @@ public class ReviewSummaryGenerationService {
     private final StringRedisTemplate redis;
     private final ReviewSummaryService summaries;
     private final ObjectMapper mapper;
+    private final map.service.user.policy.AiConsentService ai;
 
     public ReviewSummaryGenerationService(
             @Qualifier("cacheRedisTemplate") StringRedisTemplate redis,
-            ReviewSummaryService summaries, ObjectMapper mapper) {
+            ReviewSummaryService summaries, ObjectMapper mapper, map.service.user.policy.AiConsentService ai) {
         this.redis = redis;
         this.summaries = summaries;
         this.mapper = mapper;
+        this.ai = ai;
     }
 
     public ReviewSummaryResponse generate(Long userId, ReviewSummaryRequest request) {
@@ -60,28 +62,33 @@ public class ReviewSummaryGenerationService {
                 || request.query().isBlank() || request.query().length() > 60) {
             throw new IllegalArgumentException("Explicit summary consent and a valid request are required");
         }
+        var permit = ai.open(userId, "review_summary");
         String fingerprint = hash(request.query().strip().toLowerCase(Locale.ROOT));
         String owner = hash(userId + ":" + request.clientRequestId());
         String receiptKey = "reviews:explicit:v1:request:" + owner;
         String placeKey = "reviews:explicit:v1:place:" + fingerprint;
         String rateKey = "reviews:explicit:v1:rate:" + hash(userId.toString());
         try {
-            String pending = mapper.writeValueAsString(new Receipt(fingerprint, false, List.of(), 0));
+            String pending = mapper.writeValueAsString(new Receipt(fingerprint, false, List.of(), 0, permit.revision()));
             String claim = redis.execute(CLAIM, List.of(receiptKey, placeKey, rateKey), pending, owner);
             if ("LIMIT".equals(claim)) throw new CustomException(ErrorCode.RATE_LIMIT_EXCEEDED);
             if ("BUSY".equals(claim)) throw new CustomException(ErrorCode.REVIEW_SUMMARY_CONFLICT);
             if (claim != null && claim.startsWith("EXISTING:")) {
                 Receipt receipt = mapper.readValue(claim.substring(9), Receipt.class);
+                if (receipt.revision() != permit.revision()) throw new CustomException(ErrorCode.AI_CONSENT_CHANGED);
                 if (!fingerprint.equals(receipt.fingerprint()) || !receipt.complete())
                     throw new CustomException(ErrorCode.REVIEW_SUMMARY_CONFLICT);
                 if (receipt.bullets() == null || receipt.sourceCount() < 0)
                     throw new CustomException(ErrorCode.REVIEW_SUMMARY_UNAVAILABLE);
+                ai.requireCurrent(permit);
                 return new ReviewSummaryResponse(request.query(), receipt.bullets(), receipt.sourceCount());
             }
             if (!"START".equals(claim)) throw new CustomException(ErrorCode.REVIEW_SUMMARY_UNAVAILABLE);
+            ai.requireCurrent(permit);
             ReviewSummaryResponse response = summaries.summarize(request.query());
+            ai.requireCurrent(permit);
             String done = mapper.writeValueAsString(new Receipt(fingerprint, true,
-                    response.bullets(), response.sourceCount()));
+                    response.bullets(), response.sourceCount(), permit.revision()));
             Long completed = redis.execute(COMPLETE, List.of(receiptKey, placeKey), pending, done, owner);
             if (!Long.valueOf(1).equals(completed))
                 throw new CustomException(ErrorCode.REVIEW_SUMMARY_UNAVAILABLE);
@@ -94,7 +101,7 @@ public class ReviewSummaryGenerationService {
         }
     }
 
-    private record Receipt(String fingerprint, boolean complete, List<String> bullets, int sourceCount) {}
+    private record Receipt(String fingerprint, boolean complete, List<String> bullets, int sourceCount, long revision) {}
 
     private static String hash(String value) {
         try {

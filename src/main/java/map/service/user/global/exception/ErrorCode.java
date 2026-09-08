@@ -70,6 +70,11 @@ public enum ErrorCode {
     POLICY_VERSION_MISMATCH(HttpStatus.CONFLICT, "POLICY_VERSION_MISMATCH", "변경된 약관을 다시 확인해주세요."),
     POLICY_ACCEPTANCE_INVALID(HttpStatus.BAD_REQUEST, "POLICY_ACCEPTANCE_INVALID", "필수 확인 항목에 명시적으로 동의해주세요."),
 
+    AI_CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "AI_CONSENT_REQUIRED", "이 AI 기능의 외부 전송에 동의해주세요."),
+    AI_CONSENT_CHANGED(HttpStatus.FORBIDDEN, "AI_CONSENT_CHANGED", "AI 전송 동의가 변경되었습니다. 새 요청을 시작해주세요."),
+    AI_CONSENT_CONFLICT(HttpStatus.CONFLICT, "AI_CONSENT_CONFLICT", "동의 설정이 변경되었습니다. 최신 상태를 확인해주세요."),
+    AI_CONSENT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI_CONSENT_UNAVAILABLE", "AI 전송 동의를 확인하거나 저장할 수 없습니다. 잠시 후 다시 시도해주세요."),
+
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다.");
 

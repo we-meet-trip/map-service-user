@@ -21,7 +21,7 @@ public class ServicePolicyEnforcementConfiguration {
             @Override public void addInterceptors(InterceptorRegistry registry) {
                 registry.addInterceptor(new PolicyInterceptor(service)).addPathPatterns("/api/v1/**")
                         // Refusal must leave authentication, correction, deletion and safety reports accessible.
-                        .excludePathPatterns("/api/v1/auth/**", "/api/v1/consents", "/api/v1/users/me",
+                        .excludePathPatterns("/api/v1/auth/**", "/api/v1/consents", "/api/v1/consents/**", "/api/v1/users/me",
                                 "/api/v1/moderation/**");
             }
         };

@@ -127,7 +127,7 @@ public class ScheduleService {
         // 화면에는 멀쩡히 보이는 것이 저장에서만 없다고 나왔다.
         // recommendService.findDraft 는 초안이 없으면 완료 기록으로 내려간다.
         jobStore.requireOwned(request.jobId(), userId);
-        String draftJson = recommendService.findDraft(request.jobId())
+        String draftJson = recommendService.findOwnedDraft(request.jobId(), userId)
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {
@@ -529,7 +529,7 @@ public class ScheduleService {
             Long scheduleId, Long userId, ScheduleReviseRequest request) {
         ScheduleEntity entity = findOwned(scheduleId, userId);
         jobStore.requireOwned(request.jobId(), userId);
-        String draftJson = recommendService.findDraft(request.jobId())
+        String draftJson = recommendService.findOwnedDraft(request.jobId(), userId)
                 .orElseThrow(() -> new ScheduleNotFoundException(request.jobId()));
         JsonNode payload;
         try {

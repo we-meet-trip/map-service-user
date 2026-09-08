@@ -32,17 +32,22 @@ public class VisionPermitController {
     private final UserRepository users;
     private final String internalToken;
     private final int limit;
+    private final map.service.user.policy.AiConsentService ai;
 
     public VisionPermitController(@Qualifier("blacklistRedisTemplate") StringRedisTemplate redis,
                                   UserRepository users,
                                   @Value("${vision.internal-token:}") String internalToken,
-                                  @Value("${vision.daily-limit:60}") int limit) {
-        this.redis = redis; this.users = users; this.internalToken = internalToken; this.limit = limit;
+                                  @Value("${vision.daily-limit:60}") int limit, map.service.user.policy.AiConsentService ai) {
+        this.redis = redis; this.users = users; this.internalToken = internalToken; this.limit = limit; this.ai = ai;
     }
-    public record Request(boolean consume) {}
+    public record Request(boolean consume, @com.fasterxml.jackson.annotation.JsonProperty("expected_revision") Long expectedRevision) {
+        public Request(boolean consume) { this(consume, null); }
+    }
     public record Permit(@com.fasterxml.jackson.annotation.JsonProperty("user_id") long userId,
                          long remaining,
-                         @com.fasterxml.jackson.annotation.JsonProperty("reset_at") Instant resetAt) {}
+                         @com.fasterxml.jackson.annotation.JsonProperty("reset_at") Instant resetAt,
+                         @com.fasterxml.jackson.annotation.JsonProperty("consent_revision") long consentRevision,
+                         @com.fasterxml.jackson.annotation.JsonProperty("include_location") boolean includeLocation) {}
 
     @ExceptionHandler(ResponseStatusException.class)
     public org.springframework.http.ResponseEntity<Void> unavailable(ResponseStatusException error) {
@@ -60,6 +65,9 @@ public class VisionPermitController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         if (userId == null || !users.existsById(userId))
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        var permission = ai.open(userId, "vision");
+        if (request.expectedRevision() != null && request.expectedRevision() != permission.revision())
+            throw new map.service.user.global.exception.CustomException(map.service.user.global.exception.ErrorCode.AI_CONSENT_CHANGED);
         Instant now = Instant.now();
         LocalDate date = now.atOffset(ZoneOffset.UTC).toLocalDate();
         Instant reset = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
@@ -80,6 +88,7 @@ public class VisionPermitController {
         }
         if (used < 0 || (request.consume() && used > limit))
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "vision daily limit reached");
-        return new Permit(userId, Math.max(0, limit - used), reset);
+        ai.requireCurrent(permission);
+        return new Permit(userId, Math.max(0, limit - used), reset, permission.revision(), permission.includeLocation());
     }
 }

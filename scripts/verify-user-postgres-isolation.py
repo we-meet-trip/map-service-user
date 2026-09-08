@@ -232,14 +232,14 @@ def consent(token):
     require(accepted["accepted"], "synthetic_consent_not_accepted")
 
 
-def job(owner, *, role="postgres", stay=60):
+def job(owner, *, role="postgres", stay=60, mode="route"):
     ident = str(uuid.uuid4())
     payload = {"job_id": ident, "status": "done", "places": [{"place_id": 1, "day": 1,
                "name": "Synthetic fixture place", "address": "Synthetic only", "lat": 37.5, "lng": 127.0,
                "visit_start": "09:00", "visit_end": f"{9 + stay // 60:02d}:{stay % 60:02d}", "stay_minutes": stay, "grounded": True}],
                "visit_order": [1], "legs": [], "timeline_status": "ok"}
-    sql("INSERT INTO user_service.recommend_jobs(job_id,owner_user_id,status,result_payload,finished_at) VALUES "
-        f"('{ident}',{int(owner)},'done','{json.dumps(payload)}'::jsonb,NOW())", role=role)
+    sql("INSERT INTO user_service.recommend_jobs(job_id,owner_user_id,status,result_payload,finished_at,mode) VALUES "
+        f"('{ident}',{int(owner)},'done','{json.dumps(payload)}'::jsonb,NOW(),'{mode}')", role=role)
     return ident
 
 
@@ -327,8 +327,8 @@ try:
     check("provisioning_repeat_preserves_rows", fingerprint() == before)
 
     phase = "actual_standalone_migration"
-    check("real_migration_executes_only_pending_v028", migrate()["migrations_executed"] == 1)
-    check("new_history_owned_by_dedicated_owner", sql("SELECT installed_by FROM user_service.flyway_schema_history WHERE version::int=28") == "map_user_owner")
+    check("real_migration_executes_only_pending_v028_v029", migrate()["migrations_executed"] == 2)
+    check("new_history_owned_by_dedicated_owner", sql("SELECT bool_and(installed_by='map_user_owner') FROM user_service.flyway_schema_history WHERE version::int IN (28,29)") == "t")
     check("real_migration_noop", migrate()["migrations_executed"] == 0)
     check("real_migration_validate", migrate("validate")["status"] == "complete")
     check("migration_preserves_ciphertext_and_rows", fingerprint() == before)
@@ -416,6 +416,33 @@ try:
     consent(token)
     check("explicit_privacy_revision_persisted",
           sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}") == "2026-09-07.1")
+    # Actual runtime role CRUD of the new optional consent, no external AI/provider request.
+    ai_states = api("GET", "/api/v1/consents/ai", token=token)
+    check("v029_no_backfilled_optional_consent", len(ai_states) == 3 and all(not x["accepted"] and x["revision"] == 0 for x in ai_states))
+    ai_grant = {"policy_version": "2026-09-08.1", "accepted": True, "include_location": False, "expected_revision": 0}
+    receipt = api("POST", "/api/v1/consents/ai/trip", token=token, body=ai_grant)
+    check("v029_runtime_explicit_trip_grant", receipt["accepted"] and receipt["revision"] == 1)
+    check("v029_scope_independence", all(not x["accepted"] for x in api("GET", "/api/v1/consents/ai", token=token) if x["scope"] != "trip"))
+    ai_job = job(owner, role="map_user_runtime", mode="init")
+    check("v029_legacy_unbound_ai_job_denied", api("GET", f"/api/v1/recommend/{ai_job}", token=token, status=403)["code"] == "AI_CONSENT_CHANGED")
+    sql(f"INSERT INTO user_service.external_ai_job_consents(job_id,user_id,revision) VALUES ('{ai_job}',{owner},1)", role="map_user_runtime")
+    check("v029_bound_job_read", api("GET", f"/api/v1/recommend/{ai_job}", token=token)["job_id"] == ai_job)
+    receipt = api("DELETE", "/api/v1/consents/ai/trip?expected_revision=1", token=token)
+    check("v029_runtime_withdrawal_persisted", not receipt["accepted"] and receipt["revision"] == 2)
+    check("v029_withdrawal_blocks_pending_job", api("GET", f"/api/v1/recommend/{ai_job}", token=token, status=403)["code"] == "AI_CONSENT_REQUIRED")
+    stale = api("POST", "/api/v1/consents/ai/trip", token=token, body=ai_grant, status=409)
+    check("v029_stale_dialog_cannot_restore", stale["code"] == "AI_CONSENT_CONFLICT")
+    receipt = api("POST", "/api/v1/consents/ai/trip", token=token, body={**ai_grant, "expected_revision": 2})
+    check("v029_explicit_regrant_advances_epoch", receipt["revision"] == 3)
+    check("v029_regrant_never_revives_old_job", api("GET", f"/api/v1/recommend/{ai_job}", token=token, status=403)["code"] == "AI_CONSENT_CHANGED")
+    date = (dt.date.today() + dt.timedelta(days=2)).isoformat()
+    denied_save = api("POST", "/api/v1/schedules", token=token, status=403, body={"job_id": ai_job,
+        "title": "Synthetic denied old AI draft", "date_start": date, "date_end": date, "transport": "walk",
+        "active_start_hour": 9, "active_end_hour": 18})
+    check("v029_old_epoch_cannot_be_saved_as_schedule", denied_save["code"] == "AI_CONSENT_CHANGED"
+          and sql(f"SELECT count(*) FROM user_service.schedules WHERE job_id='{ai_job}'") == "0")
+    sql("CREATE TABLE user_service.synthetic_consent_ddl_forbidden(id int)",role="map_user_runtime",expect_state="42501")
+    check("v029_runtime_still_cannot_create_table")
     detail = api("GET", f"/api/v1/schedules/{schedule}", token=token)
     check("old_encrypted_schedule_decrypts", detail["stops"][0]["name"] == "Synthetic fixture place")
     history = api("GET", f"/api/v1/chat/rooms/{room}/messages?limit=100", token=token)
@@ -432,7 +459,10 @@ try:
     extra = api("POST", "/api/v1/auth/signup", body={"email": uuid.uuid4().hex + "@map.test",
                 "password": account_password, "nickname": "Synthetic disposable account", "birthDate": "2000-01-01"}, status=201)
     consent(extra["accessToken"])
+    extra_id = extra["user"]["id"]
+    api("POST", "/api/v1/consents/ai/vision", token=extra["accessToken"], body=ai_grant)
     api("DELETE", "/api/v1/users/me", token=extra["accessToken"], status=204)
+    check("v029_account_delete_cascades_consent", sql(f"SELECT count(*) FROM user_service.external_ai_consents WHERE user_id={extra_id}") == "0")
     check("runtime_account_insert_and_delete", sql("SELECT count(*) FROM user_service.users") == "1")
     api("POST", "/api/v1/moderation/reports", token=token, status=201,
         body={"client_request_id": str(uuid.uuid4()), "content_type": "REVIEW_SUMMARY", "reason": "OTHER",

@@ -202,8 +202,8 @@ class TripRouteServiceTest {
     }
 
     @Test
-    @DisplayName("자동 추천은 기존 장소 요약 예약을 유지한다")
-    void generateStillPrewarmsSummaries() {
+    @DisplayName("자동 추천은 별도 리뷰 요약 동의를 추정하지 않는다")
+    void generateDoesNotInferReviewSummaryConsent() {
         draftIsDone();
         when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(stop(1, 15), stop(2, null)));
@@ -216,14 +216,12 @@ class TripRouteServiceTest {
                 new BudgetRange(50000, 150000), List.of("nature"),
                 original.transport(), original.location()), 7L);
 
-        verify(reviewSummaryService).prewarm(List.of(
-                new ReviewSummaryService.PrewarmPlace("장소1", null),
-                new ReviewSummaryService.PrewarmPlace("장소2", null)));
+        verifyNoInteractions(reviewSummaryService);
     }
 
     @Test
-    @DisplayName("재탐색은 기존 장소 요약 예약을 유지한다")
-    void researchStillPrewarmsSummaries() {
+    @DisplayName("재탐색은 별도 리뷰 요약 동의를 추정하지 않는다")
+    void researchDoesNotInferReviewSummaryConsent() {
         draftIsDone();
         when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(stop(1, 15), stop(2, null)));
@@ -236,9 +234,7 @@ class TripRouteServiceTest {
                 original.transport(), original.location(), JOB_ID,
                 List.of(), List.of(), null), 7L);
 
-        verify(reviewSummaryService).prewarm(List.of(
-                new ReviewSummaryService.PrewarmPlace("장소1", null),
-                new ReviewSummaryService.PrewarmPlace("장소2", null)));
+        verifyNoInteractions(reviewSummaryService);
     }
 
     @Test
