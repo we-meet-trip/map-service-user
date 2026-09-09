@@ -121,7 +121,9 @@ class ContractFreezeTest {
                 "error", "String",
                 "retry_after_seconds", "Integer",
                 "warnings", "List<String>",
-                "timeline_status", "String"));
+                "timeline_status", "String",
+                "code", "String",
+                "retryable", "Boolean"));
     }
 
     @Test

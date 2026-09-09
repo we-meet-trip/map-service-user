@@ -59,6 +59,38 @@ class RecommendDtoJsonTest {
         assertThat(response.places().get(0).reason()).isNull();
         assertThat(response.warnings()).isNull();
         assertThat(response.timelineStatus()).isNull();
+        assertThat(response.code()).isNull();
+        assertThat(response.retryable()).isNull();
+    }
+
+    @Test
+    void successJsonPreservesEveryLegacyFieldWithNullableFailureMetadata() throws Exception {
+        String legacy = """
+                {"job_id":"j-success","status":"done","places":[],"visit_order":[],"legs":[],
+                 "clothing":"가벼운 겉옷","error":null,"retry_after_seconds":null,
+                 "warnings":["날씨 미확인"],"timeline_status":"unverified"}""";
+        RecommendResponse response = mapper.readValue(legacy, RecommendResponse.class);
+        var actual = mapper.readTree(mapper.writeValueAsString(response));
+        var expected = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(legacy);
+        expected.putNull("code");
+        expected.putNull("retryable");
+
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    void terminalFailureJsonExposesExactCodeAndBooleanWithoutReplacingLegacyError() throws Exception {
+        String payload = """
+                {"job_id":"j-failed","status":"failed","places":null,"visit_order":null,"legs":null,
+                 "clothing":null,"error":"장소 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                 "retry_after_seconds":null,"warnings":null,"timeline_status":null,
+                 "code":"upstream_unavailable","retryable":true}""";
+        RecommendResponse response = mapper.readValue(payload, RecommendResponse.class);
+
+        assertThat(response.code()).isEqualTo("upstream_unavailable");
+        assertThat(response.retryable()).isTrue();
+        assertThat(mapper.readTree(mapper.writeValueAsString(response)))
+                .isEqualTo(mapper.readTree(payload));
     }
 
     @Test
