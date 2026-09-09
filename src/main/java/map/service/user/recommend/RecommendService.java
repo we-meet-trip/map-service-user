@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -197,8 +198,7 @@ public class RecommendService {
                 reuseCacheStore.registerProducer(accepted.jobId(), hash, token);
                 linkJobSafely(accepted.jobId(), hash);
                 // A very fast worker can complete before its generation link is registered.
-                if (jobStore.findFinishedPayload(accepted.jobId()).isPresent())
-                    reuseCacheStore.publishCompletion(accepted.jobId());
+                reuseCacheStore.publishCompletion(accepted.jobId());
             } else {
                 log.info("reuse cache link skipped (themes merged) hash={} themes={}", hash, merged.size());
             }
@@ -389,13 +389,25 @@ public class RecommendService {
         // PG is authoritative after edits. A stale/failed Redis write must never undo an edit.
         Optional<String> durable = jobStore.findFinishedPayload(jobId);
         if (durable.isPresent()) return durable.map(value -> safeResult(jobId, value));
+        Optional<RecommendJobStore.Waiting> waiting = jobStore.findWaiting(jobId);
         try {
-            Optional<String> hit = draftStore.find(jobId);
-            return (hit.isPresent() ? hit : resolveWaiting(jobId)).map(value -> safeResult(jobId, value));
+            if (waiting.isPresent()) {
+                Optional<String> resolved = resolveWaiting(jobId, waiting.get().key());
+                if (resolved.isPresent()) return resolved;
+            } else {
+                Optional<String> hit = draftStore.find(jobId);
+                return (hit.isPresent() ? hit : reuseCacheStore.waitingHash(jobId)
+                        .flatMap(key -> resolveWaiting(jobId, key))).map(value -> safeResult(jobId, value));
+            }
         } catch (RuntimeException e) {
             log.warn("recommend draft cache unavailable job_id={} cause={}", jobId, e.getClass().getSimpleName());
-            return Optional.empty();
         }
+        // Only durable followers have this deadline. Redis loss must not strand them,
+        // and must not turn ordinary producer/route jobs into failures.
+        if (waiting.isPresent() && !waiting.get().expiresAt().isAfter(OffsetDateTime.now())) {
+            return finishWaiting(jobId, null, failureResult(jobId, RecommendationFailure.of(null, false)));
+        }
+        return Optional.empty();
     }
 
     private String safeResult(String jobId, String payload) {
@@ -440,11 +452,15 @@ public class RecommendService {
      */
     private RecommendationResult followProducer(RecommendRequest normalized, Long userId, map.service.user.policy.AiConsentService.Permit permit, String token) {
         String jobId = UUID.randomUUID().toString();
-        if ("1".equals(token)) reuseCacheStore.markLegacyWaiting(jobId, cacheKeyBuilder.hash(normalized));
-        else reuseCacheStore.markWaiting(jobId, token);
-        jobStore.insertInProgress(jobId, normalized.scheduleId(),
+        String waitingKey = "1".equals(token) ? cacheKeyBuilder.hash(normalized) : "v1:" + token;
+        jobStore.insertWaiting(jobId, normalized.scheduleId(),
                 RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
-                        .withSegment(segmentOf(userId, false)));
+                        .withSegment(segmentOf(userId, false)), normalized.province(), normalized.city(),
+                waitingKey, OffsetDateTime.now().plus(reuseCacheStore.waitingTtl()));
+        try {
+            if ("1".equals(token)) reuseCacheStore.markLegacyWaiting(jobId, waitingKey);
+            else reuseCacheStore.markWaiting(jobId, token);
+        } catch (RuntimeException ignored) { log.warn("recommendation wait cache unavailable"); }
         ai.bindJob(jobId, permit);
         log.info("joined in-flight recommendation job_id={}", jobId);
         return new RecommendationResult(
@@ -462,40 +478,35 @@ public class RecommendService {
      * 다시 물어본다. 실행 세대가 끝나면 성공·실패 모두 자기 job 의 완료로
      * 복사한다. 이전 배포의 hash-only 표시는 기존 성공 캐시만 읽는다.
      */
-    private Optional<String> resolveWaiting(String jobId) {
-        Optional<String> hash = reuseCacheStore.waitingHash(jobId);
-        if (hash.isEmpty()) {
-            return Optional.empty();
-        }
+    private Optional<String> resolveWaiting(String jobId, String key) {
         Optional<String> produced;
-        if (hash.get().startsWith("v1:")) {
-            Optional<String> terminal = reuseCacheStore.completion(hash.get().substring(3));
+        String producer = null;
+        if (key.startsWith("v1:")) {
+            Optional<ReuseCacheStore.Completion> terminal = reuseCacheStore.completion(key.substring(3));
             if (terminal.isEmpty()) return Optional.empty();
-            produced = ("failed".equals(terminal.get()) || jobStore.isCancelled(terminal.get()))
-                    ? Optional.of("{\"status\":\"failed\",\"code\":\"generation_failed\",\"retryable\":false}")
-                    : jobStore.findFinishedPayload(terminal.get());
+            producer = terminal.get().producerJobId();
+            produced = Optional.of(producer != null && jobStore.isCancelled(producer)
+                    ? ReuseCacheStore.FAILED_COMPLETION : terminal.get().payload());
         } else {
-            // Legacy wait markers can only resolve old successful cache entries.
-            produced = reuseCacheStore.find(hash.get());
+            // Pre-upgrade hash markers resolve only old success caches.
+            produced = reuseCacheStore.find(key);
+            producer = produced.map(this::originJobId).orElse(null);
         }
         if (produced.isEmpty()) return Optional.empty();
-        // 접수할 때는 캐시로 답하게 될지 몰라 agent 로 적어 두었다. 이제 어느
-        // 잡이 만든 결과인지 알게 됐으니 계보만 채운다 — 이것이 없으면 이
-        // 잡으로 저장된 일정은 후보를 되짚을 수 없다.
-        String origin = originJobId(produced.get());
-        String payload = withJobId(produced.get(), jobId);
-        if (origin != null) {
-            jobStore.insertInProgress(jobId, null,
-                    RecommendJobStore.JobOrigin.joined(origin));
-        }
+        return finishWaiting(jobId, producer, safeResult(jobId, withJobId(produced.get(), jobId)));
+    }
+
+    private Optional<String> finishWaiting(String jobId, String producer, String payload) {
         String status;
         try { status = "failed".equalsIgnoreCase(objectMapper.readTree(payload).path("status").asText()) ? "failed" : "done"; }
         catch (JsonProcessingException ex) { throw new IllegalStateException("invalid recommendation completion"); }
-        jobStore.recordCompletion(jobId, status, payload, null);
-        cacheDraft(jobId, payload);
-        reuseCacheStore.clearWaiting(jobId);
-        log.info("in-flight join resolved job_id={}", jobId);
-        return Optional.of(payload);
+        Optional<String> durable = jobStore.finishWaiting(jobId, producer, status, payload,
+                failureResult(jobId, RecommendationFailure.of(null, false)));
+        // Expiry, completion and owner edits may race: return/cache only the DB winner.
+        durable.ifPresent(value -> cacheDraft(jobId, value));
+        try { reuseCacheStore.clearWaiting(jobId); }
+        catch (RuntimeException ignored) { log.warn("recommendation wait cache cleanup unavailable"); }
+        return durable.map(value -> safeResult(jobId, value));
     }
 
     /**

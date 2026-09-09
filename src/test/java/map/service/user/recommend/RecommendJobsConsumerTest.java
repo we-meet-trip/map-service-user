@@ -29,6 +29,7 @@ class RecommendJobsConsumerTest {
     void setUp() {
         draftStore = mock(DraftStore.class);
         jobStore = mock(RecommendJobStore.class);
+        when(jobStore.recordWorkerCompletion(any(), any(), any(), any())).thenReturn(true);
         reuseCacheStore = mock(ReuseCacheStore.class);
         RedisConnectionFactory streamsFactory = mock(RedisConnectionFactory.class);
         consumer = new RecommendJobsConsumer(
@@ -56,7 +57,7 @@ class RecommendJobsConsumerTest {
         // 기록이 실패해 메시지가 재처리될 때 연결고리가 이미 없어 재사용 캐시가
         // 영영 갱신되지 않는다. 그래서 순서가 기록 → 캐시여야 한다.
         org.mockito.Mockito.doThrow(new RuntimeException("db down"))
-                .when(jobStore).recordCompletion(any(), any(), any(), any());
+                .when(jobStore).recordWorkerCompletion(any(), any(), any(), any());
 
         consumer.onMessage(record("job-9", "{\"places\":[]}"));
 
@@ -69,7 +70,7 @@ class RecommendJobsConsumerTest {
         // 사용자가 결과를 보는 경로는 초안이다. 기록 실패가 결과 전달까지
         // 막아서는 안 된다.
         org.mockito.Mockito.doThrow(new RuntimeException("db down"))
-                .when(jobStore).recordCompletion(any(), any(), any(), any());
+                .when(jobStore).recordWorkerCompletion(any(), any(), any(), any());
 
         consumer.onMessage(record("job-9", "{\"places\":[]}"));
 
@@ -87,7 +88,7 @@ class RecommendJobsConsumerTest {
 
         consumer.onMessage(rec);
 
-        verify(jobStore).recordCompletion("job-t", "done", "{\"places\":[]}",
+        verify(jobStore).recordWorkerCompletion("job-t", "done", "{\"places\":[]}",
                 "{\"schema_version\":1,\"path\":\"select\"}");
     }
 
@@ -96,7 +97,7 @@ class RecommendJobsConsumerTest {
         // agent 가 옛 판이거나 route·저하 경로면 이 필드가 없다.
         consumer.onMessage(record("job-n", "{\"places\":[]}"));
 
-        verify(jobStore).recordCompletion("job-n", "done", "{\"places\":[]}", null);
+        verify(jobStore).recordWorkerCompletion("job-n", "done", "{\"places\":[]}", null);
     }
 
     @Test
@@ -150,7 +151,7 @@ class RecommendJobsConsumerTest {
         when(jobStore.isCancelled("cancelled-job")).thenReturn(true);
         consumer.onMessage(record("cancelled-job", "{\"status\":\"done\",\"places\":[]}"));
         verify(reuseCacheStore).cancelProducer("cancelled-job");
-        verify(jobStore, never()).recordCompletion(any(), any(), any(), any());
+        verify(jobStore, never()).recordWorkerCompletion(any(), any(), any(), any());
         verify(draftStore, never()).save(any(), any());
     }
 

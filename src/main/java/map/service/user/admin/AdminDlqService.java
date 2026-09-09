@@ -5,6 +5,7 @@ import map.service.user.admin.dto.DlqEntry;
 import map.service.user.global.crypto.PayloadCipher;
 import map.service.user.recommend.DraftStore;
 import map.service.user.recommend.RecommendJobStore;
+import map.service.user.recommend.ReuseCacheStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,6 +39,7 @@ public class AdminDlqService {
     private final StringRedisTemplate streamsTemplate;
     private final DraftStore draftStore;
     private final RecommendJobStore jobStore;
+    private final ReuseCacheStore reuseCacheStore;
     private final String dlqStream;
     private final PayloadCipher payloadCipher;
 
@@ -45,11 +47,13 @@ public class AdminDlqService {
             @Qualifier("streamsConnectionFactory") RedisConnectionFactory streamsFactory,
             DraftStore draftStore,
             RecommendJobStore jobStore,
+            ReuseCacheStore reuseCacheStore,
             @Value("${streams.recommend-dlq-stream:agent:jobs:done:dlq}") String dlqStream,
             PayloadCipher payloadCipher) {
         this.streamsTemplate = new StringRedisTemplate(streamsFactory);
         this.draftStore = draftStore;
         this.jobStore = jobStore;
+        this.reuseCacheStore = reuseCacheStore;
         this.dlqStream = dlqStream;
         this.payloadCipher = payloadCipher;
     }
@@ -99,15 +103,16 @@ public class AdminDlqService {
                     failed.add(id);
                     continue;
                 }
-                draftStore.save(jobId, payload);
-                // 학습 신호는 죽은 편지함에 이미 실려 있는데, 예전에는 그것을
-                // 읽지 않고 결과만 기록한 뒤 편지를 지웠다. 되살린 잡만 남고
-                // 무엇을 보고 골랐는지는 그 자리에서 사라졌다.
-                //
-                // 기록에 실패하면 예외가 올라와 아래 지우기를 건너뛴다. 편지가
-                // 남으므로 다시 시도할 수 있다 — 예전에는 실패해도 지워 버려
-                // 되돌릴 방법이 없었다.
-                jobStore.recordCompletion(jobId, status, payload, str(v.get("training")));
+                // The same durable first-event choice as normal consumption. A conflicting
+                // later terminal cannot reach drafts or shared generation snapshots.
+                if (jobStore.recordWorkerCompletion(jobId, status, payload, str(v.get("training")))) {
+                    if (jobStore.isCancelled(jobId)) reuseCacheStore.cancelProducer(jobId);
+                    else {
+                        reuseCacheStore.publishCompletion(jobId, payload);
+                        if (jobStore.isCancelled(jobId)) reuseCacheStore.cancelProducer(jobId);
+                        else draftStore.save(jobId, payload);
+                    }
+                } else if (jobStore.isCancelled(jobId)) reuseCacheStore.cancelProducer(jobId);
                 streamsTemplate.opsForStream().delete(dlqStream, id);
                 succeeded++;
             } catch (RuntimeException e) {

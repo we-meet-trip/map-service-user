@@ -27,7 +27,7 @@ class AdminDlqPrivacyTest {
     void list_preserves_action_identity_without_reading_or_exposing_payload() {
         var cipher = mock(PayloadCipher.class);
         var service = new AdminDlqService(mock(RedisConnectionFactory.class),
-                mock(DraftStore.class), mock(RecommendJobStore.class), "synthetic-dlq", cipher);
+                mock(DraftStore.class), mock(RecommendJobStore.class), mock(map.service.user.recommend.ReuseCacheStore.class), "synthetic-dlq", cipher);
         var template = mock(StringRedisTemplate.class);
         StreamOperations<String, Object, Object> stream = mock(StreamOperations.class);
         when(template.opsForStream()).thenReturn(stream);
@@ -49,4 +49,36 @@ class AdminDlqPrivacyTest {
         verifyNoInteractions(cipher);
         verify(stream, never()).delete(anyString(), anyString());
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    @SuppressWarnings("unchecked")
+    void onlyDurablyAcceptedWorkerEventCanReachSharedSnapshots(boolean accepted) {
+        var jobs = mock(RecommendJobStore.class);
+        var drafts = mock(DraftStore.class);
+        var reuse = mock(map.service.user.recommend.ReuseCacheStore.class);
+        var cipher = map.service.user.global.crypto.TestPayloadCiphers.enabled();
+        var service = new AdminDlqService(mock(RedisConnectionFactory.class), drafts, jobs, reuse, "synthetic-dlq", cipher);
+        var template = mock(StringRedisTemplate.class);
+        StreamOperations<String, Object, Object> stream = mock(StreamOperations.class);
+        when(template.opsForStream()).thenReturn(stream);
+        ReflectionTestUtils.setField(service, "streamsTemplate", template);
+        String jobId = "11111111-1111-1111-1111-111111111111", payload = "{\"status\":\"done\",\"places\":[]}";
+        var record = MapRecord.create("synthetic-dlq", Map.<Object, Object>of("job_id", jobId, "status", "done",
+                "payload", cipher.encrypt(payload, PayloadCipher.aad("redis", "agent:jobs:done:dlq", jobId))))
+                .withId(RecordId.of("1234-0"));
+        when(stream.range(eq("synthetic-dlq"), any(Range.class))).thenReturn(List.of(record));
+        when(jobs.recordWorkerCompletion(jobId, "done", payload, null)).thenReturn(accepted);
+        assertThat(service.reprocess(List.of("1234-0")).succeeded()).isEqualTo(1);
+        var order = inOrder(jobs, reuse, drafts, stream);
+        order.verify(jobs).recordWorkerCompletion(jobId, "done", payload, null);
+        if (accepted) {
+            order.verify(reuse).publishCompletion(jobId, payload);
+            order.verify(drafts).save(jobId, payload);
+        } else {
+            verify(reuse, never()).publishCompletion(anyString(), anyString());
+            verifyNoInteractions(drafts);
+        }
+        order.verify(stream).delete("synthetic-dlq", "1234-0");
+    }
+
 }

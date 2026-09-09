@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -79,6 +80,9 @@ class RecommendServiceTest {
         researchLimitService = mock(ResearchLimitService.class);
         jobStore = mock(RecommendJobStore.class);
         reuseCacheStore = mock(ReuseCacheStore.class);
+        when(reuseCacheStore.waitingTtl()).thenReturn(java.time.Duration.ofSeconds(600));
+        when(jobStore.finishWaiting(anyString(), nullable(String.class), anyString(), anyString(), anyString()))
+                .thenAnswer(call -> Optional.of(call.getArgument(3)));
         profileThemeProvider = mock(ProfileThemeProvider.class);
         // 기본은 "저장된 취향 없음". 이 상태에서 기존 테스트들이 전부
         // 도입 전과 같은 경로를 타야 한다 — 그게 회귀 방어선이다.
@@ -844,13 +848,12 @@ class RecommendServiceTest {
     @Test
     void followerReceivesOnlyItsGenerationFailure() throws Exception {
         when(reuseCacheStore.waitingHash("waiter")).thenReturn(Optional.of("v1:generation-one"));
-        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of("producer-one"));
-        when(jobStore.findFinishedPayload("producer-one")).thenReturn(Optional.of(
-                "{\"job_id\":\"producer-one\",\"status\":\"failed\",\"code\":\"no_matching_places\",\"retryable\":false}"));
+        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of(new ReuseCacheStore.Completion("producer-one",
+                "{\"job_id\":\"producer-one\",\"status\":\"failed\",\"code\":\"no_matching_places\",\"retryable\":false}")));
         String payload = service.findDraft("waiter").orElseThrow();
         assertThat(objectMapper.readTree(payload).path("job_id").asText()).isEqualTo("waiter");
         assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("no_matching_places");
-        verify(jobStore).recordCompletion(eq("waiter"), eq("failed"), anyString(), eq(null));
+        verify(jobStore).finishWaiting(eq("waiter"), eq("producer-one"), eq("failed"), anyString(), anyString());
         verify(reuseCacheStore, never()).find(anyString());
         verify(reuseCacheStore).clearWaiting("waiter");
     }
@@ -873,7 +876,7 @@ class RecommendServiceTest {
     @Test
     void cancelledProducerCannotExposeItsDeletedResultToFollower() throws Exception {
         when(reuseCacheStore.waitingHash("waiter")).thenReturn(Optional.of("v1:generation-one"));
-        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of("cancelled-job"));
+        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of(new ReuseCacheStore.Completion("cancelled-job", "{\"status\":\"done\",\"places\":[]}")));
         when(jobStore.isCancelled("cancelled-job")).thenReturn(true);
         String payload = service.findDraft("waiter").orElseThrow();
         assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("generation_failed");

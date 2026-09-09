@@ -149,10 +149,15 @@ public class RecommendJobsConsumer
         try {
             if (jobStore.isCancelled(jobId)) { reuseCacheStore.cancelProducer(jobId); ack(recordId); return; }
             // Commit the durable result before ACK. Redis is a recoverable cache.
-            jobStore.recordCompletion(
-                    jobId, value.get("status"), payloadJson, value.get("training"));
+            if (!jobStore.recordWorkerCompletion(
+                    jobId, value.get("status"), payloadJson, value.get("training"))) {
+                if (jobStore.isCancelled(jobId)) reuseCacheStore.cancelProducer(jobId);
+                ack(recordId);
+                return;
+            }
             if (jobStore.isCancelled(jobId)) { reuseCacheStore.cancelProducer(jobId); ack(recordId); return; }
-            reuseCacheStore.publishCompletion(jobId);
+            reuseCacheStore.publishCompletion(jobId, payloadJson);
+            if (jobStore.isCancelled(jobId)) { reuseCacheStore.cancelProducer(jobId); ack(recordId); return; }
             try {
                 draftStore.save(jobId, payloadJson);
             } catch (RuntimeException cacheFailure) {

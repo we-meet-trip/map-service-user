@@ -330,8 +330,12 @@ try:
     check("provisioning_repeat_preserves_rows", fingerprint() == before)
 
     phase = "actual_standalone_migration"
-    check("real_migration_executes_only_pending_v028_v029", migrate()["migrations_executed"] == 2)
-    check("new_history_owned_by_dedicated_owner", sql("SELECT bool_and(installed_by='map_user_owner') FROM user_service.flyway_schema_history WHERE version::int IN (28,29)") == "t")
+    check("real_migration_executes_only_pending_v028_v030", migrate()["migrations_executed"] == 3)
+    check("new_history_owned_by_dedicated_owner", sql("SELECT bool_and(installed_by='map_user_owner') FROM user_service.flyway_schema_history WHERE version::int IN (28,29,30)") == "t")
+    check("v030_legacy_rows_have_no_invented_follower_identity", sql(
+        "SELECT count(*) FROM user_service.recommend_jobs WHERE waiting_key IS NOT NULL OR waiting_expires_at IS NOT NULL") == "0")
+    sql("UPDATE user_service.recommend_jobs SET waiting_key='v1:synthetic-invalid-pair'", role="map_user_runtime", expect_state="23514")
+    check("v030_postgres_rejects_partial_wait_metadata")
     check("real_migration_noop", migrate()["migrations_executed"] == 0)
     check("real_migration_validate", migrate("validate")["status"] == "complete")
     check("migration_preserves_ciphertext_and_rows", fingerprint() == before)
@@ -438,6 +442,22 @@ try:
     receipt = api("POST", "/api/v1/consents/ai/trip", token=token, body={**ai_grant, "expected_revision": 2})
     check("v029_explicit_regrant_advances_epoch", receipt["revision"] == 3)
     check("v029_regrant_never_revives_old_job", api("GET", f"/api/v1/recommend/{ai_job}", token=token, status=403)["code"] == "AI_CONSENT_CHANGED")
+    # Real PG30 metadata and serving HTTP expiry with deliberately absent Redis links.
+    # No provider is called. These are explicitly labeled synthetic follower/producer rows.
+    follower, ordinary = str(uuid.uuid4()), str(uuid.uuid4())
+    for ident in (follower, ordinary):
+        sql("INSERT INTO user_service.recommend_jobs(job_id,owner_user_id,status,mode,created_at) VALUES "
+            f"('{ident}',{owner},'in_progress','init',NOW()-INTERVAL '1 day')", role="map_user_runtime")
+        sql(f"INSERT INTO user_service.external_ai_job_consents(job_id,user_id,revision) VALUES ('{ident}',{owner},3)", role="map_user_runtime")
+    sql(f"UPDATE user_service.recommend_jobs SET waiting_key='v1:{uuid.uuid4()}',waiting_expires_at=NOW()+INTERVAL '10 minutes' WHERE job_id='{follower}'", role="map_user_runtime")
+    check("v030_follower_pending_before_deadline", api("GET", f"/api/v1/recommend/{follower}", token=token, status=202)["job_id"] == follower)
+    sql(f"UPDATE user_service.recommend_jobs SET waiting_expires_at=NOW()-INTERVAL '1 second' WHERE job_id='{follower}'", role="map_user_runtime")
+    expired = api("GET", f"/api/v1/recommend/{follower}", token=token)
+    check("v030_lost_redis_wait_expires_to_safe_terminal", expired["job_id"] == follower
+          and expired["status"] == "failed" and expired["code"] == "generation_failed" and expired["retryable"] is False)
+    check("v030_expiry_is_encrypted_and_metadata_cleared", sql(f"SELECT status='failed' AND result_payload ? 'ct' AND waiting_key IS NULL AND waiting_expires_at IS NULL FROM user_service.recommend_jobs WHERE job_id='{follower}'") == "t")
+    check("v030_expiry_durable_on_repeat", api("GET", f"/api/v1/recommend/{follower}", token=token) == expired)
+    check("v030_ordinary_producer_not_implicitly_expired", api("GET", f"/api/v1/recommend/{ordinary}", token=token, status=202)["job_id"] == ordinary)
     date = (dt.date.today() + dt.timedelta(days=2)).isoformat()
     denied_save = api("POST", "/api/v1/schedules", token=token, status=403, body={"job_id": ai_job,
         "title": "Synthetic denied old AI draft", "date_start": date, "date_end": date, "transport": "walk",

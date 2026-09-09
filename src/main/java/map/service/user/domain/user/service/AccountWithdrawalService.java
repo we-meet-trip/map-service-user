@@ -33,6 +33,7 @@ public class AccountWithdrawalService {
     private final JwtService jwtService;
     private final map.service.user.recommend.RecommendJobStore jobs;
     private final map.service.user.recommend.DraftStore drafts;
+    private final map.service.user.recommend.ReuseCacheStore reuse;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final map.service.user.domain.auth.apple.AppleAccountService appleAccounts;
 
@@ -43,8 +44,10 @@ public class AccountWithdrawalService {
                                     JwtService jwtService,
                                     map.service.user.recommend.RecommendJobStore jobs,
                                     map.service.user.recommend.DraftStore drafts,
+                                    map.service.user.recommend.ReuseCacheStore reuse,
                                     org.springframework.jdbc.core.JdbcTemplate jdbc,
                                     map.service.user.domain.auth.apple.AppleAccountService appleAccounts) {
+        this.reuse = reuse;
         this.jobs = jobs; this.drafts = drafts; this.jdbc = jdbc; this.appleAccounts = appleAccounts;
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
@@ -100,6 +103,8 @@ public class AccountWithdrawalService {
             try { jwtService.blacklistAccessToken(rawAccessToken); } catch (RuntimeException ignored) { }
             for (String id : jobIds) {
                 try { drafts.delete(id); } catch (RuntimeException ignored) { }
+                try { reuse.cancelProducer(id); } catch (RuntimeException ignored) { }
+                try { reuse.clearWaiting(id); } catch (RuntimeException ignored) { }
             }
         };
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {

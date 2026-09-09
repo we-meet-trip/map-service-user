@@ -38,6 +38,12 @@ public class ReuseCacheStore {
     /** 남이 만드는 것을 기다리는 job 이 어느 조건을 기다리는지. */
     private static final String WAIT_PREFIX = "recommend:cache-wait:";
 
+    private static final String WORKER_COMPLETION_PREFIX = "recommend:worker-completion:";
+    private static final String COMPLETION_PREFIX = "recommend:completion:";
+    static final String FAILED_COMPLETION = "{\"status\":\"failed\",\"code\":\"generation_failed\",\"retryable\":false}";
+
+    public record Completion(String producerJobId, String payload) { }
+
     private final StringRedisTemplate redis;
     private final Duration cacheTtl;
     private final Duration linkTtl;
@@ -112,31 +118,57 @@ public class ReuseCacheStore {
         redis.opsForValue().set("recommend:producer:" + jobId, hash + "|" + token, inflightTtl);
     }
 
+    /** Capture the worker event, never the owner's editable canonical draft. First terminal wins. */
+    public void publishCompletion(String jobId, String payloadJson) {
+        redis.opsForValue().setIfAbsent(WORKER_COMPLETION_PREFIX + jobId,
+                payloadCipher.encrypt(payloadJson, PayloadCipher.aad("redis", WORKER_COMPLETION_PREFIX, jobId)), linkTtl);
+        publishCompletion(jobId);
+    }
+
+    /** Repair completion-before-registration only from the immutable event snapshot. */
     public void publishCompletion(String jobId) {
-        completeProducer(jobId, jobId);
-    }
-
-    public void cancelProducer(String jobId) {
-        completeProducer(jobId, "failed");
-    }
-
-    private void completeProducer(String jobId, String result) {
         String link = redis.opsForValue().get("recommend:producer:" + jobId);
         if (link == null) return;
         String[] parts = link.split("\\|", 2);
         if (parts.length != 2) return;
-        redis.opsForValue().set("recommend:completion:" + parts[1], result, inflightTtl);
+        String snapshot = redis.opsForValue().get(WORKER_COMPLETION_PREFIX + jobId);
+        if (snapshot == null) return;
+        if ("failed".equals(snapshot)) { cancelProducer(jobId); return; }
+        String payload = payloadCipher.decrypt(snapshot, PayloadCipher.aad("redis", WORKER_COMPLETION_PREFIX, jobId));
+        // Seal the producer identity AND body to this generation: swapping pointers cannot
+        // make an unrelated personal worker result readable by another generation.
+        String envelope = payloadCipher.encrypt(jobId + "\n" + payload,
+                PayloadCipher.aad("redis", COMPLETION_PREFIX, parts[1]));
+        redis.opsForValue().setIfAbsent(COMPLETION_PREFIX + parts[1], envelope, inflightTtl);
         releaseProducer(parts[0], parts[1]);
     }
 
+    public void cancelProducer(String jobId) {
+        // Overwrite private data and prevent delayed/redelivered events from resurrecting it.
+        redis.opsForValue().set(WORKER_COMPLETION_PREFIX + jobId, "failed", linkTtl);
+        String link = redis.opsForValue().get("recommend:producer:" + jobId);
+        if (link == null) return;
+        String[] parts = link.split("\\|", 2);
+        if (parts.length == 2) failProducer(parts[0], parts[1]);
+    }
+
     public void failProducer(String hash, String token) {
-        redis.opsForValue().set("recommend:completion:" + token, "failed", inflightTtl);
+        redis.opsForValue().set(COMPLETION_PREFIX + token, "failed", inflightTtl);
         releaseProducer(hash, token);
     }
 
-    public Optional<String> completion(String token) {
-        return Optional.ofNullable(redis.opsForValue().get("recommend:completion:" + token));
+    public Optional<Completion> completion(String token) {
+        String value = redis.opsForValue().get(COMPLETION_PREFIX + token);
+        if (value == null) return Optional.empty();
+        if ("failed".equals(value)) return Optional.of(new Completion(null, FAILED_COMPLETION));
+        String decoded = payloadCipher.decrypt(value, PayloadCipher.aad("redis", COMPLETION_PREFIX, token));
+        int split = decoded.indexOf('\n');
+        // A pre-upgrade bare producer ID must never fall back to its mutable PG result.
+        if (split < 1 || (payloadCipher.isEnabled() && decoded.equals(value))) return Optional.of(new Completion(null, FAILED_COMPLETION));
+        return Optional.of(new Completion(decoded.substring(0, split), decoded.substring(split + 1)));
     }
+
+    public Duration waitingTtl() { return inflightTtl; }
 
     /** A waiter follows one execution, never a later request with the same conditions. */
     public void markWaiting(String jobId, String token) {

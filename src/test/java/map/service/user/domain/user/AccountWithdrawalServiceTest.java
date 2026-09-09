@@ -42,6 +42,9 @@ class AccountWithdrawalServiceTest {
     private ChatParticipantService participantService;
     private JwtService jwtService;
     private AccountWithdrawalService service;
+    private map.service.user.recommend.RecommendJobStore jobs;
+    private map.service.user.recommend.DraftStore drafts;
+    private map.service.user.recommend.ReuseCacheStore reuse;
 
     @BeforeEach
     void setUp() {
@@ -50,10 +53,12 @@ class AccountWithdrawalServiceTest {
         participantRepository = mock(ChatParticipantRepository.class);
         participantService = mock(ChatParticipantService.class);
         jwtService = mock(JwtService.class);
+        jobs = mock(map.service.user.recommend.RecommendJobStore.class);
+        drafts = mock(map.service.user.recommend.DraftStore.class);
+        reuse = mock(map.service.user.recommend.ReuseCacheStore.class);
         service = new AccountWithdrawalService(userRepository, scheduleRepository,
                 participantRepository, participantService, jwtService,
-                mock(map.service.user.recommend.RecommendJobStore.class),
-                mock(map.service.user.recommend.DraftStore.class),
+                jobs, drafts, reuse,
                 mock(org.springframework.jdbc.core.JdbcTemplate.class),
                 mock(map.service.user.domain.auth.apple.AppleAccountService.class));
     }
@@ -120,6 +125,25 @@ class AccountWithdrawalServiceTest {
         service.withdraw(1L, "tok");
 
         verify(jwtService).blacklistAccessToken("tok");
+    }
+
+    @Test
+    void recommendationSnapshotsAreRetiredOnlyAfterAccountCommitDespiteDraftCacheFailure() {
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
+        when(jobs.eraseOwnedJobs(1L)).thenReturn(List.of("synthetic-owned-job"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("synthetic cache outage"))
+                .when(drafts).delete("synthetic-owned-job");
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.withdraw(1L, "tok");
+            verify(reuse, never()).cancelProducer(any());
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            verify(reuse).cancelProducer("synthetic-owned-job");
+            verify(reuse).clearWaiting("synthetic-owned-job");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
