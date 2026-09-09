@@ -35,8 +35,6 @@ import java.util.Map;
 public class AdminDlqService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminDlqService.class);
-    private static final int PREVIEW_LEN = 200;
-
     private final StringRedisTemplate streamsTemplate;
     private final DraftStore draftStore;
     private final RecommendJobStore jobStore;
@@ -72,8 +70,8 @@ public class AdminDlqService {
                     str(v.get("job_id")),
                     str(v.get("status")),
                     str(v.get("delivery_count")),
-                    str(v.get("error")),
-                    preview(str(v.get("payload")))));
+                    diagnosticError(str(v.get("error"))),
+                    v.get("payload") == null ? null : "[비공개]"));
         }
         return out;
     }
@@ -113,7 +111,7 @@ public class AdminDlqService {
                 streamsTemplate.opsForStream().delete(dlqStream, id);
                 succeeded++;
             } catch (RuntimeException e) {
-                log.warn("dlq reprocess failed id={} reason={}", id, e.getMessage());
+                log.warn("dlq reprocess failed id={} reason={}", id, e.getClass().getSimpleName());
                 failed.add(id);
             }
         }
@@ -133,7 +131,7 @@ public class AdminDlqService {
                     failed.add(id);
                 }
             } catch (RuntimeException e) {
-                log.warn("dlq discard failed id={} reason={}", id, e.getMessage());
+                log.warn("dlq discard failed id={} reason={}", id, e.getClass().getSimpleName());
                 failed.add(id);
             }
         }
@@ -154,12 +152,10 @@ public class AdminDlqService {
         return o == null ? null : o.toString();
     }
 
-    private static String preview(String payload) {
-        if (payload == null) {
-            return null;
-        }
-        return payload.length() <= PREVIEW_LEN
-                ? payload
-                : payload.substring(0, PREVIEW_LEN) + "…";
+    private static String diagnosticError(String error) {
+        if (error == null || error.isBlank()) return null;
+        // 기존 소비자가 생성하는 고정 형식만 진단 코드로 바꾼다.
+        return error.matches("max retries exceeded \\([0-9]+ deliveries\\)")
+                ? "delivery_retry_exhausted" : "delivery_failed";
     }
 }

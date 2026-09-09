@@ -70,7 +70,7 @@ public class AdminJobQueryService {
                         e.getJobId() == null ? null : e.getJobId().toString(),
                         e.getScheduleId(),
                         e.getStatus(),
-                        e.getError(),
+                        e.getError() == null || e.getError().isBlank() ? null : "job_failed",
                         e.getCreatedAt(),
                         e.getFinishedAt()))
                 .toList();

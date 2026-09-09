@@ -2,11 +2,15 @@ package map.service.user.admin;
 
 import map.service.user.admin.dto.JobStats;
 import map.service.user.recommend.RecommendJobRepository;
+import map.service.user.recommend.RecommendJobEntity;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,5 +46,18 @@ class AdminJobQueryServiceTest {
                 .containsEntry("failed", 2L).containsEntry("in_progress", 1L);
         assertThat(stats.total()).isEqualTo(8L);
         assertThat(stats.failedLast24h()).isEqualTo(1L);
+    }
+
+    @Test
+    void list_keeps_identifiers_and_omits_raw_error() {
+        UUID id = UUID.randomUUID();
+        var job = new RecommendJobEntity(id, "synthetic-schedule", "failed", null,
+                "https://private.invalid/?serviceKey=synthetic-secret", OffsetDateTime.now());
+        when(repository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(job)));
+        var page = service.list(null, 0, 20);
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).jobId()).isEqualTo(id.toString());
+        assertThat(page.items().get(0).error()).isEqualTo("job_failed");
+        assertThat(page.toString()).doesNotContain("synthetic-secret", "private.invalid");
     }
 }
