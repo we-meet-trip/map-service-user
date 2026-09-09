@@ -450,14 +450,14 @@ try:
             f"('{ident}',{owner},'in_progress','init',NOW()-INTERVAL '1 day')", role="map_user_runtime")
         sql(f"INSERT INTO user_service.external_ai_job_consents(job_id,user_id,revision) VALUES ('{ident}',{owner},3)", role="map_user_runtime")
     sql(f"UPDATE user_service.recommend_jobs SET waiting_key='v1:{uuid.uuid4()}',waiting_expires_at=NOW()+INTERVAL '10 minutes' WHERE job_id='{follower}'", role="map_user_runtime")
-    check("v030_follower_pending_before_deadline", api("GET", f"/api/v1/recommend/{follower}", token=token, status=202)["job_id"] == follower)
+    check("v030_follower_pending_before_deadline", api("GET", f"/api/v1/recommend/{follower}", token=token, status=202) is None)
     sql(f"UPDATE user_service.recommend_jobs SET waiting_expires_at=NOW()-INTERVAL '1 second' WHERE job_id='{follower}'", role="map_user_runtime")
     expired = api("GET", f"/api/v1/recommend/{follower}", token=token)
     check("v030_lost_redis_wait_expires_to_safe_terminal", expired["job_id"] == follower
           and expired["status"] == "failed" and expired["code"] == "generation_failed" and expired["retryable"] is False)
     check("v030_expiry_is_encrypted_and_metadata_cleared", sql(f"SELECT status='failed' AND result_payload ? 'ct' AND waiting_key IS NULL AND waiting_expires_at IS NULL FROM user_service.recommend_jobs WHERE job_id='{follower}'") == "t")
     check("v030_expiry_durable_on_repeat", api("GET", f"/api/v1/recommend/{follower}", token=token) == expired)
-    check("v030_ordinary_producer_not_implicitly_expired", api("GET", f"/api/v1/recommend/{ordinary}", token=token, status=202)["job_id"] == ordinary)
+    check("v030_ordinary_producer_not_implicitly_expired", api("GET", f"/api/v1/recommend/{ordinary}", token=token, status=202) is None)
     date = (dt.date.today() + dt.timedelta(days=2)).isoformat()
     denied_save = api("POST", "/api/v1/schedules", token=token, status=403, body={"job_id": ai_job,
         "title": "Synthetic denied old AI draft", "date_start": date, "date_end": date, "transport": "walk",
