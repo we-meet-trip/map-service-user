@@ -118,10 +118,6 @@ public class TripService {
 
         // 3) draft 파싱 → 검증
         RecommendResponse result = parseDraft(jobId, draftJson);
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         // 4) stops 변환 (경로 성공 구간은 이동 시간/거리를 실측으로 대체)
         //    저장된 일정 상세 조회도 같은 조립기를 쓴다 — 두 화면이 같은
@@ -207,10 +203,6 @@ public class TripService {
         log.info("trip replan started job_id={} schedule_id={}", jobId, scheduleId);
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result, spec.transport(), startHour, endHour);
@@ -280,10 +272,6 @@ public class TripService {
                 jobId, request.places().size());
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result,
@@ -356,10 +344,6 @@ public class TripService {
                 request.keep() == null ? 0 : request.keep().size());
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result,
@@ -433,7 +417,12 @@ public class TripService {
     /** draft JSON → RecommendResponse. 파싱 실패는 비정상 결과로 간주(502). */
     private RecommendResponse parseDraft(String jobId, String draftJson) {
         try {
-            return objectMapper.readValue(draftJson, RecommendResponse.class);
+            RecommendResponse result = objectMapper.readValue(draftJson, RecommendResponse.class);
+            if (result == null) throw new TripGenerationException("recommendation result is malformed");
+            if ("failed".equalsIgnoreCase(result.status())) {
+                throw new TripGenerationException(result.code(), result.retryable());
+            }
+            return result;
         } catch (JsonProcessingException e) {
             log.error("draft parse failed job_id={} reason={}", jobId, e.getMessage());
             throw new TripGenerationException("recommendation result is malformed");

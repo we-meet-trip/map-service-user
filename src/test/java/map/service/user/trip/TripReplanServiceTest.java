@@ -124,4 +124,15 @@ class TripReplanServiceTest {
                 .isInstanceOf(ScheduleReplanUnavailableException.class);
         verify(recommendService, never()).createFreshRecommendation(any(), any());
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"no_matching_places", "selection_invalid", "upstream_unavailable"})
+    void preservesTypedFailureAcrossFacade(String code) {
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\",\"code\":\"" + code + "\",\"retryable\":false}"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(TripGenerationException.class,
+                () -> service.replan(5L, 42L));
+        assertThat(failure.failure().code()).isEqualTo(code);
+        assertThat(failure.failure().retryable()).isFalse();
+    }
+
 }

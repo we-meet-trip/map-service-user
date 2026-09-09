@@ -246,7 +246,7 @@ class TripRouteServiceTest {
 
         assertThatThrownBy(() -> service.route(request()))
                 .isInstanceOf(TripGenerationException.class)
-                .hasMessageContaining("stage=route requires places");
+                .hasMessage("추천을 생성하지 못했습니다.");
     }
 
     @Test
@@ -257,4 +257,29 @@ class TripRouteServiceTest {
         assertThatThrownBy(() -> service.route(request()))
                 .isInstanceOf(TripTimeoutException.class);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"no_matching_places", "selection_invalid", "upstream_unavailable"})
+    void preservesTypedFailureAcrossFacade(String code) {
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\",\"code\":\"" + code + "\",\"retryable\":false}"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(TripGenerationException.class,
+                () -> service.route(request()));
+        assertThat(failure.failure().code()).isEqualTo(code);
+        assertThat(failure.failure().retryable()).isFalse();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"no_matching_places", "selection_invalid", "upstream_unavailable"})
+    void generatePreservesTypedFailure(String code) {
+        when(recommendService.createRecommendationDetailed(any(), any())).thenReturn(
+                new RecommendService.RecommendationResult(new JobAccepted(JOB_ID, "in_progress", 3), false));
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\",\"code\":\"" + code + "\",\"retryable\":false}"));
+        var request = new TripGenerateRequest(request().schedule(), new BudgetRange(10000, 50000),
+                List.of("산책"), "walk", request().location());
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(TripGenerationException.class,
+                () -> service.generate(request));
+        assertThat(failure.failure().code()).isEqualTo(code);
+    }
+
 }

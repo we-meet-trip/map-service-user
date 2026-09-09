@@ -145,4 +145,13 @@ class RecommendJobsConsumerTest {
 
         verify(draftStore).save("job-3", "{\"places\":[]}");
     }
+    @Test
+    void cancelledProducerNotifiesWaitersWithoutPersistingPayload() {
+        when(jobStore.isCancelled("cancelled-job")).thenReturn(true);
+        consumer.onMessage(record("cancelled-job", "{\"status\":\"done\",\"places\":[]}"));
+        verify(reuseCacheStore).cancelProducer("cancelled-job");
+        verify(jobStore, never()).recordCompletion(any(), any(), any(), any());
+        verify(draftStore, never()).save(any(), any());
+    }
+
 }

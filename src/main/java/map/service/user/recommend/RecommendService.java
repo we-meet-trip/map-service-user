@@ -174,19 +174,33 @@ public class RecommendService {
             // 취향이 섞이지 않은 요청만 하나로 묶는다. 해시는 취향을 섞기 전
             // 값으로 만들어지므로, 취향이 다른 두 사람이 같은 해시를 만든다.
             // 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된 결과를 받는다.
-            if (merged == null && !reuseCacheStore.tryBecomeProducer(hash)) {
-                return followProducer(normalized, userId, permit);
+            String token = merged == null ? UUID.randomUUID().toString() : null;
+            if (token != null) {
+                String producer = reuseCacheStore.claimProducer(hash, token);
+                if (producer == null) throw new IllegalStateException("recommendation coordination unavailable");
+                if (!token.equals(producer)) return followProducer(normalized, userId, permit, producer);
             }
             RecommendRequest outbound =
                     merged == null ? normalized : withTheme(normalized, merged);
-            ai.requireCurrent(permit);
-            JobAccepted accepted = agentClient.requestRecommend(outbound);
-            if (merged == null) {
+            JobAccepted accepted;
+            try {
+                ai.requireCurrent(permit);
+                accepted = agentClient.requestRecommend(outbound);
+            } catch (RuntimeException ex) {
+                if (token != null) {
+                    try { reuseCacheStore.failProducer(hash, token); }
+                    catch (RuntimeException ignored) { log.warn("recommendation coordination cleanup unavailable"); }
+                }
+                throw ex;
+            }
+            if (token != null) {
+                reuseCacheStore.registerProducer(accepted.jobId(), hash, token);
                 linkJobSafely(accepted.jobId(), hash);
+                // A very fast worker can complete before its generation link is registered.
+                if (jobStore.findFinishedPayload(accepted.jobId()).isPresent())
+                    reuseCacheStore.publishCompletion(accepted.jobId());
             } else {
-                log.info(
-                        "reuse cache link skipped (themes merged) hash={} themes={}",
-                        hash, merged.size());
+                log.info("reuse cache link skipped (themes merged) hash={} themes={}", hash, merged.size());
             }
             jobStore.insertInProgress(accepted.jobId(), normalized.scheduleId(),
                     RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
@@ -374,14 +388,39 @@ public class RecommendService {
     public Optional<String> findDraft(String jobId) {
         // PG is authoritative after edits. A stale/failed Redis write must never undo an edit.
         Optional<String> durable = jobStore.findFinishedPayload(jobId);
-        if (durable.isPresent()) return durable;
+        if (durable.isPresent()) return durable.map(value -> safeResult(jobId, value));
         try {
             Optional<String> hit = draftStore.find(jobId);
-            return hit.isPresent() ? hit : resolveWaiting(jobId);
+            return (hit.isPresent() ? hit : resolveWaiting(jobId)).map(value -> safeResult(jobId, value));
         } catch (RuntimeException e) {
             log.warn("recommend draft cache unavailable job_id={} cause={}", jobId, e.getClass().getSimpleName());
             return Optional.empty();
         }
+    }
+
+    private String safeResult(String jobId, String payload) {
+        try {
+            JsonNode node = objectMapper.readTree(payload);
+            if (node == null || !node.isObject()) return failureResult(jobId, RecommendationFailure.of(null, false));
+            if ("failed".equalsIgnoreCase(node.path("status").asText())) {
+                return failureResult(jobId, RecommendationFailure.of(node.path("code").asText(null),
+                        node.path("retryable").isBoolean() && node.path("retryable").booleanValue()));
+            }
+            return payload;
+        } catch (JsonProcessingException ex) {
+            return failureResult(jobId, RecommendationFailure.of(null, false));
+        }
+    }
+
+    private String failureResult(String jobId, RecommendationFailure failure) {
+        // Legacy failures may contain provider bodies. Only fixed fields leave here.
+        ObjectNode safe = objectMapper.createObjectNode();
+        safe.put("job_id", jobId);
+        safe.put("status", "failed");
+        safe.put("error", failure.message());
+        safe.put("code", failure.code());
+        safe.put("retryable", failure.retryable());
+        return safe.toString();
     }
 
     private void cacheDraft(String jobId, String payload) {
@@ -399,9 +438,10 @@ public class RecommendService {
      * 채워지는지는 조회 시점에 확인하므로(resolveWaiting) 여기서 기다리지
      * 않는다 — 기다리면 접수 응답이 그만큼 늦어진다.
      */
-    private RecommendationResult followProducer(RecommendRequest normalized, Long userId, map.service.user.policy.AiConsentService.Permit permit) {
+    private RecommendationResult followProducer(RecommendRequest normalized, Long userId, map.service.user.policy.AiConsentService.Permit permit, String token) {
         String jobId = UUID.randomUUID().toString();
-        reuseCacheStore.markWaiting(jobId, cacheKeyBuilder.hash(normalized));
+        if ("1".equals(token)) reuseCacheStore.markLegacyWaiting(jobId, cacheKeyBuilder.hash(normalized));
+        else reuseCacheStore.markWaiting(jobId, token);
         jobStore.insertInProgress(jobId, normalized.scheduleId(),
                 RecommendJobStore.JobOrigin.agent("init").ownedBy(userId)
                         .withSegment(segmentOf(userId, false)));
@@ -419,18 +459,26 @@ public class RecommendService {
      * 바꾼다. 캐시 적중 경로가 이미 같은 방식으로 복사하고 있다.
      *
      * 아직 안 나왔으면 empty 를 돌려준다 — 조회하는 쪽은 진행 중으로 보고
-     * 다시 물어본다. 앞선 요청이 끝내 실패하면 캐시가 채워지지 않아 기다림
-     * 표시의 시한이 끝나고, 조회 쪽 시한도 함께 끝난다.
+     * 다시 물어본다. 실행 세대가 끝나면 성공·실패 모두 자기 job 의 완료로
+     * 복사한다. 이전 배포의 hash-only 표시는 기존 성공 캐시만 읽는다.
      */
     private Optional<String> resolveWaiting(String jobId) {
         Optional<String> hash = reuseCacheStore.waitingHash(jobId);
         if (hash.isEmpty()) {
             return Optional.empty();
         }
-        Optional<String> produced = reuseCacheStore.find(hash.get());
-        if (produced.isEmpty()) {
-            return Optional.empty();
+        Optional<String> produced;
+        if (hash.get().startsWith("v1:")) {
+            Optional<String> terminal = reuseCacheStore.completion(hash.get().substring(3));
+            if (terminal.isEmpty()) return Optional.empty();
+            produced = ("failed".equals(terminal.get()) || jobStore.isCancelled(terminal.get()))
+                    ? Optional.of("{\"status\":\"failed\",\"code\":\"generation_failed\",\"retryable\":false}")
+                    : jobStore.findFinishedPayload(terminal.get());
+        } else {
+            // Legacy wait markers can only resolve old successful cache entries.
+            produced = reuseCacheStore.find(hash.get());
         }
+        if (produced.isEmpty()) return Optional.empty();
         // 접수할 때는 캐시로 답하게 될지 몰라 agent 로 적어 두었다. 이제 어느
         // 잡이 만든 결과인지 알게 됐으니 계보만 채운다 — 이것이 없으면 이
         // 잡으로 저장된 일정은 후보를 되짚을 수 없다.
@@ -440,7 +488,10 @@ public class RecommendService {
             jobStore.insertInProgress(jobId, null,
                     RecommendJobStore.JobOrigin.joined(origin));
         }
-        jobStore.recordCompletion(jobId, "done", payload, null);
+        String status;
+        try { status = "failed".equalsIgnoreCase(objectMapper.readTree(payload).path("status").asText()) ? "failed" : "done"; }
+        catch (JsonProcessingException ex) { throw new IllegalStateException("invalid recommendation completion"); }
+        jobStore.recordCompletion(jobId, status, payload, null);
         cacheDraft(jobId, payload);
         reuseCacheStore.clearWaiting(jobId);
         log.info("in-flight join resolved job_id={}", jobId);

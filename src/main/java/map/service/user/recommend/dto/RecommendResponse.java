@@ -33,6 +33,8 @@ public record RecommendResponse(
         String error,
         @JsonProperty("retry_after_seconds") Integer retryAfterSeconds,
         List<String> warnings,
-        @JsonProperty("timeline_status") String timelineStatus
+        @JsonProperty("timeline_status") String timelineStatus,
+        String code,
+        Boolean retryable
 ) {
 }
