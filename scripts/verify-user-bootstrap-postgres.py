@@ -79,7 +79,9 @@ def sql(statement, *, db=None, role='postgres', expected=None):
 
 def operator(filename, expected=0, extra=''):
     script = ('\\set expected_database '+database+'\n\\set marker '+marker+'\n'
-              +'\\set bootstrap_password '+passwords['map_user_bootstrap']+'\n'+extra
+              +'\\set bootstrap_password '+passwords['map_user_bootstrap']+'\n'
+              +'\\set runtime_password '+passwords['map_user_runtime']+'\n'
+              +'\\set migrator_password '+passwords['map_user_migrator']+'\n'+extra
               +(ROOT / 'docs' / filename).read_text())
     env = {**process_environment(), 'PGHOST':'127.0.0.1','PGPORT':'5432','PGDATABASE':database,
            'PGUSER':'postgres','PGPASSWORD':passwords['postgres']}
@@ -168,7 +170,7 @@ try:
     require(os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'
             and os.environ.get('MAP_HOSTED_DATABASE_FIXTURE')=='true' and os.environ.get('PGHOST')=='127.0.0.1'
             and os.environ.get('PGPORT')=='5432' and os.environ.get('PGUSER')=='postgres','hosted_only_gate')
-    passwords={role:secrets.token_hex(24) for role in ROLES}; passwords['postgres']=os.environ['PGPASSWORD']
+    passwords={role:secrets.token_hex(32) for role in ROLES}; passwords['postgres']=os.environ['PGPASSWORD']
     jar=next(p for p in (ROOT/'build/libs').glob('*.jar') if not p.name.endswith('-training-export.jar'))
     report['jar_sha256']=hashlib.sha256(jar.read_bytes()).hexdigest()
     check('postgres_17',int(sql("SELECT current_setting('server_version_num')",db='postgres'))>=170000)
@@ -223,8 +225,12 @@ try:
     check('bootstrap_login_password_revoked',sql("SELECT NOT rolcanlogin AND rolpassword IS NULL FROM pg_authid WHERE rolname='map_user_bootstrap'")=='t')
     for privilege in ('CONNECT','CREATE','TEMP'):
         check('bootstrap_denied_'+privilege.lower(),sql("SELECT NOT has_database_privilege('map_user_bootstrap',current_database(),'"+privilege+"')")=='t')
-    for role in ('map_user_migrator','map_user_runtime'):
-        sql("ALTER ROLE "+role+" LOGIN PASSWORD '"+passwords[role]+"'")
+    operator('user-database-bootstrap-activate.sql', expected=1, extra='\\set marker '+('f'*64)+'\n')
+    check('wrong_activation_marker_preserves_nologin',sql("SELECT count(*)=2 AND bool_and(NOT rolcanlogin AND rolpassword IS NULL) FROM pg_authid WHERE rolname IN ('map_user_runtime','map_user_migrator')")=='t')
+    operator('user-database-bootstrap-activate.sql')
+    check('genuine_runtime_migrator_activation',sql("SELECT count(*)=2 AND bool_and(rolcanlogin AND rolpassword IS NOT NULL AND NOT rolsuper AND NOT rolinherit) FROM pg_authid WHERE rolname IN ('map_user_runtime','map_user_migrator')")=='t')
+    operator('user-database-bootstrap-activate.sql', expected=1)
+    check('activation_cannot_repeat',sql("SELECT md5(string_agg(row_to_json(t)::text,',' ORDER BY installed_rank)) FROM user_service.flyway_schema_history t")==history)
     env={**process_environment(),'USER_MIGRATION_URL':f'jdbc:postgresql://127.0.0.1:5432/{database}',
          'USER_MIGRATION_USERNAME':'map_user_migrator','USER_MIGRATION_PASSWORD':passwords['map_user_migrator']}
     check('normal_forward_migrations',launch('migrate',env=env,main='map.migration.UserMigrationApplication')['migrations_executed']>=24)

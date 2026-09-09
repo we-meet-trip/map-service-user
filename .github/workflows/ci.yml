@@ -59,6 +59,9 @@ jobs:
       - name: verify one-use bootstrap entrypoint without database access
         run: python3 scripts/verify-user-bootstrap-launch.py
 
+      - name: verify NCP controller boundaries without Docker or database access
+        run: python3 -B scripts/test_ncp_user_bootstrap.py
+
       - name: preserve migration launcher evidence
         if: always()
         uses: actions/upload-artifact@v4
