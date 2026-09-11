@@ -23,7 +23,7 @@ class ServicePolicyPersistenceTest {
     @Test void explicitAcceptancePersistsOnceAndWithdrawalCascadesOnlyItsOwnRecord() {
         User first = users.saveAndFlush(User.builder().nickname("synthetic-consent-first").authProvider(AuthProvider.EMAIL).birthDate(java.time.LocalDate.of(2000, 1, 1)).build());
         User second = users.saveAndFlush(User.builder().nickname("synthetic-consent-second").authProvider(AuthProvider.EMAIL).birthDate(java.time.LocalDate.of(2000, 1, 1)).build());
-        var request = new ServicePolicyService.AcceptRequest("2026-09-07", "2026-09-07.1", true, true, true);
+        var request = new ServicePolicyService.AcceptRequest(ServicePolicyService.TERMS_VERSION, ServicePolicyService.PRIVACY_VERSION, true, true, true);
         var original = service.accept(first.getId(), request);
         service.accept(first.getId(), request);
         service.accept(second.getId(), request);
@@ -43,7 +43,7 @@ class ServicePolicyPersistenceTest {
     @Test void existingReceiptCannotBypassMissingBirthdayAndCorrectionIsReevaluated() {
         User user = users.saveAndFlush(User.builder().nickname("synthetic-dob-required")
                 .authProvider(AuthProvider.KAKAO).build());
-        records.saveAndFlush(new ServicePolicyAcceptance(user, "2026-09-07", "2026-09-07.1",
+        records.saveAndFlush(new ServicePolicyAcceptance(user, ServicePolicyService.TERMS_VERSION, ServicePolicyService.PRIVACY_VERSION,
                 java.time.OffsetDateTime.now()));
         entityManager.clear();
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.requireEligible(user.getId()))
