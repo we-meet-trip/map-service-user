@@ -90,15 +90,15 @@ class ServicePolicyCurrentReadTest {
         assertThat(policy.status(ownUserId).accepted()).isFalse();
         rejected(ErrorCode.SERVICE_POLICY_REQUIRED);
         assertThatThrownBy(() -> policy.accept(ownUserId, new ServicePolicyService.AcceptRequest(
-                "2026-09-07", "2026-09-07", true, true, true)))
+                ServicePolicyService.TERMS_VERSION, "2026-09-07", true, true, true)))
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.POLICY_VERSION_MISMATCH);
         assertThat(jdbc.queryForObject("select privacy_version from service_policy_acceptances where user_id=?",
                 String.class, ownUserId)).isEqualTo("2026-09-07");
         assertThat(policy.accept(ownUserId, new ServicePolicyService.AcceptRequest(
-                "2026-09-07", "2026-09-07.1", true, true, true)).accepted()).isTrue();
+                ServicePolicyService.TERMS_VERSION, ServicePolicyService.PRIVACY_VERSION, true, true, true)).accepted()).isTrue();
         policy.requireCurrentEligible(ownUserId);
         assertThat(jdbc.queryForObject("select privacy_version from service_policy_acceptances where user_id=?",
-                String.class, ownUserId)).isEqualTo("2026-09-07.1");
+                String.class, ownUserId)).isEqualTo(ServicePolicyService.PRIVACY_VERSION);
     }
 
 }

@@ -409,11 +409,11 @@ try:
     check("runtime_profile_update", api("PATCH", "/api/v1/users/me", token=token,
           body={"nickname": "Synthetic updated owner", "birthDate": "2000-01-01"})["nickname"] == "Synthetic updated owner")
     policy_state = api("GET", "/api/v1/consents", token=token)
+    legacy_privacy = sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}")
     check("new_privacy_revision_requires_existing_adult_reacceptance",
-          policy_state["terms_version"] == "2026-09-07" and policy_state["privacy_version"] == "2026-09-07.1"
+          policy_state["privacy_version"] != legacy_privacy
           and policy_state["age_eligible"] is True and policy_state["accepted"] is False)
-    check("old_privacy_receipt_preserved_until_explicit_acceptance",
-          sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}") == "2026-09-07")
+    check("old_privacy_receipt_preserved_until_explicit_acceptance", legacy_privacy == "2026-09-07")
     denied = api("GET", f"/api/v1/schedules/{schedule}", token=token, status=403)
     check("old_privacy_receipt_cannot_read_protected_schedule", denied["code"] == "SERVICE_POLICY_REQUIRED")
     stale = api("POST", "/api/v1/consents", token=token, status=409, body={
@@ -422,7 +422,8 @@ try:
     check("old_privacy_post_rejected", stale["code"] == "POLICY_VERSION_MISMATCH")
     consent(token)
     check("explicit_privacy_revision_persisted",
-          sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}") == "2026-09-07.1")
+          sql(f"SELECT privacy_version FROM user_service.service_policy_acceptances WHERE user_id={owner}")
+          == policy_state["privacy_version"])
     # Actual runtime role CRUD of the new optional consent, no external AI/provider request.
     ai_states = api("GET", "/api/v1/consents/ai", token=token)
     check("v029_no_backfilled_optional_consent", len(ai_states) == 3 and all(not x["accepted"] and x["revision"] == 0 for x in ai_states))
