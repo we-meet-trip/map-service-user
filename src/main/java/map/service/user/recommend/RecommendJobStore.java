@@ -161,6 +161,49 @@ public class RecommendJobStore {
         }
     }
 
+    /** A follower's identity/deadline is committed with its row; Redis loss cannot orphan it. */
+    @Transactional(noRollbackFor = CustomException.class)
+    public void insertWaiting(String jobId, String scheduleId, JobOrigin origin,
+                              String province, String city, String key, OffsetDateTime expiresAt) {
+        if (key == null || key.isBlank() || key.length() > 128 || expiresAt == null)
+            throw new IllegalArgumentException("invalid recommendation wait metadata");
+        insertInProgress(jobId, scheduleId, origin, province, city);
+        RecommendJobEntity entity = repository.findByIdForUpdate(UUID.fromString(jobId)).orElseThrow();
+        if (!TERMINAL_STATUS.contains(entity.getStatus()) && entity.getWaitingKey() == null) {
+            entity.setWaiting(key, expiresAt);
+            repository.save(entity);
+        }
+    }
+
+    public record Waiting(String key, OffsetDateTime expiresAt) { }
+
+    public Optional<Waiting> findWaiting(String jobId) {
+        UUID id = parseUuid(jobId);
+        if (id == null) return Optional.empty();
+        return repository.findById(id)
+                .filter(row -> !TERMINAL_STATUS.contains(row.getStatus()) && row.getWaitingKey() != null)
+                .map(row -> new Waiting(row.getWaitingKey(), row.getWaitingExpiresAt()));
+    }
+
+    /** Return the actual first durable terminal under the same row lock, including expiry races. */
+    @Transactional
+    public Optional<String> finishWaiting(String jobId, String producerJobId, String status,
+                                           String payload, String cancelledPayload) {
+        UUID id = parseUuid(jobId);
+        if (id == null || cancellations.existsById(id)) return Optional.empty();
+        RecommendJobEntity row = repository.findByIdForUpdate(id).orElse(null);
+        if (row == null || cancellations.existsById(id)) return Optional.empty();
+        if (!TERMINAL_STATUS.contains(row.getStatus())) {
+            if (producerJobId != null && isCancelled(producerJobId)) {
+                status = "failed";
+                payload = cancelledPayload;
+            }
+            if ("done".equals(status)) row.fillParentIfAbsent(parseUuid(producerJobId));
+            writeFinished(id, normalizeStatus(status), parsePayload(payload));
+        }
+        return findFinishedPayload(jobId);
+    }
+
     /**
      * 성향 스냅샷을 비어 있을 때만 채운다.
      *
@@ -309,6 +352,39 @@ public class RecommendJobStore {
             writeFinished(uuid, normalizeStatus(status), parsePayload(payloadJson));
         }
         writeTraining(uuid, trainingJson);
+    }
+
+    /** Choose one worker event durably before publishing a shared snapshot. A conflicting
+     * later terminal (e.g. success publication timeout followed by failure) cannot replace it.
+     * The unacknowledged original stays in the stream PEL if its cache publication failed.
+     */
+    @Transactional
+    public boolean recordWorkerCompletion(String jobId, String status, String payloadJson, String trainingJson) {
+        UUID id = parseUuid(jobId);
+        if (id == null || cancellations.existsById(id)) return false;
+        String normalized = normalizeStatus(status);
+        String fingerprint;
+        try {
+            byte[] bytes = (id + "\n" + normalized + "\n" + payloadJson)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            fingerprint = java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("worker fingerprint unavailable", impossible);
+        }
+        RecommendJobEntity row = repository.findByIdForUpdate(id).orElse(null);
+        if (cancellations.existsById(id)) return false;
+        if (row != null && TERMINAL_STATUS.contains(row.getStatus())) {
+            // Legacy terminal rows have no immutable event identity. Never infer it from
+            // an editable result or accept a later event as the missing original.
+            return fingerprint.equals(row.getWorkerCompletionHash());
+        }
+        writeFinished(id, normalized, parsePayload(payloadJson));
+        row = repository.findById(id).orElseThrow();
+        row.setWorkerCompletionHash(fingerprint);
+        repository.save(row);
+        writeTraining(id, trainingJson);
+        return true;
     }
 
     /**
@@ -494,6 +570,7 @@ public class RecommendJobStore {
             entity.setResultPayload(stored);
             entity.setFinishedAt(OffsetDateTime.now());
         }
+        entity.setWaiting(null, null);
         repository.save(entity);
     }
 
@@ -513,7 +590,14 @@ public class RecommendJobStore {
         RecommendJobEntity entity = repository.findById(uuid).orElse(null);
         if (entity == null || !TERMINAL_STATUS.contains(entity.getStatus()) || entity.getResultPayload() == null)
             return Optional.empty();
-        return Optional.of(payloadCipher.decryptNode(entity.getResultPayload(), aadFor(uuid)).toString());
+        return Optional.of(readPayload(entity).toString());
+    }
+
+    /** Decode a stored result using its original job AAD, without changing the row.
+     * Callers must establish request ownership or a separately authorized batch context.
+     */
+    public JsonNode readPayload(RecommendJobEntity entity) {
+        return payloadCipher.decryptNode(entity.getResultPayload(), aadFor(entity.getJobId()));
     }
 
     /**
@@ -547,7 +631,7 @@ public class RecommendJobStore {
      * 결과 본문을 묶어 둘 자리 이름. 작업 식별자는 행이 사는 동안 바뀌지 않고
      * 행마다 다르므로, 한 작업의 결과를 다른 작업의 행에 옮겨 넣어도 열리지 않는다.
      */
-    private static String aadFor(UUID uuid) {
+    public static String aadFor(UUID uuid) {
         return PayloadCipher.aad("recommend_jobs", "result_payload", uuid.toString());
     }
 

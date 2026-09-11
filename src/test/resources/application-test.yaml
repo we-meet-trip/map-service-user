@@ -60,11 +60,13 @@ training:
     enabled: false
 
 kakao:
+  native-environment: test
+  public-origin: https://test.example.com
   client-id: test-client-id
   client-secret: test-client-secret
   redirect-uri: https://test.example.com/api/v1/auth/kakao/callback
   authorize-uri: https://kauth.kakao.com/oauth/authorize
-  app-callback-scheme: mapauth://kakao
+  app-callback-scheme: mapauth-test://kakao
   token-uri: https://kauth.kakao.com/oauth/token
   user-info-uri: https://kapi.kakao.com/v2/user/me
 

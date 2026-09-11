@@ -2,6 +2,8 @@ package map.service.user.recommend;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.List;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import map.service.user.global.crypto.PayloadCipher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +37,12 @@ public class ReuseCacheStore {
     private static final String INFLIGHT_PREFIX = "recommend:inflight:";
     /** 남이 만드는 것을 기다리는 job 이 어느 조건을 기다리는지. */
     private static final String WAIT_PREFIX = "recommend:cache-wait:";
+
+    private static final String WORKER_COMPLETION_PREFIX = "recommend:worker-completion:";
+    private static final String COMPLETION_PREFIX = "recommend:completion:";
+    static final String FAILED_COMPLETION = "{\"status\":\"failed\",\"code\":\"generation_failed\",\"retryable\":false}";
+
+    public record Completion(String producerJobId, String payload) { }
 
     private final StringRedisTemplate redis;
     private final Duration cacheTtl;
@@ -92,19 +100,82 @@ public class ReuseCacheStore {
      * 처리 시간보다 넉넉히 길게 두어, 시한이 먼저 끝나 중복이 나가는 일이
      * 없게 한다.
      */
-    public boolean tryBecomeProducer(String hash) {
-        Boolean acquired = redis.opsForValue()
-                .setIfAbsent(inflightKey(hash), "1", inflightTtl);
-        return Boolean.TRUE.equals(acquired);
+    public String claimProducer(String hash, String token) {
+        return redis.execute(new DefaultRedisScript<>(
+                "local current = redis.call('GET', KEYS[1]); if current then return current end; "
+                + "redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]); return ARGV[1]", String.class),
+                List.of(inflightKey(hash)), token, Long.toString(inflightTtl.toSeconds()));
     }
 
-    /** 다 만들었으니 표시를 치운다. 못 치워도 시한이 끝나면 사라진다. */
-    public void releaseProducer(String hash) {
-        redis.delete(inflightKey(hash));
+    private void releaseProducer(String hash, String token) {
+        redis.execute(new DefaultRedisScript<>(
+                "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0", Long.class),
+                List.of(inflightKey(hash)), token);
     }
 
-    /** 이 job 이 어느 조건의 결과를 기다리는지 적어 둔다. */
-    public void markWaiting(String jobId, String hash) {
+    /** Keep the generation link until expiry so redelivery can repair a missed notification. */
+    public void registerProducer(String jobId, String hash, String token) {
+        redis.opsForValue().set("recommend:producer:" + jobId, hash + "|" + token, inflightTtl);
+    }
+
+    /** Capture the worker event, never the owner's editable canonical draft. First terminal wins. */
+    public void publishCompletion(String jobId, String payloadJson) {
+        redis.opsForValue().setIfAbsent(WORKER_COMPLETION_PREFIX + jobId,
+                payloadCipher.encrypt(payloadJson, PayloadCipher.aad("redis", WORKER_COMPLETION_PREFIX, jobId)), linkTtl);
+        publishCompletion(jobId);
+    }
+
+    /** Repair completion-before-registration only from the immutable event snapshot. */
+    public void publishCompletion(String jobId) {
+        String link = redis.opsForValue().get("recommend:producer:" + jobId);
+        if (link == null) return;
+        String[] parts = link.split("\\|", 2);
+        if (parts.length != 2) return;
+        String snapshot = redis.opsForValue().get(WORKER_COMPLETION_PREFIX + jobId);
+        if (snapshot == null) return;
+        if ("failed".equals(snapshot)) { cancelProducer(jobId); return; }
+        String payload = payloadCipher.decrypt(snapshot, PayloadCipher.aad("redis", WORKER_COMPLETION_PREFIX, jobId));
+        // Seal the producer identity AND body to this generation: swapping pointers cannot
+        // make an unrelated personal worker result readable by another generation.
+        String envelope = payloadCipher.encrypt(jobId + "\n" + payload,
+                PayloadCipher.aad("redis", COMPLETION_PREFIX, parts[1]));
+        redis.opsForValue().setIfAbsent(COMPLETION_PREFIX + parts[1], envelope, inflightTtl);
+        releaseProducer(parts[0], parts[1]);
+    }
+
+    public void cancelProducer(String jobId) {
+        // Overwrite private data and prevent delayed/redelivered events from resurrecting it.
+        redis.opsForValue().set(WORKER_COMPLETION_PREFIX + jobId, "failed", linkTtl);
+        String link = redis.opsForValue().get("recommend:producer:" + jobId);
+        if (link == null) return;
+        String[] parts = link.split("\\|", 2);
+        if (parts.length == 2) failProducer(parts[0], parts[1]);
+    }
+
+    public void failProducer(String hash, String token) {
+        redis.opsForValue().set(COMPLETION_PREFIX + token, "failed", inflightTtl);
+        releaseProducer(hash, token);
+    }
+
+    public Optional<Completion> completion(String token) {
+        String value = redis.opsForValue().get(COMPLETION_PREFIX + token);
+        if (value == null) return Optional.empty();
+        if ("failed".equals(value)) return Optional.of(new Completion(null, FAILED_COMPLETION));
+        String decoded = payloadCipher.decrypt(value, PayloadCipher.aad("redis", COMPLETION_PREFIX, token));
+        int split = decoded.indexOf('\n');
+        // A pre-upgrade bare producer ID must never fall back to its mutable PG result.
+        if (split < 1 || (payloadCipher.isEnabled() && decoded.equals(value))) return Optional.of(new Completion(null, FAILED_COMPLETION));
+        return Optional.of(new Completion(decoded.substring(0, split), decoded.substring(split + 1)));
+    }
+
+    public Duration waitingTtl() { return inflightTtl; }
+
+    /** A waiter follows one execution, never a later request with the same conditions. */
+    public void markWaiting(String jobId, String token) {
+        redis.opsForValue().set(waitKey(jobId), "v1:" + token, inflightTtl);
+    }
+
+    public void markLegacyWaiting(String jobId, String hash) {
         redis.opsForValue().set(waitKey(jobId), hash, inflightTtl);
     }
 

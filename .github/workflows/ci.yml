@@ -48,7 +48,35 @@ jobs:
           cache: gradle
 
       - name: test
-        run: ./gradlew --no-daemon clean test
+        run: ./gradlew --no-daemon clean test bootJar trainingExportJar
+
+      - name: launch isolated exporter artifact
+        run: python3 scripts/verify-training-export-launch.py
+
+      - name: verify standalone migration entrypoint without database access
+        run: python3 scripts/verify-user-migration-launch.py
+
+      - name: verify one-use bootstrap entrypoint without database access
+        run: python3 scripts/verify-user-bootstrap-launch.py
+
+      - name: verify NCP controller boundaries without Docker or database access
+        run: python3 -B scripts/test_ncp_user_bootstrap.py
+
+      - name: preserve migration launcher evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-migration-launch-verification
+          path: build/user-migration-launch-verification.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: preserve exact candidate JAR for isolated PostgreSQL job
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-runtime-isolation-jar
+          path: build/libs/service-user-0.0.1-SNAPSHOT.jar
+          retention-days: 3
 
       # 실패한 것을 눈으로 볼 수 있어야 한다. 로그만 남기면 어느 단언이
       # 깨졌는지 확인하러 다시 돌려야 한다.
@@ -69,11 +97,96 @@ jobs:
           d=$(sed -n 's/^FROM gradle:\([^-]*\)-.*/\1/p' Dockerfile)
           [ "$w" = "$d" ] || { echo "래퍼 $w · 이미지 $d 로 갈라져 있다"; exit 1; }
 
+  database-isolation:
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        # docker.io/library/postgres:17-alpine, resolved Linux/amd64 digest 2026-09-07.
+        image: postgres@sha256:7456ef82e5f5bc43d997f4781bbd7c0d6389bff397564649a356e206ba473aee
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-database-only
+          POSTGRES_DB: user_runtime_fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d user_runtime_fixture"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: actions/download-artifact@v4
+        with:
+          name: user-runtime-isolation-jar
+          path: build/libs
+      - uses: actions/download-artifact@v4
+        with:
+          name: user-migration-launch-verification
+          path: build
+      - name: checkout immutable prior User source for realistic transition fixture
+        uses: actions/checkout@v4
+        with:
+          repository: we-meet-trip/map-service-user
+          ref: 1d4f394b51f471319eb9403f6e926a8d0a511c72
+          path: legacy-source
+      - name: build prior source for fixture only
+        working-directory: legacy-source
+        run: ./gradlew --no-daemon bootJar
+      - name: install fixture clients and syscall observer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client redis-tools strace
+      - name: genuine empty-host bootstrap and one-use role finalization
+        env:
+          MAP_HOSTED_DATABASE_FIXTURE: "true"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: synthetic-ci-database-only
+        run: python3 scripts/verify-user-bootstrap-postgres.py
+      - name: preserve redacted bootstrap PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-bootstrap-postgres-verification
+          path: build/user-bootstrap-postgres-verification.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: actual PostgreSQL role migration and serving isolation
+        env:
+          MAP_HOSTED_DATABASE_FIXTURE: "true"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: user_runtime_fixture
+          PGUSER: postgres
+          PGPASSWORD: synthetic-ci-database-only
+        run: python3 scripts/verify-user-postgres-isolation.py
+      - name: preserve redacted PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-postgres-isolation-verification
+          path: build/user-postgres-isolation-verification.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Optional cross-repository release request; the infra receiver verifies this run.
   release-dispatch:
-    needs: [test]
+    needs: [test, database-isolation]
     if: >-
-      needs.test.result == 'success' &&
+      needs.test.result == 'success' && needs.database-isolation.result == 'success' &&
       github.repository == 'we-meet-trip/map-service-user' &&
       github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest

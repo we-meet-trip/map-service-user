@@ -78,11 +78,24 @@ class KakaoOAuthUrlBuilderTest {
     }
 
     @Test
-    @DisplayName("앱 콜백 Location — error 우선. error 존재 시 code 대신 error/error_description 전달")
+    @DisplayName("앱 콜백 Location — 오류·취소에도 인코딩된 state를 보존")
     void buildAppCallbackLocation_error() {
-        String loc = service.buildAppCallbackLocation(null, null, "access_denied", "User denied");
+        String loc = service.buildAppCallbackLocation(null, "s/취소 +&", "access_denied", "User denied");
         assertThat(loc).isEqualTo(
-                "mapauth://kakao?error=access_denied&error_description=" + enc("User denied"));
+                "mapauth://kakao?error=access_denied&error_description=" + enc("User denied") + "&state=" + enc("s/취소 +&"));
+    }
+
+    @Test
+    void callbackRequiresOneOutcomeAndUsableState() {
+        for (String state : new String[] {null, "", " ", "x\n", "x".repeat(513)}) {
+            assertThatThrownBy(() -> service.buildAppCallbackLocation("code", state, null, null))
+                    .isInstanceOf(CustomException.class);
+            assertThatThrownBy(() -> service.buildAuthorizeUrl(state)).isInstanceOf(CustomException.class);
+        }
+        assertThatThrownBy(() -> service.buildAppCallbackLocation("code", "state", "error", null))
+                .isInstanceOf(CustomException.class);
+        assertThatThrownBy(() -> service.buildAppCallbackLocation(null, "state", null, null))
+                .isInstanceOf(CustomException.class);
     }
 
     @Test

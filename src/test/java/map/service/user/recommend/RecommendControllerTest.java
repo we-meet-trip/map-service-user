@@ -4,6 +4,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.Optional;
@@ -43,6 +45,34 @@ class RecommendControllerTest {
                 {"places":[{"place_id":1,"name":"경복궁","address":"서울",
                 "lat":%s,"lng":%s,"recommended_visit_time":"오전"}]}
                 """.formatted(lat, lng);
+    }
+
+    @Test
+    void getPreservesLegacySuccessfulPublicJsonExactly() throws Exception {
+        String payload = """
+                {"job_id":"job-success","status":"done","places":[],"visit_order":[],"legs":[],
+                 "clothing":"가벼운 겉옷","error":null,"retry_after_seconds":null,
+                 "warnings":["날씨 미확인"],"timeline_status":"unverified"}""";
+        when(service.findOwnedDraft(eq("job-success"), any())).thenReturn(Optional.of(payload));
+
+        mockMvc.perform(get("/api/v1/recommend/job-success"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(payload));
+    }
+
+    @Test
+    void getPreservesTerminalFailureCodeAndRetryablePublicJsonExactly() throws Exception {
+        String payload = """
+                {"job_id":"job-failed","status":"failed",
+                 "error":"장소 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                 "code":"upstream_unavailable","retryable":true}""";
+        when(service.findOwnedDraft(eq("job-failed"), any())).thenReturn(Optional.of(payload));
+
+        mockMvc.perform(get("/api/v1/recommend/job-failed"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(payload));
     }
 
     @Test

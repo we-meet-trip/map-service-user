@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,13 +21,18 @@ import map.service.user.recommend.dto.JobAccepted;
 import map.service.user.recommend.dto.RecommendRequest;
 import map.service.user.recommend.dto.SelectedPlace;
 import map.service.user.trip.dto.Location;
+import map.service.user.trip.dto.BudgetRange;
 import map.service.user.trip.dto.Schedule;
+import map.service.user.trip.dto.TripGenerateRequest;
 import map.service.user.trip.dto.TripGenerateResponse;
+import map.service.user.trip.dto.TripResearchRequest;
 import map.service.user.trip.dto.TripRouteRequest;
 import map.service.user.trip.dto.TripStop;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -167,6 +173,70 @@ class TripRouteServiceTest {
         verify(recommendService, never()).createRecommendationDetailed(any());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("수동 동선과 명시적 최적화는 외부 AI 장소 요약을 예약하지 않는다")
+    void routeNeverPrewarmsGenerativeSummaries(boolean optimize) {
+        draftIsDone();
+        List<TripStop> stops = List.of(stop(1, 15), stop(2, null));
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(stops);
+        TripRouteRequest original = request();
+        // false case exercises the default constructor used by manual ordering.
+        TripRouteRequest input = optimize
+                ? new TripRouteRequest(original.schedule(), original.transport(),
+                        original.location(), original.places(), true)
+                : original;
+
+        TripGenerateResponse out = service.route(input, 7L);
+
+        verifyNoInteractions(reviewSummaryService);
+        ArgumentCaptor<RecommendRequest> sent = ArgumentCaptor.forClass(RecommendRequest.class);
+        verify(recommendService).createRouteJob(sent.capture(), org.mockito.ArgumentMatchers.eq(7L));
+        assertThat(sent.getValue().optimize()).isEqualTo(optimize);
+        assertThat(sent.getValue().places()).containsExactlyElementsOf(original.places());
+        assertThat(out.stops()).containsExactlyElementsOf(stops);
+        assertThat(out.totalDurationMinutes()).isEqualTo(15);
+        verify(hubWeatherClient).fetchWeather("강원특별자치도", "속초시",
+                original.schedule().startDate(), original.schedule().endDate());
+    }
+
+    @Test
+    @DisplayName("자동 추천은 별도 리뷰 요약 동의를 추정하지 않는다")
+    void generateDoesNotInferReviewSummaryConsent() {
+        draftIsDone();
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 15), stop(2, null)));
+        when(recommendService.createRecommendationDetailed(any(), any()))
+                .thenReturn(new RecommendService.RecommendationResult(
+                        new JobAccepted(JOB_ID, "in_progress", 3), false));
+        TripRouteRequest original = request();
+
+        service.generate(new TripGenerateRequest(original.schedule(),
+                new BudgetRange(50000, 150000), List.of("nature"),
+                original.transport(), original.location()), 7L);
+
+        verifyNoInteractions(reviewSummaryService);
+    }
+
+    @Test
+    @DisplayName("재탐색은 별도 리뷰 요약 동의를 추정하지 않는다")
+    void researchDoesNotInferReviewSummaryConsent() {
+        draftIsDone();
+        when(stopsAssembler.assemble(any(), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(stop(1, 15), stop(2, null)));
+        when(recommendService.research(anyString(), any(), any(), any(), any()))
+                .thenReturn(new JobAccepted(JOB_ID, "in_progress", 3));
+        TripRouteRequest original = request();
+
+        service.research(new TripResearchRequest(original.schedule(),
+                new BudgetRange(50000, 150000), List.of("nature"),
+                original.transport(), original.location(), JOB_ID,
+                List.of(), List.of(), null), 7L);
+
+        verifyNoInteractions(reviewSummaryService);
+    }
+
     @Test
     @DisplayName("추천이 실패로 끝나면 생성과 같은 예외로 502 가 된다")
     void failedDraftRaisesGenerationException() {
@@ -176,7 +246,7 @@ class TripRouteServiceTest {
 
         assertThatThrownBy(() -> service.route(request()))
                 .isInstanceOf(TripGenerationException.class)
-                .hasMessageContaining("stage=route requires places");
+                .hasMessage("추천을 생성하지 못했습니다.");
     }
 
     @Test
@@ -187,4 +257,29 @@ class TripRouteServiceTest {
         assertThatThrownBy(() -> service.route(request()))
                 .isInstanceOf(TripTimeoutException.class);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"no_matching_places", "selection_invalid", "upstream_unavailable"})
+    void preservesTypedFailureAcrossFacade(String code) {
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\",\"code\":\"" + code + "\",\"retryable\":false}"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(TripGenerationException.class,
+                () -> service.route(request()));
+        assertThat(failure.failure().code()).isEqualTo(code);
+        assertThat(failure.failure().retryable()).isFalse();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"no_matching_places", "selection_invalid", "upstream_unavailable"})
+    void generatePreservesTypedFailure(String code) {
+        when(recommendService.createRecommendationDetailed(any(), any())).thenReturn(
+                new RecommendService.RecommendationResult(new JobAccepted(JOB_ID, "in_progress", 3), false));
+        when(recommendService.findDraft(JOB_ID)).thenReturn(Optional.of(
+                "{\"job_id\":\"" + JOB_ID + "\",\"status\":\"failed\",\"code\":\"" + code + "\",\"retryable\":false}"));
+        var request = new TripGenerateRequest(request().schedule(), new BudgetRange(10000, 50000),
+                List.of("산책"), "walk", request().location());
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(TripGenerationException.class,
+                () -> service.generate(request));
+        assertThat(failure.failure().code()).isEqualTo(code);
+    }
+
 }

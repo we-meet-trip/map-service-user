@@ -32,9 +32,9 @@ class ChatMembershipHistoryTest {
         participants.save(new ChatParticipant(id, 1L, ChatParticipant.Role.OWNER));
         ChatParticipant member = participants.save(new ChatParticipant(id, 7L, ChatParticipant.Role.MEMBER));
         ChatRoomAccessService access = new ChatRoomAccessService(rooms, participants, intervals);
-        ChatMessageService history = new ChatMessageService(messages, participants, new ChatProperties(), access);
+        ChatMessageService history = new ChatMessageService(messages, participants, new ChatProperties(), access, ModerationTestSupport.guard(messages));
         ChatParticipantService membership = new ChatParticipantService(participants, access,
-                org.mockito.Mockito.mock(ChatPresenceService.class), users);
+                org.mockito.Mockito.mock(ChatPresenceService.class), users, ModerationTestSupport.guard(messages));
         send(room, 2); // before initial join
         access.openInterval(id, 7L, room.getNextSeq());
         send(room, 3); // authorized 3,4,5

@@ -77,21 +77,6 @@ public class TripService {
     }
 
     /**
-     * 방문지 목록으로 요약 선작성을 예약한다.
-     *
-     * 제출만 하고 즉시 돌아가므로 응답이 늦어지지 않는다. 이름이 없는
-     * 항목은 캐시 키를 만들 수 없어 건너뛴다.
-     */
-    private void prewarmSummaries(List<TripStop> stops) {
-        List<ReviewSummaryService.PrewarmPlace> places = stops.stream()
-                .filter(s -> s.name() != null && !s.name().isBlank())
-                .map(s -> new ReviewSummaryService.PrewarmPlace(
-                        s.name(), s.category()))
-                .toList();
-        reviewSummaryService.prewarm(places);
-    }
-
-    /**
      * trip 생성 동기 처리. 성공 시 완성된 TripGenerateResponse, 실패 시 예외를 던진다
      * (TripGenerationException→502, TripTimeoutException→504, IllegalArgument→400).
      *
@@ -133,10 +118,6 @@ public class TripService {
 
         // 3) draft 파싱 → 검증
         RecommendResponse result = parseDraft(jobId, draftJson);
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         // 4) stops 변환 (경로 성공 구간은 이동 시간/거리를 실측으로 대체)
         //    저장된 일정 상세 조회도 같은 조립기를 쓴다 — 두 화면이 같은
@@ -152,7 +133,7 @@ public class TripService {
         // 5) 장소 요약을 미리 만들어 둔다. 일정에 담긴 장소는 대부분 한 번씩
         //    눌러 보는데, 누를 때 만들면 그 자리에서 모델 응답을 기다려야 한다.
         //    제출만 하고 넘어가므로 이 응답이 늦어지지 않는다.
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         // 6) 날씨(best-effort)
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
@@ -222,14 +203,10 @@ public class TripService {
         log.info("trip replan started job_id={} schedule_id={}", jobId, scheduleId);
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result, spec.transport(), startHour, endHour);
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         List<WeatherForecastItem> forecast = TripMapping.toWeatherForecast(
                 hubWeatherClient.fetchWeather(
@@ -295,10 +272,6 @@ public class TripService {
                 jobId, request.places().size());
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result,
@@ -307,7 +280,8 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        prewarmSummaries(stops);
+        // Manual routes and explicit route optimization must not enqueue
+        // generative review summaries: this flow requires no external AI consent.
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());
@@ -370,10 +344,6 @@ public class TripService {
                 request.keep() == null ? 0 : request.keep().size());
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
-        if ("failed".equalsIgnoreCase(result.status())) {
-            String reason = result.error() != null ? result.error() : "recommendation failed";
-            throw new TripGenerationException(reason);
-        }
 
         List<TripStop> stops = stopsAssembler.assemble(
                 result,
@@ -382,7 +352,7 @@ public class TripService {
                 schedule.activeEndHour());
         int totalDuration = TripStopsAssembler.totalDurationMinutes(stops);
 
-        prewarmSummaries(stops);
+        // Review summaries require their own explicit review_summary permission/action.
 
         HubWeatherResponse weather = hubWeatherClient.fetchWeather(
                 province, city, schedule.startDate(), schedule.endDate());
@@ -447,7 +417,12 @@ public class TripService {
     /** draft JSON → RecommendResponse. 파싱 실패는 비정상 결과로 간주(502). */
     private RecommendResponse parseDraft(String jobId, String draftJson) {
         try {
-            return objectMapper.readValue(draftJson, RecommendResponse.class);
+            RecommendResponse result = objectMapper.readValue(draftJson, RecommendResponse.class);
+            if (result == null) throw new TripGenerationException("recommendation result is malformed");
+            if ("failed".equalsIgnoreCase(result.status())) {
+                throw new TripGenerationException(result.code(), result.retryable());
+            }
+            return result;
         } catch (JsonProcessingException e) {
             log.error("draft parse failed job_id={} reason={}", jobId, e.getMessage());
             throw new TripGenerationException("recommendation result is malformed");

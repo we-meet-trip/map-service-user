@@ -8,7 +8,23 @@ package map.service.user.trip;
  */
 public class TripGenerationException extends RuntimeException {
 
+    private final map.service.user.recommend.RecommendationFailure failure;
+
     public TripGenerationException(String message) {
         super(message);
+        this.failure = map.service.user.recommend.RecommendationFailure.of(null, false);
+    }
+
+    public TripGenerationException(String code, Boolean retryable) {
+        this(map.service.user.recommend.RecommendationFailure.of(code, retryable));
+    }
+
+    private TripGenerationException(map.service.user.recommend.RecommendationFailure failure) {
+        super(failure.message());
+        this.failure = failure;
+    }
+
+    public map.service.user.recommend.RecommendationFailure failure() {
+        return failure;
     }
 }

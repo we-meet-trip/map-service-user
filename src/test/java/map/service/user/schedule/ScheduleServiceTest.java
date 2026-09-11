@@ -64,7 +64,7 @@ class ScheduleServiceTest {
                 new ObjectMapper(), mock(TripStopsAssembler.class),
                 TestPayloadCiphers.enabled(), jobStore, weatherService);
         // 저장은 조회와 같은 길로 초안을 찾는다(초안이 없으면 완료 기록으로 내려간다).
-        when(recommendService.findDraft(JOB_ID))
+        when(recommendService.findOwnedDraft(eq(JOB_ID), any()))
                 .thenReturn(Optional.of("{\"job_id\":\"" + JOB_ID + "\",\"places\":[]}"));
         when(jobStore.findRegion(JOB_ID)).thenReturn(Optional.empty());
     }
@@ -295,7 +295,7 @@ class ScheduleServiceTest {
         entity.setRegion("서울특별시", "중구");
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(recommendService.findDraft(newJob)).thenReturn(Optional.of(
+        when(recommendService.findOwnedDraft(eq(newJob), any())).thenReturn(Optional.of(
                 "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
 
         service.revise(5L, 42L, new ScheduleReviseRequest(newJob, null, null, null));
@@ -321,7 +321,7 @@ class ScheduleServiceTest {
                 null, "walk", 9, 18);
         when(repository.findByScheduleIdAndUserId(5L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(recommendService.findDraft(newJob)).thenReturn(Optional.of(
+        when(recommendService.findOwnedDraft(eq(newJob), any())).thenReturn(Optional.of(
                 "{\"job_id\":\"" + newJob + "\",\"places\":[]}"));
 
         service.revise(5L, 42L,
@@ -349,7 +349,7 @@ class ScheduleServiceTest {
                 null, "walk", 9, 18);
         when(repository.findByScheduleIdAndUserId(6L, 42L))
                 .thenReturn(Optional.of(entity));
-        when(recommendService.findDraft(newJob)).thenReturn(Optional.empty());
+        when(recommendService.findOwnedDraft(eq(newJob), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.revise(
                 6L, 42L, new ScheduleReviseRequest(newJob, null, null, null)))

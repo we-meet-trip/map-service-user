@@ -33,6 +33,7 @@ public class AccountWithdrawalService {
     private final JwtService jwtService;
     private final map.service.user.recommend.RecommendJobStore jobs;
     private final map.service.user.recommend.DraftStore drafts;
+    private final map.service.user.recommend.ReuseCacheStore reuse;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final map.service.user.domain.auth.apple.AppleAccountService appleAccounts;
 
@@ -43,8 +44,10 @@ public class AccountWithdrawalService {
                                     JwtService jwtService,
                                     map.service.user.recommend.RecommendJobStore jobs,
                                     map.service.user.recommend.DraftStore drafts,
+                                    map.service.user.recommend.ReuseCacheStore reuse,
                                     org.springframework.jdbc.core.JdbcTemplate jdbc,
                                     map.service.user.domain.auth.apple.AppleAccountService appleAccounts) {
+        this.reuse = reuse;
         this.jobs = jobs; this.drafts = drafts; this.jdbc = jdbc; this.appleAccounts = appleAccounts;
         this.userRepository = userRepository;
         this.scheduleRepository = scheduleRepository;
@@ -80,6 +83,14 @@ public class AccountWithdrawalService {
                 + "WHERE system_payload->>'user_id'=?", userId.toString());
         jdbc.update("UPDATE user_service.chat_rooms SET schedule_id=NULL, owner_id=NULL, title='종료된 대화', "
                 + "read_only=TRUE, invite_revoked=TRUE, invite_token_hash=NULL WHERE owner_id=?", userId);
+        // Retain only non-identifying moderation outcome/audit metadata. Erase freeform
+        // descriptions even when another reporter may have named the withdrawn author.
+        jdbc.update("UPDATE user_service.moderation_reports SET description=NULL, request_fingerprint=NULL, "
+                + "reporter_id=CASE WHEN reporter_id=? THEN NULL ELSE reporter_id END, reported_user_id=NULL, "
+                + "message_id=NULL, room_id=NULL, message_seq=NULL, schedule_id=NULL, recommend_job_id=NULL "
+                + "WHERE reporter_id=? OR reported_user_id=?", userId, userId, userId);
+        jdbc.update("DELETE FROM user_service.user_blocks WHERE blocker_id=? OR blocked_user_id=?", userId, userId);
+        jdbc.update("DELETE FROM user_service.chat_restrictions WHERE user_id=?", userId);
         java.util.List<String> jobIds = jobs.eraseOwnedJobs(userId);
         // Erase authored personal content, while other participants keep their own conversation.
         jdbc.update("UPDATE user_service.chat_messages SET sender_id=NULL, content=NULL, system_payload=NULL WHERE sender_id=?", userId);
@@ -92,6 +103,8 @@ public class AccountWithdrawalService {
             try { jwtService.blacklistAccessToken(rawAccessToken); } catch (RuntimeException ignored) { }
             for (String id : jobIds) {
                 try { drafts.delete(id); } catch (RuntimeException ignored) { }
+                try { reuse.cancelProducer(id); } catch (RuntimeException ignored) { }
+                try { reuse.clearWaiting(id); } catch (RuntimeException ignored) { }
             }
         };
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {

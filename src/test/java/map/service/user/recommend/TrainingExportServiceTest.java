@@ -21,6 +21,8 @@ import map.service.user.schedule.ScheduleArrivalRepository;
 import map.service.user.schedule.ScheduleEntity;
 import map.service.user.schedule.ScheduleExportRepository;
 import map.service.user.schedule.ScheduleRepository;
+import map.service.user.schedule.ScheduleService;
+import map.service.user.global.crypto.TestPayloadCiphers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -81,7 +83,8 @@ class TrainingExportServiceTest {
                 scheduleExportRepository, arrivalRepository, impressionRepository,
                 jobRepository,
                 trainingRepository, userRepository,
-                new RecommendCacheKey(50000, 60), objectMapper, 500);
+                new RecommendCacheKey(50000, 60), objectMapper,
+                TestPayloadCiphers.enabled(), 500);
     }
 
     // ── 픽스처 ────────────────────────────────────────────────────

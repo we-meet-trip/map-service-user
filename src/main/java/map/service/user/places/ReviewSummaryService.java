@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -89,8 +90,16 @@ public class ReviewSummaryService {
         this.prewarmBatchSize = prewarmBatchSize;
     }
 
+    /** A read-only lookup: cache misses, corrupt entries and outages never call providers. */
+    public ReviewSummaryResponse cachedSummary(String query) {
+        Cached cached = readCache(cacheKey(query));
+        return cached == null
+                ? new ReviewSummaryResponse(query, List.of(), 0)
+                : new ReviewSummaryResponse(query, cached.bullets(), cached.sourceCount());
+    }
+
     /**
-     * 장소명으로 두 줄 요약을 얻는다.
+     * 명시적으로 동의한 생성 요청 또는 추천 흐름에서 두 줄 요약을 얻는다.
      *
      * query: 장소명. 캐시 키는 앞뒤 공백을 없애고 소문자로 맞춘 값을 해시해
      *        만든다 — 같은 장소를 조금 다르게 적어 보내도 한 번만 요약한다.
@@ -141,7 +150,7 @@ public class ReviewSummaryService {
             } catch (RuntimeException e) {
                 // 대기열이 가득 차 거부되는 경우까지 포함해 흡수한다.
                 log.warn("summary prewarm submit failed reason={}",
-                        e.getMessage());
+                        e.getClass().getSimpleName());
             }
         }
     }
@@ -180,10 +189,8 @@ public class ReviewSummaryService {
      * 실행기 스레드에서 도는 본체 — 어떤 실패도 밖으로 내보내지 않는다.
      *
      * 근거를 모아 한 번에 요약을 맡기고, 두 줄을 받은 장소만 담는다.
-     * 요약을 만드는 사이 사용자가 그 장소를 누르면 요약이 한 번 더
-     * 만들어질 수 있다. 그대로 둔다 — 진행 중임을 표시해 두면 그 순간에
-     * 누른 사용자는 실제 요약 대신 빈 화면을 확정으로 받게 되어, 호출
-     * 한 번을 아끼려고 화면의 답을 버리는 거래가 된다.
+     * 장소 상세 자동 조회는 이 경로를 호출하지 않는다. 명시 생성과의
+     * 동시 실행까지 같은 작업으로 병합하지는 않으며, Agent의 공통 한도를 따른다.
      */
     private void prewarmNow(List<PrewarmPlace> chunk) {
         try {
@@ -224,7 +231,7 @@ public class ReviewSummaryService {
             log.info("summary prewarm done places={} written={}",
                     batch.size(), written);
         } catch (RuntimeException e) {
-            log.warn("summary prewarm failed reason={}", e.getMessage());
+            log.warn("summary prewarm failed reason={}", e.getClass().getSimpleName());
         }
     }
 
@@ -246,7 +253,7 @@ public class ReviewSummaryService {
             }
             return res.reviews();
         } catch (RuntimeException e) {
-            log.warn("review sources fetch failed reason={}", e.getMessage());
+            log.warn("review sources fetch failed reason={}", e.getClass().getSimpleName());
             return List.of();
         }
     }
@@ -275,11 +282,17 @@ public class ReviewSummaryService {
                 // 형식이 다른 옛 값은 미스로 다뤄 다시 만든다.
                 return null;
             }
+            if (sourceCount < 1 || sourceCount > SOURCE_COUNT) {
+                return null;
+            }
             List<String> bullets =
                     List.of(parts).subList(1, parts.length);
+            if (bullets.isEmpty() || bullets.stream().anyMatch(String::isBlank)) {
+                return null;
+            }
             return new Cached(bullets, sourceCount);
         } catch (RuntimeException e) {
-            log.warn("summary cache read failed reason={}", e.getMessage());
+            log.warn("summary cache read failed reason={}", e.getClass().getSimpleName());
             return null;
         }
     }
@@ -291,13 +304,13 @@ public class ReviewSummaryService {
                     sources + JOIN + String.join(JOIN, bullets);
             redis.opsForValue().set(key, payload, ttl);
         } catch (RuntimeException e) {
-            log.warn("summary cache write failed reason={}", e.getMessage());
+            log.warn("summary cache write failed reason={}", e.getClass().getSimpleName());
         }
     }
 
     /** 장소명을 정규화해 해시한 캐시 키. */
     private static String cacheKey(String query) {
-        String normalized = query.strip().toLowerCase();
+        String normalized = query.strip().toLowerCase(Locale.ROOT);
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hashed =

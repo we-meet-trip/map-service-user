@@ -40,14 +40,14 @@ class TripStopsAssemblerModeCaseTest {
                 List.of(place(0), place(1)),
                 List.of(0, 1),
                 List.of(new Leg(0, 1, Mobility.WALK, 0.9, 9)),
-                null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     private static Route route() {
         return new Route(
                 List.of(List.of(37.50, 127.0), List.of(37.505, 127.0),
                         List.of(37.51, 127.0)),
-                1420, 1230);
+                1420, 1230, "OSRM", "foot");
     }
 
     @Test

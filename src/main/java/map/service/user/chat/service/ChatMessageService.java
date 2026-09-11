@@ -32,15 +32,18 @@ public class ChatMessageService {
     private final ChatParticipantRepository participantRepository;
     private final ChatProperties chatProperties;
     private final ChatRoomAccessService access;
+    private final map.service.user.moderation.ChatModerationGuard moderation;
 
     public ChatMessageService(ChatMessageRepository messageRepository,
                               ChatParticipantRepository participantRepository,
                               ChatProperties chatProperties,
-                              ChatRoomAccessService access) {
+                              ChatRoomAccessService access,
+                              map.service.user.moderation.ChatModerationGuard moderation) {
         this.messageRepository = messageRepository;
         this.participantRepository = participantRepository;
         this.chatProperties = chatProperties;
         this.access = access;
+        this.moderation = moderation;
     }
 
     /**
@@ -62,12 +65,13 @@ public class ChatMessageService {
         ChatRoom room = access.requireRoomForUpdate(roomId);
         access.requireActiveParticipant(roomId, userId);
         access.assertSendable(room);
+        moderation.assertCanSend(userId, content);
 
         long seq = room.allocateNextSeq();
         ChatMessage message = messageRepository.save(ChatMessage.text(roomId, seq, userId, content));
         participantRepository.advanceReadPointer(roomId, userId, seq);
 
-        long unread = Math.max(0L, access.activeCount(roomId) - 1L);
+        long unread = Math.max(0L, participantRepository.findVisibleReadPointers(roomId, userId, ChatParticipant.Status.ACTIVE).size() - 1L);
         return toResponse(message, unread, clientMsgId);
     }
 
@@ -91,7 +95,7 @@ public class ChatMessageService {
                 beforeSeq == null ? Long.MAX_VALUE : beforeSeq, page);
 
         List<Long> pointers =
-                participantRepository.findReadPointers(roomId, ChatParticipant.Status.ACTIVE);
+                participantRepository.findVisibleReadPointers(roomId, userId, ChatParticipant.Status.ACTIVE);
         Collections.sort(pointers);
 
         List<MessageResponse> items = new ArrayList<>(messages.size());
@@ -197,7 +201,7 @@ public class ChatMessageService {
                 message.getSeq(),
                 message.getSenderId(),
                 message.getType().name(),
-                message.getContent(),
+                moderation.visibleText(message.getContent()),
                 message.getSystemPayload(),
                 message.getCreatedAt(),
                 unreadCount,

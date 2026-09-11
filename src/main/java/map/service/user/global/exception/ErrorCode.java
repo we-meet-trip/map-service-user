@@ -26,8 +26,13 @@ public enum ErrorCode {
     KAKAO_USER_INFO_FAILED(HttpStatus.BAD_GATEWAY, "KAKAO_002", "카카오 사용자 정보 조회에 실패했습니다."),
     KAKAO_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "KAKAO_003", "카카오 로그인이 아직 열리지 않았습니다."),
 
+    KAKAO_ACCOUNT_CONFLICT(HttpStatus.CONFLICT, "KAKAO_004", "계정 정보를 자동으로 연결할 수 없습니다. 기존 로그인 방법을 이용하거나 다시 시도해주세요."),
+    KAKAO_CALLBACK_INVALID(HttpStatus.BAD_REQUEST, "KAKAO_005", "카카오 로그인 요청을 다시 시작해주세요."),
+
     // Rate Limit
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "RATE_001", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    REVIEW_SUMMARY_CONFLICT(HttpStatus.CONFLICT, "REVIEW_SUMMARY_CONFLICT", "요약 생성이 진행 중이거나 요청 식별자가 이미 사용되었습니다."),
+    REVIEW_SUMMARY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "REVIEW_SUMMARY_UNAVAILABLE", "요약 생성을 안전하게 요청할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // Recommend
     RESEARCH_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "RECOMMEND_001", "재추천 한도(일 3회)를 초과했습니다. KST 자정 이후 다시 시도해주세요."),
@@ -49,6 +54,26 @@ public enum ErrorCode {
     CHAT_INVITE_REVOKED(HttpStatus.GONE, "CHAT_009", "만료되었거나 폐기된 초대 링크입니다."),
     CHAT_KICKED(HttpStatus.FORBIDDEN, "CHAT_010", "내보내진 채팅방에는 다시 참가할 수 없습니다."),
     CHAT_MESSAGE_INVALID(HttpStatus.BAD_REQUEST, "CHAT_011", "메시지 내용이 비어 있거나 허용 길이를 초과했습니다."),
+    CHAT_CONTENT_REJECTED(HttpStatus.BAD_REQUEST, "CHAT_012", "운영 정책에 위반되는 메시지는 보낼 수 없습니다."),
+    CHAT_RESTRICTED(HttpStatus.FORBIDDEN, "CHAT_013", "운영 정책에 따라 채팅 전송이 일시 제한되었습니다."),
+    MODERATION_INVALID(HttpStatus.BAD_REQUEST, "MODERATION_001", "신고 또는 차단 요청을 확인해주세요."),
+    MODERATION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODERATION_002", "대상을 찾을 수 없거나 접근할 수 없습니다."),
+    MODERATION_CONFLICT(HttpStatus.CONFLICT, "MODERATION_003", "요청 식별자가 이미 사용되었거나 처리 상태가 변경되었습니다."),
+    MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MODERATION_004", "신고를 안전하게 보관할 수 없습니다. 잠시 후 다시 시도해주세요."),
+
+    // Explicit service policy and adult eligibility. Codes are consumed by the app router.
+    SERVICE_POLICY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_POLICY_UNAVAILABLE", "서비스 이용 권한을 확인할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    SERVICE_POLICY_REQUIRED(HttpStatus.FORBIDDEN, "SERVICE_POLICY_REQUIRED", "서비스 이용 약관과 만 18세 이상 여부를 확인해주세요."),
+    AGE_INFORMATION_REQUIRED(HttpStatus.FORBIDDEN, "AGE_INFORMATION_REQUIRED", "서비스 이용 전에 생년월일을 입력해주세요."),
+    BIRTH_DATE_INVALID(HttpStatus.BAD_REQUEST, "BIRTH_DATE_INVALID", "생년월일은 미래 날짜일 수 없습니다."),
+    AGE_RESTRICTED(HttpStatus.FORBIDDEN, "AGE_RESTRICTED", "MAP은 만 18세 이상만 이용할 수 있습니다."),
+    POLICY_VERSION_MISMATCH(HttpStatus.CONFLICT, "POLICY_VERSION_MISMATCH", "변경된 약관을 다시 확인해주세요."),
+    POLICY_ACCEPTANCE_INVALID(HttpStatus.BAD_REQUEST, "POLICY_ACCEPTANCE_INVALID", "필수 확인 항목에 명시적으로 동의해주세요."),
+
+    AI_CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "AI_CONSENT_REQUIRED", "이 AI 기능의 외부 전송에 동의해주세요."),
+    AI_CONSENT_CHANGED(HttpStatus.FORBIDDEN, "AI_CONSENT_CHANGED", "AI 전송 동의가 변경되었습니다. 새 요청을 시작해주세요."),
+    AI_CONSENT_CONFLICT(HttpStatus.CONFLICT, "AI_CONSENT_CONFLICT", "동의 설정이 변경되었습니다. 최신 상태를 확인해주세요."),
+    AI_CONSENT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI_CONSENT_UNAVAILABLE", "AI 전송 동의를 확인하거나 저장할 수 없습니다. 잠시 후 다시 시도해주세요."),
 
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다.");

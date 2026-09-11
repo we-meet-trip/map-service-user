@@ -30,6 +30,19 @@ public record TransportToNext(
         @JsonProperty("duration_minutes") int durationMinutes,
         @JsonProperty("distance_km") double distanceKm,
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        List<List<Double>> path
+        List<List<Double>> path,
+        String source,
+        @JsonProperty("route_profile") String routeProfile,
+        @JsonProperty("data_version") String dataVersion
 ) {
+    public TransportToNext {
+        source = "OSRM".equals(source) ? "OSRM"
+                : "ESTIMATED".equals(source) ? "ESTIMATED" : "UNKNOWN";
+    }
+
+    /** Legacy constructors describe an estimate; a path alone is not provenance. */
+    public TransportToNext(String type, String label, int durationMinutes,
+            double distanceKm, List<List<Double>> path) {
+        this(type, label, durationMinutes, distanceKm, path, "ESTIMATED", null, null);
+    }
 }

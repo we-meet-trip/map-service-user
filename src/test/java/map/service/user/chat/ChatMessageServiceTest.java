@@ -53,7 +53,7 @@ class ChatMessageServiceTest {
     @BeforeEach
     void setUp() {
         ChatRoomAccessService access = new ChatRoomAccessService(roomRepository, participantRepository, intervals);
-        messageService = new ChatMessageService(messageRepository, participantRepository, props, access);
+        messageService = new ChatMessageService(messageRepository, participantRepository, props, access, ModerationTestSupport.guard(messageRepository));
     }
 
     private void flushAndClear() {

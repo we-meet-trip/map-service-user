@@ -78,12 +78,12 @@ class ChatServiceTest {
     void setUp() {
         access = new ChatRoomAccessService(roomRepository, participantRepository, intervals);
         roomService = new ChatRoomService(roomRepository, participantRepository, messageRepository,
-                scheduleRepository, props, access);
+                scheduleRepository, props, access, ModerationTestSupport.guard(messageRepository));
         inviteService = new ChatInviteService(roomRepository, participantRepository, tokenFactory,
                 props, access);
         // presence 는 leave/kick 테스트와 무관하므로 목으로 대체한다.
         participantService = new ChatParticipantService(participantRepository, access,
-                org.mockito.Mockito.mock(ChatPresenceService.class), userRepository);
+                org.mockito.Mockito.mock(ChatPresenceService.class), userRepository, ModerationTestSupport.guard(messageRepository));
     }
 
     /** 소유자·종료일을 지정해 일정을 저장하고 schedule_id 를 반환한다. */

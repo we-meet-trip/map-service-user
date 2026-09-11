@@ -90,8 +90,7 @@ public class ChatStompController {
     @SendToUser(destinations = "/queue/errors", broadcast = false)
     public ChatErrorEvent handleUnexpected(Exception e, Message<?> message) {
         String destination = destinationOf(message);
-        log.error("chat stomp handler failed destination={} reason={}",
-                destination, e.toString(), e);
+        log.error("chat stomp handler failed cause={}", e.getClass().getSimpleName());
         ErrorCode code = ErrorCode.INTERNAL_SERVER_ERROR;
         return new ChatErrorEvent(
                 code.getCode(),

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -95,6 +96,33 @@ class ReviewSummaryServiceTest {
         verify(reviewClient, never())
                 .search(anyString(), any(), any(), any());
         verify(summaryClient, never()).summarize(anyString(), any());
+    }
+
+    @Test
+    void cachedReadReturnsStoredSummaryWithoutProvider() {
+        when(ops.get(anyString())).thenReturn("2" + JOIN + "first" + JOIN + "second");
+        ReviewSummaryResponse response = service.cachedSummary("fixture");
+        assertThat(response.bullets()).containsExactly("first", "second");
+        assertThat(response.sourceCount()).isEqualTo(2);
+        verifyNoInteractions(reviewClient, summaryClient);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"legacy", "-1\u001Fwrong", "0\u001Fwrong", "8\u001Fwrong", "2\u001F "})
+    void cachedReadMissOrCorruptEntryNeverCreates(String raw) {
+        when(ops.get(anyString())).thenReturn(raw);
+        ReviewSummaryResponse response = service.cachedSummary("fixture");
+        assertThat(response.bullets()).isEmpty();
+        assertThat(response.sourceCount()).isZero();
+        verifyNoInteractions(reviewClient, summaryClient);
+    }
+
+    @Test
+    void cachedReadOutageNeverCreates() {
+        when(ops.get(anyString())).thenThrow(new IllegalStateException("synthetic cache outage"));
+        assertThat(service.cachedSummary("fixture").bullets()).isEmpty();
+        verifyNoInteractions(reviewClient, summaryClient);
     }
 
     @Test

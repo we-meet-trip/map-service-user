@@ -3,7 +3,11 @@ package map.service.user.places;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -15,11 +19,14 @@ import map.service.user.places.dto.ReviewSearchResponse;
 import map.service.user.places.dto.ReviewSummaryResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
  * ReviewSearchControllerTest — 리뷰 검색 엔드포인트 단위 테스트 (MockMvc)
@@ -35,10 +42,14 @@ class ReviewSearchControllerTest {
 
     @MockitoBean private ReviewSearchClient client;
     @MockitoBean private ReviewSummaryService summaryService;
+    @MockitoBean private ReviewSummaryGenerationService generationService;
     // @WebMvcTest 는 서블릿 Filter 빈(JWT/RateLimit)을 컨텍스트에 포함하므로,
     // 실제 의존성(JwtService/RateLimitService) 없이 로드되도록 필터를 모킹한다.
     @MockitoBean private JwtAuthenticationFilter jwtAuthenticationFilter;
     @MockitoBean private RateLimitFilter rateLimitFilter;
+
+    @AfterEach
+    void clearSecurityContext() { SecurityContextHolder.clearContext(); }
 
     @Test
     @DisplayName("정상 조회 — 200 OK 및 리뷰 본문 반환")
@@ -74,7 +85,7 @@ class ReviewSearchControllerTest {
     @Test
     @DisplayName("요약 조회 — 200 OK 및 두 줄·근거 수 반환")
     void summary_valid_returns200() throws Exception {
-        when(summaryService.summarize(eq("속초해변")))
+        when(summaryService.cachedSummary(eq("속초해변")))
                 .thenReturn(new ReviewSummaryResponse(
                         "속초해변", List.of("첫 줄", "둘째 줄"), 7));
 
@@ -84,12 +95,14 @@ class ReviewSearchControllerTest {
                 .andExpect(jsonPath("$.bullets[0]").value("첫 줄"))
                 .andExpect(jsonPath("$.bullets[1]").value("둘째 줄"))
                 .andExpect(jsonPath("$.sourceCount").value(7));
+        verify(summaryService, never()).summarize(any());
+        verifyNoInteractions(generationService);
     }
 
     @Test
     @DisplayName("요약 조회 — 근거가 없으면 빈 목록(오류가 아님)")
     void summary_noSources_returnsEmpty() throws Exception {
-        when(summaryService.summarize(eq("무명장소")))
+        when(summaryService.cachedSummary(eq("무명장소")))
                 .thenReturn(new ReviewSummaryResponse("무명장소", List.of(), 0));
 
         mockMvc.perform(get("/api/v1/reviews/summary").param("query", "무명장소"))
@@ -111,5 +124,34 @@ class ReviewSearchControllerTest {
         mockMvc.perform(get("/api/v1/reviews/summary")
                         .param("query", "가".repeat(61)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void explicitPostUsesAuthenticatedUserAndReturnsSummary() throws Exception {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(7L, null, List.of()));
+        when(generationService.generate(eq(7L), any()))
+                .thenReturn(new ReviewSummaryResponse("fixture", List.of("summary"), 1));
+        mockMvc.perform(post("/api/v1/reviews/summary").contentType("application/json")
+                        .content("{\"query\":\"fixture\",\"consent\":true,"
+                                + "\"client_request_id\":\"22222222-2222-2222-2222-222222222222\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bullets[0]").value("summary"));
+        verify(generationService).generate(eq(7L), any());
+        verifyNoInteractions(summaryService, client);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{\"query\":\"fixture\",\"client_request_id\":\"22222222-2222-2222-2222-222222222222\"}",
+            "{\"query\":\"fixture\",\"consent\":false,\"client_request_id\":\"22222222-2222-2222-2222-222222222222\"}",
+            "{\"query\":\"fixture\",\"consent\":true}",
+            "{\"query\":\"fixture\",\"consent\":true,\"client_request_id\":\"not-a-uuid\"}",
+            "{\"query\":\" \",\"consent\":true,\"client_request_id\":\"22222222-2222-2222-2222-222222222222\"}"
+    })
+    void postRejectsImplicitConsentOrInvalidRequest(String body) throws Exception {
+        mockMvc.perform(post("/api/v1/reviews/summary").contentType("application/json").content(body))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(generationService, summaryService, client);
     }
 }

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -79,6 +80,9 @@ class RecommendServiceTest {
         researchLimitService = mock(ResearchLimitService.class);
         jobStore = mock(RecommendJobStore.class);
         reuseCacheStore = mock(ReuseCacheStore.class);
+        when(reuseCacheStore.waitingTtl()).thenReturn(java.time.Duration.ofSeconds(600));
+        when(jobStore.finishWaiting(anyString(), nullable(String.class), anyString(), anyString(), anyString()))
+                .thenAnswer(call -> Optional.of(call.getArgument(3)));
         profileThemeProvider = mock(ProfileThemeProvider.class);
         // 기본은 "저장된 취향 없음". 이 상태에서 기존 테스트들이 전부
         // 도입 전과 같은 경로를 타야 한다 — 그게 회귀 방어선이다.
@@ -86,12 +90,12 @@ class RecommendServiceTest {
         service = new RecommendService(
                 agentClient, draftStore, objectMapper, researchLimitService, jobStore,
                 reuseCacheStore, cacheKeyBuilder, profileThemeProvider,
-                immediateExecutor, 3L, mock(map.service.user.schedule.ScheduleRepository.class));
+                immediateExecutor, 3L, mock(map.service.user.schedule.ScheduleRepository.class), mock(map.service.user.policy.AiConsentService.class));
         when(agentClient.requestRecommend(any()))
                 .thenReturn(new JobAccepted("job-2", "in_progress", 3));
         // 기본은 "이 요청이 만드는 쪽". 같은 조건이 겹치는 상황은 개별
         // 테스트에서 false 로 바꿔 확인한다.
-        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(true);
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenAnswer(call -> call.getArgument(1));
         // 기본은 한도 이내(허용). 한도 초과 시나리오는 개별 테스트에서 재정의한다.
         when(researchLimitService.tryConsume(anyString())).thenReturn(true);
 
@@ -769,7 +773,7 @@ class RecommendServiceTest {
     void 겹치는_요청은_agent_를_부르지_않는다() {
         // 한 건이 LLM 을 두 번 쓴다. 같은 조건 열 건이 동시에 들어오면
         // 스무 번이 나가는데, 하루 한도가 정해진 자원이라 그 낭비가 크다.
-        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenReturn("existing-generation");
 
         RecommendService.RecommendationResult result =
                 service.createRecommendationDetailed(request("init", List.of()), null);
@@ -783,7 +787,7 @@ class RecommendServiceTest {
     void 붙는_쪽도_자기_job_id_를_갖는다() {
         // 앞선 요청의 job 을 그대로 주면, 한 사람이 고친 것이 다른 사람 결과를
         // 바꾼다. 초안은 고칠 수 있는 값이므로 반드시 따로 가져가야 한다.
-        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenReturn("existing-generation");
 
         RecommendService.RecommendationResult first =
                 service.createRecommendationDetailed(request("init", List.of()), null);
@@ -802,7 +806,7 @@ class RecommendServiceTest {
         // 해시를 만든다. 그 상태로 묶으면 뒤에 온 사람이 앞사람 취향이 반영된
         // 결과를 받는다.
         when(profileThemeProvider.themesFor(any())).thenReturn(List.of("맛집"));
-        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenReturn("existing-generation");
 
         service.createRecommendationDetailed(request("init", List.of()), 42L);
 
@@ -812,7 +816,7 @@ class RecommendServiceTest {
     @Test
     @DisplayName("앞선 요청이 끝나면 붙어 있던 job 도 그 결과로 답한다")
     void 붙어있던_job_이_결과를_받는다() {
-        when(reuseCacheStore.tryBecomeProducer(anyString())).thenReturn(false);
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenReturn("existing-generation");
         RecommendService.RecommendationResult joined =
                 service.createRecommendationDetailed(request("init", List.of()), null);
         String jobId = joined.accepted().jobId();
@@ -831,4 +835,69 @@ class RecommendServiceTest {
         assertThat(readJobId(resolved.get())).isEqualTo(jobId);
         verify(reuseCacheStore).clearWaiting(jobId);
     }
+    @Test
+    void legacyFailedPayloadCannotExposeProviderText() throws Exception {
+        when(jobStore.findFinishedPayload("job-2")).thenReturn(Optional.of(
+                "{\"job_id\":\"job-2\",\"status\":\"failed\",\"error\":\"private-provider-token\",\"extra\":\"private-body\"}"));
+        String payload = service.findDraft("job-2").orElseThrow();
+        assertThat(payload).doesNotContain("private-");
+        assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("generation_failed");
+        assertThat(objectMapper.readTree(payload).path("retryable").asBoolean()).isFalse();
+    }
+
+    @Test
+    void followerReceivesOnlyItsGenerationFailure() throws Exception {
+        when(reuseCacheStore.waitingHash("waiter")).thenReturn(Optional.of("v1:generation-one"));
+        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of(new ReuseCacheStore.Completion("producer-one",
+                "{\"job_id\":\"producer-one\",\"status\":\"failed\",\"code\":\"no_matching_places\",\"retryable\":false}")));
+        String payload = service.findDraft("waiter").orElseThrow();
+        assertThat(objectMapper.readTree(payload).path("job_id").asText()).isEqualTo("waiter");
+        assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("no_matching_places");
+        verify(jobStore).finishWaiting(eq("waiter"), eq("producer-one"), eq("failed"), anyString(), anyString());
+        verify(reuseCacheStore, never()).find(anyString());
+        verify(reuseCacheStore).clearWaiting("waiter");
+    }
+
+    @Test
+    void followerDoesNotConsumeAnOlderGenerationCache() {
+        when(reuseCacheStore.waitingHash("waiter")).thenReturn(Optional.of("v1:new-generation"));
+        when(reuseCacheStore.completion("new-generation")).thenReturn(Optional.empty());
+        assertThat(service.findDraft("waiter")).isEmpty();
+        verify(reuseCacheStore, never()).find(anyString());
+    }
+
+    @Test
+    void agentSubmissionFailureReleasesOnlyOwnedGeneration() {
+        when(agentClient.requestRecommend(any())).thenThrow(new IllegalStateException("private-url"));
+        assertThatThrownBy(() -> service.createRecommendationDetailed(cacheRequest, null)).isInstanceOf(IllegalStateException.class);
+        verify(reuseCacheStore).failProducer(anyString(), anyString());
+    }
+
+    @Test
+    void cancelledProducerCannotExposeItsDeletedResultToFollower() throws Exception {
+        when(reuseCacheStore.waitingHash("waiter")).thenReturn(Optional.of("v1:generation-one"));
+        when(reuseCacheStore.completion("generation-one")).thenReturn(Optional.of(new ReuseCacheStore.Completion("cancelled-job", "{\"status\":\"done\",\"places\":[]}")));
+        when(jobStore.isCancelled("cancelled-job")).thenReturn(true);
+        String payload = service.findDraft("waiter").orElseThrow();
+        assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("generation_failed");
+        verify(jobStore, never()).findFinishedPayload("cancelled-job");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"null", "[]", "invalid-json"})
+    void malformedResultIsSafeTerminalFailure(String raw) throws Exception {
+        when(jobStore.findFinishedPayload("job-2")).thenReturn(Optional.of(raw));
+        String payload = service.findDraft("job-2").orElseThrow();
+        assertThat(objectMapper.readTree(payload).path("status").asText()).isEqualTo("failed");
+        assertThat(objectMapper.readTree(payload).path("code").asText()).isEqualTo("generation_failed");
+    }
+
+    @Test
+    void legacyInflightMarkerUsesLegacySuccessLookup() {
+        when(reuseCacheStore.claimProducer(anyString(), anyString())).thenReturn("1");
+        service.createRecommendationDetailed(cacheRequest, null);
+        verify(reuseCacheStore).markLegacyWaiting(anyString(), anyString());
+        verify(reuseCacheStore, never()).markWaiting(anyString(), anyString());
+    }
+
 }

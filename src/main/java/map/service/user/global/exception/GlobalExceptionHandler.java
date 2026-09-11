@@ -289,8 +289,10 @@ public class GlobalExceptionHandler {
         // The ordinary exception may contain a worker's raw error. Only this local,
         // fixed timeline diagnosis is suitable for displaying directly.
         body.put("message", ex instanceof map.service.user.trip.TripTimelineException
-                ? ex.getMessage() : "추천을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+                ? ex.getMessage() : ex.failure().message());
+        body.put("code", ex instanceof map.service.user.trip.TripTimelineException ? "timeline_changed" : ex.failure().code());
+        body.put("retryable", ex.failure().retryable());
+        return ResponseEntity.status(ex.failure().httpStatus()).body(body);
     }
 
     /**
@@ -302,7 +304,10 @@ public class GlobalExceptionHandler {
         log.warn("trip generation timeout: {}", ex.getMessage());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", "trip_generation_timeout");
-        body.put("message", "추천 생성이 시간 내에 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        // The worker may still be running; this is not a terminal failure to resubmit.
+        body.put("code", "recommendation_pending");
+        body.put("retryable", false);
+        body.put("message", "추천 결과를 기다리는 시간이 초과되었습니다. 생성 상태를 확인해 주세요.");
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(body);
     }
 
@@ -410,7 +415,7 @@ public class GlobalExceptionHandler {
     /** 위에서 처리되지 않은 모든 예외를 500 으로 변환한다. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception e) {
-        log.error("Unexpected error", e);
+        log.error("Unexpected error cause={}", e.getClass().getSimpleName());
         return ResponseEntity
                 .status(500)
                 .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR));

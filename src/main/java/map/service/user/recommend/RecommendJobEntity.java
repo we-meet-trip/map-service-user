@@ -110,6 +110,29 @@ public class RecommendJobEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode userSegment;
 
+    @Column(name = "worker_completion_hash", length = 64)
+    private String workerCompletionHash;
+
+    public String getWorkerCompletionHash() { return workerCompletionHash; }
+    public void setWorkerCompletionHash(String hash) { this.workerCompletionHash = hash; }
+
+    @Column(name = "waiting_key", length = 128)
+    private String waitingKey;
+
+    @Column(name = "waiting_expires_at")
+    private OffsetDateTime waitingExpiresAt;
+
+    public void fillParentIfAbsent(UUID parent) {
+        if (this.parentJobId == null) this.parentJobId = parent;
+    }
+
+    public String getWaitingKey() { return waitingKey; }
+    public OffsetDateTime getWaitingExpiresAt() { return waitingExpiresAt; }
+    public void setWaiting(String key, OffsetDateTime expiresAt) {
+        this.waitingKey = key;
+        this.waitingExpiresAt = expiresAt;
+    }
+
     /**
      * JPA 요구사항을 위한 보호 수준 기본 생성자.
      */

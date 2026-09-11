@@ -28,15 +28,17 @@ public class ChatParticipantService {
     private final ChatRoomAccessService access;
     private final ChatPresenceService presenceService;
     private final UserRepository userRepository;
+    private final map.service.user.moderation.ChatModerationGuard moderation;
 
     public ChatParticipantService(ChatParticipantRepository participantRepository,
                                   ChatRoomAccessService access,
                                   ChatPresenceService presenceService,
-                                  UserRepository userRepository) {
+                                  UserRepository userRepository, map.service.user.moderation.ChatModerationGuard moderation) {
         this.participantRepository = participantRepository;
         this.access = access;
         this.presenceService = presenceService;
         this.userRepository = userRepository;
+        this.moderation = moderation;
     }
 
     /** 방의 현재 온라인 사용자 식별자 목록. 호출자는 ACTIVE 참가자여야 한다. */
@@ -44,7 +46,7 @@ public class ChatParticipantService {
     public List<Long> listOnline(Long roomId, Long userId) {
         access.requireRoom(roomId);
         access.requireActiveParticipant(roomId, userId);
-        return presenceService.onlineUserIds(roomId);
+        return presenceService.onlineUserIds(roomId).stream().filter(actor -> !moderation.blocked(userId, actor)).toList();
     }
 
     /**
@@ -69,7 +71,7 @@ public class ChatParticipantService {
                         nicknames.get(participant.getUserId()),
                         participant.getRole().name(),
                         participant.getStatus().name(),
-                        participant.getLastReadMessageSeq(),
+                        moderation.blocked(userId, participant.getUserId()) ? 0L : participant.getLastReadMessageSeq(),
                         participant.getJoinedAt()))
                 .toList();
     }

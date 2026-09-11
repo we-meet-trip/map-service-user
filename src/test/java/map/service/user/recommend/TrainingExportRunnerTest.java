@@ -47,9 +47,9 @@ class TrainingExportRunnerTest {
     private TrainingExportRunner runner(TrainingExportService service, Path dir,
                                         boolean enabled, String salt) {
         // 문맥을 주지 않는다 — 주면 뽑고 나서 이 시험 프로세스를 내려 버린다.
-        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(), null, enabled, salt,
+        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(), enabled, salt,
                 true, "admin.map,test.com", dir.toString());
-        org.springframework.test.util.ReflectionTestUtils.setField(runner, "trainingCaptureEnabled", true);
+        org.springframework.test.util.ReflectionTestUtils.setField(runner, "exportApproved", true);
         return runner;
     }
 
@@ -66,13 +66,13 @@ class TrainingExportRunnerTest {
     }
 
     private Stream<Path> files(Path dir) throws IOException {
-        return Files.exists(dir) ? Files.list(dir) : Stream.empty();
+        return Files.exists(dir) ? Files.list(dir).filter(p -> p.toString().endsWith(".jsonl")) : Stream.empty();
     }
 
     @Test
     void captureHoldBlocksExportEvenWhenExportFlagIsEnabled(@TempDir Path dir) throws IOException {
         TrainingExportService service = service(List.of(row(1L, "u_a")));
-        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(), null,
+        TrainingExportRunner runner = new TrainingExportRunner(service, new ObjectMapper(),
                 true, SALT, true, "test.com", dir.toString());
         runner.run(new DefaultApplicationArguments());
         verify(service, never()).export(anyBoolean(), any(), anyString());
@@ -142,5 +142,37 @@ class TrainingExportRunnerTest {
         assertThat(name).startsWith("sessions-")
                 .endsWith(TrainingExportService.sha256Hex(SALT).substring(0, 8) + ".jsonl")
                 .doesNotContain(SALT);
+    }
+
+    @Test
+    void byteBudgetFailureNeverPublishesManifest(@TempDir Path dir) throws IOException {
+        var runner = runner(service(List.of(row(1L, "u_synthetic"))), dir, true, SALT);
+        org.springframework.test.util.ReflectionTestUtils.setField(runner, "maxBytes", 1L);
+        runner.run(new DefaultApplicationArguments());
+        assertThat(runner.getExitCode()).isEqualTo(1);
+        assertThat(Files.list(dir)).noneMatch(p -> p.toString().endsWith(".manifest.json"));
+    }
+
+    @Test
+    void parallelExportIsRejectedBeforeReadingSource(@TempDir Path dir) throws IOException {
+        TrainingExportService service = service(List.of(row(1L, "u_synthetic")));
+        try (var channel = java.nio.channels.FileChannel.open(dir.resolve(".export.lock"),
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
+             var lock = channel.lock()) {
+            var runner = runner(service, dir, true, SALT);
+            runner.run(new DefaultApplicationArguments());
+            assertThat(runner.getExitCode()).isEqualTo(1);
+            verify(service, never()).export(anyBoolean(), any(), anyString());
+        }
+    }
+
+    @Test
+    void publicDirectoryIsRejectedBeforeReadingSource(@TempDir Path dir) throws IOException {
+        Files.setPosixFilePermissions(dir, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        TrainingExportService service = service(List.of(row(1L, "u_synthetic")));
+        var runner = runner(service, dir, true, SALT);
+        runner.run(new DefaultApplicationArguments());
+        assertThat(runner.getExitCode()).isEqualTo(1);
+        verify(service, never()).export(anyBoolean(), any(), anyString());
     }
 }
