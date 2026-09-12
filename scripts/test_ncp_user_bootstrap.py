@@ -3,6 +3,10 @@
 import importlib.util
 import io
 import json
+import stat
+import subprocess
+import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
@@ -47,6 +51,36 @@ class ControllerBoundaryTest(unittest.TestCase):
             with self.assertRaisesRegex(bootstrap.BootstrapError, 'standalone_checkout_required'):
                 bootstrap.checkout(Path('/tmp/worktree'), 'a' * 40)
             command.assert_not_called()
+
+    def test_checkout_validates_actual_git_filenames_without_quoting_or_whitespace_loss(self):
+        names = [' leading space.md', '한글 템플릿.md', 'tab\tname.md', 'line\nbreak.md', 'carriage\rreturn.md', 'quote"name.md']
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True, capture_output=True)
+            for name in names:
+                (repository / name).write_text('fixture\n')
+            subprocess.run(['git', '-C', directory, 'add', '--', *names], check=True, capture_output=True)
+            original = bootstrap.command
+
+            def git_command(args, **kwargs):
+                if args[-1] == '--show-toplevel':
+                    return '/opt/map-service-user'
+                if args[-1] == 'HEAD':
+                    return 'a' * 40
+                if 'status' in args:
+                    return ''
+                return original(args, cwd=repository, **{k: v for k, v in kwargs.items() if k != 'cwd'})
+
+            with patch.object(bootstrap, 'command', side_effect=git_command), \
+                 patch.object(Path, 'is_dir', return_value=True), \
+                 patch.object(Path, 'is_symlink', return_value=False), \
+                 patch.object(Path, 'exists', return_value=False), \
+                 patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)), \
+                 patch.object(bootstrap.os, 'walk', return_value=[]), \
+                 patch.object(bootstrap, 'secure_path') as secure:
+                bootstrap.checkout(Path('/opt/map-service-user'), 'a' * 40)
+            self.assertEqual({call.args[0] for call in secure.call_args_list},
+                             {Path('/opt/map-service-user') / name for name in names})
 
     def test_bootstrap_main_has_inner_deadline_strict_environment_and_no_secret_arguments(self):
         args = bootstrap.bootstrap_command()

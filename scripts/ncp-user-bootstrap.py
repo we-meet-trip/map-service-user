@@ -70,11 +70,11 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
-def command(args, *, payload=None, timeout=30, cwd=ROOT):
+def command(args, *, payload=None, timeout=30, cwd=ROOT, raw=False):
     # Child output may contain SQL/credentials. Never include it in errors/evidence.
     try:
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=ENV, cwd=cwd,
+                                stderr=subprocess.PIPE, text=not raw, env=ENV, cwd=cwd,
                                 start_new_session=True)
         try:
             stdout, stderr = proc.communicate(payload, timeout=timeout)
@@ -88,7 +88,7 @@ def command(args, *, payload=None, timeout=30, cwd=ROOT):
     except (OSError, subprocess.TimeoutExpired):
         raise BootstrapError('bootstrap_command_unavailable') from None
     require(proc.returncode == 0, 'bootstrap_command_failed')
-    return stdout.strip()
+    return os.fsdecode(stdout) if raw else stdout.strip()
 
 
 def checkout(path, expected):
@@ -114,7 +114,7 @@ def checkout(path, expected):
             and command(git + ['rev-parse', 'HEAD'], cwd=path) == expected
             and not command(git + ['status', '--porcelain', '--untracked-files=no'], cwd=path),
             'source_checkout_mismatch')
-    for name in command(git + ['ls-files'], cwd=path).splitlines():
+    for name in command(git + ['ls-files', '-z'], cwd=path, raw=True).removesuffix('\0').split('\0'):
         secure_path(path / name)
 
 
