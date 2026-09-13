@@ -223,4 +223,21 @@ class RecommendJobsConsumerTest {
         verify(operations, never()).delete("agent:jobs:done:dlq", live.getId());
     }
 
+    @Test
+    void expiredDlqIsDeletedEvenWhenCancellationDatabaseIsUnavailable() {
+        long now = System.currentTimeMillis();
+        var old = record("expired", "{}").withId(RecordId.of((now - Duration.ofDays(2).toMillis()) + "-1"));
+        var fresh = record("fresh", "{}").withId(RecordId.of(now + "-1"));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done"), any())).thenReturn(List.of(fresh));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done:dlq"), any())).thenReturn(List.of(old, fresh));
+        when(jobStore.cancelledAmong(any())).thenThrow(new IllegalStateException("database unavailable"));
+
+        consumer.eraseExpiredPayloads();
+
+        verify(operations).delete("agent:jobs:done:dlq", old.getId());
+        verify(operations, never()).delete("agent:jobs:done:dlq", fresh.getId());
+        verify(streams, never()).execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.script.RedisScript<Long>>any(),
+                org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.<Object[]>any());
+    }
+
 }

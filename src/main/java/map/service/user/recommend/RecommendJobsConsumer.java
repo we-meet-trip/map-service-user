@@ -322,11 +322,19 @@ public class RecommendJobsConsumer
                 // Both streams are already bounded by MAXLEN (~2000); no keyspace scan.
                 var records = streamsTemplate.<String, String>opsForStream().range(key, Range.unbounded());
                 if (records == null || records.isEmpty()) continue;
+                if (key.equals(dlqStream)) {
+                    // Time-based expiry must not depend on PostgreSQL availability.
+                    for (var record : records) {
+                        if (record.getId().getTimestamp() <= cutoff)
+                            streamsTemplate.opsForStream().delete(key, record.getId());
+                    }
+                    records = records.stream().filter(record -> record.getId().getTimestamp() > cutoff).toList();
+                    if (records.isEmpty()) continue;
+                }
                 var cancelled = jobStore.cancelledAmong(records.stream()
                         .map(record -> record.getValue().get("job_id")).toList());
                 for (var record : records) {
-                    boolean expired = key.equals(dlqStream) && record.getId().getTimestamp() < cutoff;
-                    if (expired || cancelled.contains(record.getValue().get("job_id"))) {
+                    if (cancelled.contains(record.getValue().get("job_id"))) {
                         if (key.equals(stream)) ack(record.getId().getValue());
                         else streamsTemplate.opsForStream().delete(key, record.getId());
                     }
