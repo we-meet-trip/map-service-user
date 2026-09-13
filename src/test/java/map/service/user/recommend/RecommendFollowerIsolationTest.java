@@ -211,6 +211,8 @@ class RecommendFollowerIsolationTest {
         String[] ids = pair();
         complete(ids[0], payload(ids[0], "삭제 대상 원본"));
         cancellations.saveAndFlush(new RecommendCancellation(UUID.fromString(ids[0])));
+        assertThat(store.cancelledAmong(java.util.Arrays.asList(ids[0], ids[1], null, "invalid")))
+                .containsExactly(ids[0]);
         cache.cancelProducer(ids[0]);
         complete(ids[0], payload(ids[0], "삭제 대상 원본"));
         assertThat(service.findOwnedDraft(ids[1], 8L).orElseThrow())
