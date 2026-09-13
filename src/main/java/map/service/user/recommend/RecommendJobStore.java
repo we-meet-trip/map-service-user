@@ -411,6 +411,14 @@ public class RecommendJobStore {
         return id != null && cancellations.existsById(id);
     }
 
+    java.util.Set<String> cancelledAmong(java.util.List<String> jobIds) {
+        var ids = jobIds.stream().map(RecommendJobStore::parseUuid)
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return java.util.Set.of();
+        return cancellations.findCancelledIds(ids).stream().map(UUID::toString)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
     @Transactional
     public java.util.List<String> eraseOwnedJobs(Long userId) {
         // Legacy edits can identify an actor on an unowned job. Erase only that actor's copy.

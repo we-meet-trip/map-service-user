@@ -19,6 +19,7 @@ import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.stream.StreamListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -54,6 +55,15 @@ public class RecommendJobsConsumer
         implements StreamListener<String, MapRecord<String, String, String>> {
 
     private static final Logger log = LoggerFactory.getLogger(RecommendJobsConsumer.class);
+    // This result stream has one durable consumer group. Keep unacknowledged
+    // payloads retryable; never leave an ACKed copy behind on process shutdown.
+    static final DefaultRedisScript<Long> ACK_AND_DELETE = new DefaultRedisScript<>("""
+            local groups = redis.call('XINFO', 'GROUPS', KEYS[1])
+            if #groups ~= 1 then return redis.error_reply('single result group required') end
+            redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+            return redis.call('XDEL', KEYS[1], ARGV[2])
+            """, Long.class);
+    static final Duration DLQ_RETENTION = Duration.ofDays(1);
 
     private final DraftStore draftStore;
     private final RecommendJobStore jobStore;
@@ -278,24 +288,60 @@ public class RecommendJobsConsumer
         // 대기열에는 한 겹만 씌운다. 들어온 값이 감싸여 있으면 먼저 열고 저장
         // 암호화로 다시 감싼다. 두 겹으로 두면 되살리는 쪽이 어느 것부터
         // 풀어야 하는지 알 수 없다.
-        routeToDlq(rec, value.get("job_id"),
+        if (jobStore.isCancelled(value.get("job_id"))) {
+            ack(rec.getId().getValue());
+            return;
+        }
+        if (routeToDlq(rec, value.get("job_id"),
                 openIfSealed(value.get("payload"), value.get("job_id")),
                 value.get("status"),
                 value.get("training"), (int) deliveries,
-                "max retries exceeded (" + deliveries + " deliveries)");
-        ack(rec.getId().getValue());
+                "max retries exceeded (" + deliveries + " deliveries)")) {
+            ack(rec.getId().getValue());
+        }
     }
 
     /**
-     * 메시지에 대해 XACK 호출. ack 자체 예외는 경고 로그만 남기고 삼킨다.
+     * 처리 확인과 본문 삭제를 한 번에 수행한다. 실패하면 PEL에서 재처리한다.
      */
     private void ack(String recordId) {
         try {
-            streamsTemplate.opsForStream().acknowledge(
-                    stream, group, RecordId.of(recordId));
+            streamsTemplate.execute(ACK_AND_DELETE, List.of(stream), group, recordId);
         } catch (RuntimeException ackError) {
             log.warn("ack failed stream={} group={} id={} reason={}",
                     stream, group, recordId, ackError.getMessage());
+        }
+    }
+
+    /** Retries erasure after withdrawal and bounds failed-body retention to one day. */
+    @Scheduled(fixedDelayString = "${streams.recommend-erasure-interval-ms:60000}")
+    public void eraseExpiredPayloads() {
+        long cutoff = System.currentTimeMillis() - DLQ_RETENTION.toMillis();
+        for (String key : List.of(stream, dlqStream)) {
+            try {
+                // Both streams are already bounded by MAXLEN (~2000); no keyspace scan.
+                var records = streamsTemplate.<String, String>opsForStream().range(key, Range.unbounded());
+                if (records == null || records.isEmpty()) continue;
+                if (key.equals(dlqStream)) {
+                    // Time-based expiry must not depend on PostgreSQL availability.
+                    for (var record : records) {
+                        if (record.getId().getTimestamp() <= cutoff)
+                            streamsTemplate.opsForStream().delete(key, record.getId());
+                    }
+                    records = records.stream().filter(record -> record.getId().getTimestamp() > cutoff).toList();
+                    if (records.isEmpty()) continue;
+                }
+                var cancelled = jobStore.cancelledAmong(records.stream()
+                        .map(record -> record.getValue().get("job_id")).toList());
+                for (var record : records) {
+                    if (cancelled.contains(record.getValue().get("job_id"))) {
+                        if (key.equals(stream)) ack(record.getId().getValue());
+                        else streamsTemplate.opsForStream().delete(key, record.getId());
+                    }
+                }
+            } catch (RuntimeException error) {
+                log.warn("result erasure deferred stream={} cause={}", key, error.getClass().getSimpleName());
+            }
         }
     }
 
@@ -336,7 +382,7 @@ public class RecommendJobsConsumer
         }
     }
 
-    private void routeToDlq(
+    private boolean routeToDlq(
             MapRecord<String, String, String> message,
             String jobId,
             String payloadJson,
@@ -363,7 +409,7 @@ public class RecommendJobsConsumer
             }
             MapRecord<String, String, String> dlqRecord =
                     StreamRecords.mapBacked(dlqEntry).withStreamKey(dlqStream);
-            streamsTemplate.opsForStream().add(dlqRecord);
+            if (streamsTemplate.opsForStream().add(dlqRecord) == null) return false;
             if (dlqMaxlen > 0) {
                 try {
                     streamsTemplate.opsForStream().trim(dlqStream, dlqMaxlen, true);
@@ -374,9 +420,11 @@ public class RecommendJobsConsumer
             }
             log.warn("routed to dlq stream={} original_id={} job_id={} attempts={}",
                     dlqStream, message.getId().getValue(), jobId, deliveryCount);
+            return true;
         } catch (RuntimeException dlqError) {
             log.error("dlq publish failed original_id={} job_id={} reason={}",
                     message.getId().getValue(), jobId, dlqError.getMessage(), dlqError);
+            return false;
         }
     }
 }

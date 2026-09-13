@@ -11,12 +11,20 @@ import static org.mockito.Mockito.when;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
+import java.util.Set;
+import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamRecords;
+import org.springframework.data.redis.connection.stream.PendingMessage;
+import org.springframework.data.redis.connection.stream.PendingMessages;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.StreamOperations;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class RecommendJobsConsumerTest {
 
@@ -24,6 +32,8 @@ class RecommendJobsConsumerTest {
     private RecommendJobStore jobStore;
     private ReuseCacheStore reuseCacheStore;
     private RecommendJobsConsumer consumer;
+    private StringRedisTemplate streams;
+    private StreamOperations<String, String, String> operations;
 
     @BeforeEach
     void setUp() {
@@ -37,6 +47,10 @@ class RecommendJobsConsumerTest {
                 "agent:jobs:done", "bff-result", "user-1",
                 "agent:jobs:done:dlq", 3, 2000L, 60000L, 64L,
                 TestPayloadCiphers.enabled(), TestLocationSeals.enabled());
+        streams = mock(StringRedisTemplate.class);
+        operations = mock(StreamOperations.class);
+        when(streams.<String, String>opsForStream()).thenReturn(operations);
+        ReflectionTestUtils.setField(consumer, "streamsTemplate", streams);
     }
 
     private MapRecord<String, String, String> record(String jobId, String payload) {
@@ -63,6 +77,7 @@ class RecommendJobsConsumerTest {
 
         verify(reuseCacheStore, never()).consumeLink(any());
         verify(reuseCacheStore, never()).save(any(), any());
+        verify(streams, never()).execute(org.mockito.ArgumentMatchers.eq(RecommendJobsConsumer.ACK_AND_DELETE), org.mockito.ArgumentMatchers.eq(List.of("agent:jobs:done")), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -153,6 +168,76 @@ class RecommendJobsConsumerTest {
         verify(reuseCacheStore).cancelProducer("cancelled-job");
         verify(jobStore, never()).recordWorkerCompletion(any(), any(), any(), any());
         verify(draftStore, never()).save(any(), any());
+        verify(streams).execute(RecommendJobsConsumer.ACK_AND_DELETE, List.of("agent:jobs:done"), "bff-result", "1-1");
+    }
+
+    @Test
+    void completedPayloadIsAcknowledgedAndErasedAfterDurableStorage() {
+        consumer.onMessage(record("job-1", "{\"places\":[]}"));
+        var order = org.mockito.Mockito.inOrder(jobStore, streams);
+        order.verify(jobStore).recordWorkerCompletion("job-1", "done", "{\"places\":[]}", null);
+        order.verify(streams).execute(RecommendJobsConsumer.ACK_AND_DELETE, List.of("agent:jobs:done"), "bff-result", "1-1");
+    }
+
+    private void exhaustedPending() {
+        PendingMessage message = mock(PendingMessage.class);
+        when(message.getId()).thenReturn(RecordId.of("1-1"));
+        when(message.getTotalDeliveryCount()).thenReturn(4L);
+        when(message.getElapsedTimeSinceLastDelivery()).thenReturn(Duration.ofMinutes(2));
+        PendingMessages pending = mock(PendingMessages.class);
+        when(pending.iterator()).thenReturn(List.of(message).iterator());
+        when(operations.pending(org.mockito.ArgumentMatchers.eq("agent:jobs:done"), org.mockito.ArgumentMatchers.eq("bff-result"), org.mockito.ArgumentMatchers.<org.springframework.data.domain.Range<String>>any(), org.mockito.ArgumentMatchers.anyLong())).thenReturn(pending);
+        when(operations.claim("agent:jobs:done", "bff-result", "user-1", Duration.ofMinutes(1), RecordId.of("1-1")))
+                .thenReturn(List.of(record("job-1", "{\"places\":[]}")));
+    }
+
+    @Test
+    void dlqWriteFailureKeepsOriginalPendingPayload() {
+        exhaustedPending();
+        when(operations.add(any(MapRecord.class))).thenThrow(new RuntimeException("unavailable"));
+        consumer.reclaimPending();
+        verify(streams, never()).execute(org.mockito.ArgumentMatchers.eq(RecommendJobsConsumer.ACK_AND_DELETE), org.mockito.ArgumentMatchers.eq(List.of("agent:jobs:done")), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void dlqSuccessfulWriteAllowsOriginalErasure() {
+        exhaustedPending();
+        when(operations.add(any(MapRecord.class))).thenReturn(RecordId.of("2-1"));
+        consumer.reclaimPending();
+        verify(streams).execute(RecommendJobsConsumer.ACK_AND_DELETE, List.of("agent:jobs:done"), "bff-result", "1-1");
+    }
+
+    @Test
+    void erasureRetriesCancelledJobsAndExpiresOnlyOldDlqBodies() {
+        long now = System.currentTimeMillis();
+        var cancelled = record("cancelled", "{}").withId(RecordId.of(now + "-1"));
+        var live = record("live", "{}").withId(RecordId.of(now + "-2"));
+        var old = record("expired", "{}").withId(RecordId.of((now - Duration.ofDays(2).toMillis()) + "-1"));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done"), any())).thenReturn(List.of(cancelled, live));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done:dlq"), any())).thenReturn(List.of(cancelled, live, old));
+        when(jobStore.cancelledAmong(any())).thenReturn(Set.of("cancelled"));
+        consumer.eraseExpiredPayloads();
+        verify(streams).execute(RecommendJobsConsumer.ACK_AND_DELETE, List.of("agent:jobs:done"), "bff-result", cancelled.getId().getValue());
+        verify(operations).delete("agent:jobs:done:dlq", cancelled.getId());
+        verify(operations).delete("agent:jobs:done:dlq", old.getId());
+        verify(operations, never()).delete("agent:jobs:done:dlq", live.getId());
+    }
+
+    @Test
+    void expiredDlqIsDeletedEvenWhenCancellationDatabaseIsUnavailable() {
+        long now = System.currentTimeMillis();
+        var old = record("expired", "{}").withId(RecordId.of((now - Duration.ofDays(2).toMillis()) + "-1"));
+        var fresh = record("fresh", "{}").withId(RecordId.of(now + "-1"));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done"), any())).thenReturn(List.of(fresh));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done:dlq"), any())).thenReturn(List.of(old, fresh));
+        when(jobStore.cancelledAmong(any())).thenThrow(new IllegalStateException("database unavailable"));
+
+        consumer.eraseExpiredPayloads();
+
+        verify(operations).delete("agent:jobs:done:dlq", old.getId());
+        verify(operations, never()).delete("agent:jobs:done:dlq", fresh.getId());
+        verify(streams, never()).execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.script.RedisScript<Long>>any(),
+                org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.<Object[]>any());
     }
 
 }
