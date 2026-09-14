@@ -334,7 +334,10 @@ public class RecommendJobsConsumer
                 var cancelled = jobStore.cancelledAmong(records.stream()
                         .map(record -> record.getValue().get("job_id")).toList());
                 for (var record : records) {
-                    if (cancelled.contains(record.getValue().get("job_id"))) {
+                    // 그룹 생성용 자리표시 레코드에는 job_id 가 없다. 취소 목록이 비어 있는
+                    // 구현에서는 null 조회 자체가 예외이므로 먼저 걸러 낸다.
+                    String jobId = record.getValue().get("job_id");
+                    if (jobId != null && cancelled.contains(jobId)) {
                         if (key.equals(stream)) ack(record.getId().getValue());
                         else streamsTemplate.opsForStream().delete(key, record.getId());
                     }
