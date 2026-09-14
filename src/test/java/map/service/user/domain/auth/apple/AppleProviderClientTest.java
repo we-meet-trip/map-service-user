@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class AppleProviderClientTest {
     private KeyPair pair;
@@ -69,6 +69,36 @@ class AppleProviderClientTest {
         parts[2]=(parts[2].startsWith("A") ? "B" : "A")+parts[2].substring(1);
         assertThatThrownBy(() -> client.verify(String.join(".",parts),"nonce")).isInstanceOf(ResponseStatusException.class);
     }
+    /** 철회 요청은 client_secret 서명을 먼저 통과해야 하므로 실제 P-256 키가 필요하다. */
+    private AppleProviderClient signingClient() throws Exception {
+        var generator = KeyPairGenerator.getInstance("EC");
+        generator.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        String pem = "-----BEGIN PRIVATE KEY-----\n"
+                + Base64.getMimeEncoder().encodeToString(generator.generateKeyPair().getPrivate().getEncoded())
+                + "\n-----END PRIVATE KEY-----\n";
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        return new AppleProviderClient(new AppleSettings(true, "kr.mapservice.client", "team", "key",
+                Base64.getEncoder().encodeToString(pem.getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+                json, builder.build());
+    }
+
+    @Test void 이미_무효인_토큰의_철회는_탈퇴를_막지_않는다() throws Exception {
+        var signing = signingClient();
+        server.expect(requestTo("https://appleid.apple.com/auth/revoke"))
+                .andRespond(withBadRequest().body("{\"error\":\"invalid_grant\"}").contentType(MediaType.APPLICATION_JSON));
+        assertThatCode(() -> signing.revoke("already-revoked")).doesNotThrowAnyException();
+        server.verify();
+    }
+
+    @Test void 철회가_닿지_않으면_완료로_표시하지_않는다() throws Exception {
+        var signing = signingClient();
+        server.expect(requestTo("https://appleid.apple.com/auth/revoke")).andRespond(withServerError());
+        assertThatThrownBy(() -> signing.revoke("live-token"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> assertThat(e.getStatusCode().value()).isEqualTo(503));
+        server.verify();
+    }
+
     @Test void disabledConfigurationDoesNotContactApple() {
         var disabled=new AppleProviderClient(new AppleSettings(false,"","","",""),json,RestClient.create());
         assertThatThrownBy(() -> disabled.verify("invalid","nonce")).isInstanceOfSatisfying(ResponseStatusException.class,e -> assertThat(e.getStatusCode().value()).isEqualTo(503));
