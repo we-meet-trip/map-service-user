@@ -427,7 +427,11 @@ try:
     # Actual runtime role CRUD of the new optional consent, no external AI/provider request.
     ai_states = api("GET", "/api/v1/consents/ai", token=token)
     check("v029_no_backfilled_optional_consent", len(ai_states) == 3 and all(not x["accepted"] and x["revision"] == 0 for x in ai_states))
-    ai_grant = {"policy_version": "2026-09-08.1", "accepted": True, "include_location": False, "expected_revision": 0}
+    # 판 번호는 서버가 알려 주는 값을 그대로 쓴다. 문안을 개정할 때마다 이 검사가
+    # 같이 깨지지 않게 하려는 것이며, 바로 위 stale 검사는 일부러 옛 값을 보낸다.
+    trip_state = next(x for x in ai_states if x["scope"] == "trip")
+    ai_grant = {"policy_version": trip_state["policy_version"], "accepted": True,
+                "include_location": False, "expected_revision": 0}
     receipt = api("POST", "/api/v1/consents/ai/trip", token=token, body=ai_grant)
     check("v029_runtime_explicit_trip_grant", receipt["accepted"] and receipt["revision"] == 1)
     check("v029_scope_independence", all(not x["accepted"] for x in api("GET", "/api/v1/consents/ai", token=token) if x["scope"] != "trip"))

@@ -149,7 +149,19 @@ public class AppleProviderClient {
         try {
             http.post().uri(ISSUER + "/auth/revoke").contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(form).retrieve().toBodilessEntity();
-        } catch (Exception e) { throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Apple revocation unavailable; retry account deletion"); }
+        }
+        // 이미 무효가 된 토큰에는 철회할 것이 남아 있지 않다. 그 응답만 통과시키고
+        // 연결 실패는 그대로 실패로 둔다 — 실패를 완료로 표시하지 않는다.
+        catch (RestClientResponseException e) { if (!alreadyInvalid(e)) throw revocationUnavailable(); }
+        catch (Exception e) { throw revocationUnavailable(); }
+    }
+    private boolean alreadyInvalid(RestClientResponseException e) {
+        if (e.getStatusCode().value() != 400) return false;
+        try { return "invalid_grant".equals(json.readTree(e.getResponseBodyAsString()).path("error").asText()); }
+        catch (Exception ignored) { return false; }
+    }
+    private static ResponseStatusException revocationUnavailable() {
+        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Apple revocation unavailable; retry account deletion");
     }
     private LinkedMultiValueMap<String, String> form() {
         var form = new LinkedMultiValueMap<String, String>();
