@@ -11,6 +11,7 @@ import map.service.user.global.exception.ErrorResponse;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -46,7 +47,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String routeKey = request.getMethod() + ":" + request.getRequestURI();
+        String routeKey = request.getMethod() + ":" + routePath(request);
         int[] config = LIMITS.get(routeKey);
 
         if (config != null) {
@@ -62,6 +63,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         chain.doFilter(request, response);
+    }
+
+    /**
+     * 요청 경로를 한 가지 모양으로 맞춘다.
+     *
+     * 원시 URI 를 그대로 쓰면 같은 처리기로 가는 요청이 다른 열쇠를 받는다.
+     * 퍼센트 인코딩, 세미콜론 뒤 경로 파라미터, 이어진 슬래시가 모두 그 통로다.
+     */
+    private static String routePath(HttpServletRequest request) {
+        return UrlPathHelper.defaultInstance.getPathWithinApplication(request).replaceAll("/{2,}", "/");
     }
 
     private void writeErrorResponse(HttpServletResponse response) throws IOException {
