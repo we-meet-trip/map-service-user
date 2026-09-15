@@ -19,11 +19,6 @@ import java.util.List;
  *   구간은 빈 리스트다.
  * stops: 지나는 역/정류장 이름 목록(순서대로). geometry 와 같은 이유로
  *   비어 있을 수 있다.
- * mapObj: hub가 ODsay loadLane 조회에 그대로 되돌려줘야 하는 원본 토큰.
- *   걷는 구간과, hub가 아직 노선 좌표 조회를 지원하지 않는 시외·고속버스
- *   구간에는 없다(null). client가 이 값을 그대로 되돌려 실제 노선 좌표를
- *   따로 조회하는 데 쓴다 — 후보 목록 단계에서 구간마다 조회하면 hub의
- *   ODsay 일일 호출 상한을 빨리 소진하므로, 화면을 열 때만 쓴다.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TransitRouteLeg(
@@ -35,7 +30,6 @@ public record TransitRouteLeg(
         @JsonProperty("station_count") Integer stationCount,
         @JsonProperty("distance_m") int distanceM,
         List<List<Double>> geometry,
-        List<String> stops,
-        @JsonProperty("map_obj") String mapObj
+        List<String> stops
 ) {
 }

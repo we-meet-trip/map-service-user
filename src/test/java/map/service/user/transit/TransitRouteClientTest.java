@@ -51,8 +51,7 @@ class TransitRouteClientTest {
                      {"type":"subway","line_name":"수도권 9호선",
                       "start_name":"언주","end_name":"신논현",
                       "section_time_min":2,"station_count":1,
-                      "geometry":[[37.507323,127.033909],[37.504454,127.024504]],
-                      "map_obj":"18:2:132:136@204:2:917:915"}
+                      "geometry":[[37.507323,127.033909],[37.504454,127.024504]]}
                    ]},
                   {"total_time_min":44,"fare":1750,
                    "transfer_count":2,"total_walk_m":314,
@@ -85,21 +84,24 @@ class TransitRouteClientTest {
     }
 
     @Test
-    @DisplayName("mapObj — hub가 실제 노선 좌표 조회용으로 실은 값이 그대로 전달된다")
+    @DisplayName("mapObj — 경로 후보 단위 값이 그대로 전달되고, 없는 후보는 null")
     void fetchParsesMapObj() {
         String json = """
                 {"status":"ok","routes":[
                   {"total_time_min":28,"fare":1650,
                    "transfer_count":2,"total_walk_m":903,
                    "modes":["subway"],
+                   "map_obj":"18:2:132:136@204:2:917:915",
                    "legs":[
-                     {"type":"walk","start_name":"","end_name":"",
-                      "section_time_min":11,"geometry":[]},
-                     {"type":"subway","line_name":"수도권 9호선",
-                      "start_name":"언주","end_name":"신논현",
-                      "section_time_min":2,"station_count":1,
-                      "geometry":[[37.507323,127.033909]],
-                      "map_obj":"18:2:132:136@204:2:917:915"}
+                     {"type":"subway","start_name":"언주","end_name":"신논현",
+                      "section_time_min":2,"geometry":[[37.507323,127.033909]]}
+                   ]},
+                  {"total_time_min":190,"fare":23000,
+                   "transfer_count":0,"total_walk_m":300,
+                   "modes":["intercity"],
+                   "legs":[
+                     {"type":"intercity","start_name":"동서울","end_name":"속초",
+                      "section_time_min":180,"geometry":[]}
                    ]}
                 ]}""";
         server.expect(requestTo(startsWith("http://hub:8000/v1/transit/routes")))
@@ -108,10 +110,10 @@ class TransitRouteClientTest {
         TransitRouteOptionsResponse response =
                 client.fetch(37.4979, 127.0276, 37.5663, 126.9779, "all");
 
-        // 도보 구간에는 mapObj 자체가 없다(응답에 필드가 없으면 null).
-        assertThat(response.routes().get(0).legs().get(0).mapObj()).isNull();
-        assertThat(response.routes().get(0).legs().get(1).mapObj())
+        assertThat(response.routes().get(0).mapObj())
                 .isEqualTo("18:2:132:136@204:2:917:915");
+        // 발급처가 주지 않는 후보(시외버스 등)는 필드가 없어 null.
+        assertThat(response.routes().get(1).mapObj()).isNull();
     }
 
     @Test
