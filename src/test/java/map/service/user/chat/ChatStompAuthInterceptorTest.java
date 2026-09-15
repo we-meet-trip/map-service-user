@@ -48,6 +48,8 @@ class ChatStompAuthInterceptorTest {
     private StompAuthChannelInterceptor interceptor() {
         Claims claims = org.mockito.Mockito.mock(Claims.class);
         when(jwtService.validateAccessToken("session-token")).thenReturn(claims);
+        // 이미 열린 소켓으로 내보낼 때는 만료를 봐주는 쪽을 탄다.
+        when(jwtService.validateAccessTokenTolerantOfExpiry("session-token")).thenReturn(claims);
         when(jwtService.extractUserId(claims)).thenReturn(7L);
         StompAuthChannelInterceptor interceptor = new StompAuthChannelInterceptor(jwtService, access, moderation, policy);
         interceptor.preSend(frame(StompCommand.CONNECT, null, "Bearer session-token", null), null);
@@ -231,6 +233,48 @@ class ChatStompAuthInterceptorTest {
                 .isEqualTo(ErrorCode.CHAT_NOT_PARTICIPANT);
     }
     @Test
+    @DisplayName("전달 — 토큰이 만료돼도 방 토픽 전달은 이어지고 새로 보내는 것은 막힌다")
+    void expiredTokenKeepsDeliveringButBlocksSending() {
+        StompAuthChannelInterceptor interceptor = interceptor();
+        // 소켓은 붙을 때 한 번 인증하고 오래 열려 있는데 접근 토큰 수명은 그보다 짧다.
+        // 전달까지 끊으면 받는 쪽은 연결이 멀쩡해 보이는 채로 아무 말도 못 받는다.
+        when(jwtService.validateAccessToken("session-token"))
+                .thenThrow(new CustomException(ErrorCode.EXPIRED_TOKEN));
+        when(moderation.mayDeliver(org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+
+        var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.create(
+                org.springframework.messaging.simp.SimpMessageType.MESSAGE);
+        headers.setSessionId("test-session");
+        headers.setDestination("/topic/rooms/10");
+        assertThat(interceptor.authorizeOutbound(
+                MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders()))).isNotNull();
+
+        assertThatThrownBy(() -> interceptor.preSend(
+                frame(StompCommand.SEND, "/app/rooms/10/send", null, new StompPrincipal("7")), null))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.EXPIRED_TOKEN);
+    }
+
+    @Test
+    @DisplayName("전달 — 인가를 판정하지 못하면 거부와 똑같이 버린다")
+    void unevaluableAuthorizationFailsClosed() {
+        StompAuthChannelInterceptor interceptor = interceptor();
+        // 계약된 거부가 아니라 판정 자체가 안 된 경우다. 흘려 보내면 중재·참가 구간 검사가
+        // 무력해지므로 버리는 쪽을 택한다(기록은 남긴다).
+        when(access.requireActiveParticipant(10L, 7L))
+                .thenThrow(new IllegalStateException("pool exhausted"));
+
+        var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.create(
+                org.springframework.messaging.simp.SimpMessageType.MESSAGE);
+        headers.setSessionId("test-session");
+        headers.setDestination("/topic/rooms/10");
+        assertThat(interceptor.authorizeOutbound(
+                MessageBuilder.createMessage(new byte[0], headers.getMessageHeaders()))).isNull();
+    }
+
+    @Test
     void existingSubscriptionIsDeniedAfterLeaveOrRevocation() {
         StompAuthChannelInterceptor interceptor = interceptor();
         var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.create(
@@ -243,7 +287,10 @@ class ChatStompAuthInterceptorTest {
         when(access.requireActiveParticipant(10L, 7L))
                 .thenThrow(new CustomException(ErrorCode.CHAT_NOT_PARTICIPANT));
         assertThat(interceptor.authorizeOutbound(outgoing)).isNull();
+        // 폐기는 만료와 달리 관용 경로에서도 그대로 막힌다.
         when(jwtService.validateAccessToken("session-token"))
+                .thenThrow(new CustomException(ErrorCode.BLACKLISTED_TOKEN));
+        when(jwtService.validateAccessTokenTolerantOfExpiry("session-token"))
                 .thenThrow(new CustomException(ErrorCode.BLACKLISTED_TOKEN));
         assertThat(interceptor.authorizeOutbound(outgoing)).isNull();
         assertThatThrownBy(() -> interceptor.preSend(
