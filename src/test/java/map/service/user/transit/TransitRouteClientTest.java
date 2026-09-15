@@ -3,12 +3,16 @@ package map.service.user.transit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import map.service.user.global.crypto.TestLocationSeals;
+import java.util.List;
+import map.service.user.transit.dto.TransitLaneRequest;
+import map.service.user.transit.dto.TransitLaneResponse;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -157,5 +161,55 @@ class TransitRouteClientTest {
                 .isInstanceOf(TransitRouteException.class)
                 .satisfies(e -> assertThat(
                         ((TransitRouteException) e).statusCode()).isEqualTo(500));
+    }
+
+    // ── fetchLane (POST /v1/transit/routes/lane) ──────────────────────
+
+    private static final TransitLaneRequest LANE_REQUEST = new TransitLaneRequest(
+            "18:2:132:136@204:2:917:915", List.of("walk", "subway", "walk"));
+
+    @Test
+    @DisplayName("노선 좌표 — mapObj·types 를 본문으로 보내고 geometries 를 그대로 받는다")
+    void fetchLaneSendsBodyAndParses() {
+        server.expect(requestTo("http://hub:8000/v1/transit/routes/lane"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().json("""
+                        {"map_obj":"18:2:132:136@204:2:917:915",
+                         "types":["walk","subway","walk"]}"""))
+                .andRespond(withSuccess("""
+                        {"status":"ok",
+                         "geometries":[[],[[37.5663,126.9779],[37.5219,126.9243]],[]]}""",
+                        MediaType.APPLICATION_JSON));
+
+        TransitLaneResponse res = client.fetchLane(LANE_REQUEST);
+
+        assertThat(res.status()).isEqualTo("ok");
+        assertThat(res.geometries()).hasSize(3);
+        assertThat(res.geometries().get(0)).isEmpty();
+        assertThat(res.geometries().get(1).get(0)).containsExactly(37.5663, 126.9779);
+    }
+
+    @Test
+    @DisplayName("노선 좌표 — hub 5xx 는 예외가 아니라 unavailable(기존 직선 유지)")
+    void fetchLaneHubErrorIsUnavailable() {
+        server.expect(requestTo("http://hub:8000/v1/transit/routes/lane"))
+                .andRespond(withServerError().body("hub down"));
+
+        TransitLaneResponse res = client.fetchLane(LANE_REQUEST);
+
+        assertThat(res.status()).isEqualTo("unavailable");
+        assertThat(res.geometries()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("노선 좌표 — 본문이 비거나 모양이 틀려도 unavailable")
+    void fetchLaneMalformedBodyIsUnavailable() {
+        server.expect(requestTo("http://hub:8000/v1/transit/routes/lane"))
+                .andRespond(withSuccess("{\"status\":\"ok\"}", MediaType.APPLICATION_JSON));
+
+        TransitLaneResponse res = client.fetchLane(LANE_REQUEST);
+
+        assertThat(res.status()).isEqualTo("unavailable");
+        assertThat(res.geometries()).isEmpty();
     }
 }
