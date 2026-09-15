@@ -26,6 +26,7 @@ import map.service.user.chat.service.ChatParticipantService;
 import map.service.user.chat.service.ChatPresenceService;
 import map.service.user.chat.service.ChatRoomAccessService;
 import map.service.user.chat.service.ChatRoomService;
+import map.service.user.chat.service.ChatSystemMessageService;
 import map.service.user.domain.user.repository.UserRepository;
 import map.service.user.global.config.ChatProperties;
 import map.service.user.global.exception.CustomException;
@@ -73,6 +74,7 @@ class ChatServiceTest {
     private ChatRoomService roomService;
     private ChatInviteService inviteService;
     private ChatParticipantService participantService;
+    private ChatSystemMessageService systemMessageService;
 
     @BeforeEach
     void setUp() {
@@ -81,9 +83,13 @@ class ChatServiceTest {
                 scheduleRepository, props, access, ModerationTestSupport.guard(messageRepository));
         inviteService = new ChatInviteService(roomRepository, participantRepository, tokenFactory,
                 props, access);
+        // 방송은 커밋 뒤에 나가므로 여기서는 목으로 두고, 남는 시스템 메시지로 확인한다.
+        systemMessageService = new ChatSystemMessageService(messageRepository, access,
+                org.mockito.Mockito.mock(map.service.user.chat.ws.ChatBroadcastRelay.class), objectMapper);
         // presence 는 leave/kick 테스트와 무관하므로 목으로 대체한다.
         participantService = new ChatParticipantService(participantRepository, access,
-                org.mockito.Mockito.mock(ChatPresenceService.class), userRepository, ModerationTestSupport.guard(messageRepository));
+                org.mockito.Mockito.mock(ChatPresenceService.class), userRepository, ModerationTestSupport.guard(messageRepository),
+                systemMessageService);
     }
 
     /** 소유자·종료일을 지정해 일정을 저장하고 schedule_id 를 반환한다. */
@@ -447,7 +453,7 @@ class ChatServiceTest {
     }
 
     @Test
-    @DisplayName("나가기 — 소유자가 나가면 방 종료(read_only)")
+    @DisplayName("나가기 — 남은 사람이 없으면 방 종료(read_only)")
     void leave_owner_closesRoom() {
         long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
 
@@ -456,6 +462,64 @@ class ChatServiceTest {
         assertThat(participantRepository.findByRoomIdAndUserId(roomId, OWNER))
                 .get().extracting(ChatParticipant::getStatus).isEqualTo(ChatParticipant.Status.LEFT);
         assertThat(roomRepository.findById(roomId).orElseThrow().isReadOnly()).isTrue();
+    }
+
+    @Test
+    @DisplayName("나가기 — 방장이 나가도 남은 사람이 있으면 방장만 넘어가고 방은 유지")
+    void leave_owner_transfersOwnership() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        String token = inviteService.generateOrRotate(roomId, OWNER).token();
+        inviteService.join(token, 2L);
+
+        boolean closed = participantService.leave(roomId, OWNER);
+
+        assertThat(closed).isFalse();
+        ChatRoom room = roomRepository.findById(roomId).orElseThrow();
+        assertThat(room.isReadOnly()).isFalse();
+        assertThat(room.getOwnerId()).isEqualTo(2L);
+        assertThat(participantRepository.findByRoomIdAndUserId(roomId, 2L).orElseThrow())
+                .extracting(ChatParticipant::getRole, ChatParticipant::getStatus)
+                .containsExactly(ChatParticipant.Role.OWNER, ChatParticipant.Status.ACTIVE);
+        // 떠난 사람의 역할까지 내려 두지 않으면 옛 링크로 돌아왔을 때 방장이 둘이 된다.
+        assertThat(participantRepository.findByRoomIdAndUserId(roomId, OWNER).orElseThrow())
+                .extracting(ChatParticipant::getRole, ChatParticipant::getStatus)
+                .containsExactly(ChatParticipant.Role.MEMBER, ChatParticipant.Status.LEFT);
+        ChatMessage notice = messageRepository.findTopByRoomIdOrderBySeqDesc(roomId).orElseThrow();
+        assertThat(notice.getType()).isEqualTo(ChatMessage.MessageType.SYSTEM);
+        assertThat(notice.getSystemPayload().path("kind").asText()).isEqualTo("OWNER_CHANGED");
+        assertThat(notice.getSystemPayload().path("user_id").asLong()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("나가기 — 넘겨받은 방장이 마지막으로 나가면 그때 방이 닫힌다")
+    void leave_promotedOwnerAloneClosesRoom() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        String token = inviteService.generateOrRotate(roomId, OWNER).token();
+        inviteService.join(token, 2L);
+        participantService.leave(roomId, OWNER);
+
+        assertThat(participantService.leave(roomId, 2L)).isTrue();
+        assertThat(roomRepository.findById(roomId).orElseThrow().isReadOnly()).isTrue();
+    }
+
+    @Test
+    @DisplayName("나가기 — 방장을 넘긴 사람이 옛 링크로 돌아와도 방장은 한 명뿐")
+    void leave_formerOwnerRejoinsAsMember() {
+        long roomId = createRoomAsOwner(LocalDate.now().plusDays(3));
+        String token = inviteService.generateOrRotate(roomId, OWNER).token();
+        inviteService.join(token, 2L);
+        participantService.leave(roomId, OWNER);
+
+        inviteService.join(token, OWNER);
+
+        assertThat(participantRepository.findByRoomIdAndStatus(roomId, ChatParticipant.Status.ACTIVE))
+                .filteredOn(ChatParticipant::isOwner)
+                .extracting(ChatParticipant::getUserId)
+                .containsExactly(2L);
+        assertThatThrownBy(() -> inviteService.generateOrRotate(roomId, OWNER))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.CHAT_NOT_OWNER);
     }
 
     @Test
