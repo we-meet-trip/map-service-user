@@ -1,11 +1,16 @@
 package map.service.user.transit;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Pattern;
+import map.service.user.transit.dto.TransitLaneRequest;
+import map.service.user.transit.dto.TransitLaneResponse;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * 엔드포인트:
  * - GET /api/v1/transit/routes → routes
+ * - POST /api/v1/transit/routes/lane → lane (후보 한 건의 실제 노선 좌표)
  */
 @RestController
 @RequestMapping("/api/v1/transit")
@@ -66,5 +72,24 @@ public class TransitRouteController {
             String mode
     ) {
         return client.fetch(startLat, startLng, endLat, endLng, mode);
+    }
+
+    /**
+     * 경로 후보 한 건의 실제 노선 좌표 조회.
+     *
+     * routes 응답의 구간 좌표는 지나는 정류장을 직선으로 이은 것이다. client 가
+     * 후보를 골라 지도를 열 때 그 후보의 mapObj 와 구간 종류(types)를 보내면,
+     * 실제 선로·도로 굴곡을 따라가는 좌표를 types 와 같은 순서로 돌려준다.
+     *
+     * 본문으로 받는 이유: mapObj 에 타고 내린 구간이 담겨 있어 주소창(쿼리)에
+     * 싣지 않는다. 형식 검사는 TransitLaneRequest 가 하고, 틀리면 400 이며
+     * hub 를 부르지 않는다.
+     *
+     * 조회하지 못하면 오류가 아니라 status "unavailable" 로 온다 — client 는
+     * 그때 이미 가진 정류장 직선을 그대로 그린다.
+     */
+    @PostMapping("/routes/lane")
+    public TransitLaneResponse lane(@Valid @RequestBody TransitLaneRequest request) {
+        return client.fetchLane(request);
     }
 }
