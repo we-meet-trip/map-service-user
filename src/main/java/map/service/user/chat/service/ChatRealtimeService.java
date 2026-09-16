@@ -66,10 +66,18 @@ public class ChatRealtimeService {
         return response;
     }
 
-    /** 읽음 위치를 갱신하고, 갱신된 읽음 위치를 방 구독자에게 브로드캐스트한다. */
+    /**
+     * 읽음 위치를 갱신하고, 위치가 실제로 앞으로 갔을 때만 방 구독자에게 알린다.
+     *
+     * 이미 확인한 자리를 다시 확인하는 호출은 방의 상태를 바꾸지 않는다. 그런 호출까지
+     * 알리면 알림을 받은 쪽이 다시 확인하고 그 확인이 또 알림이 되어 멈추지 않는다.
+     */
     public UnreadResponse markRead(Long roomId, Long userId, long lastReadSeq) {
-        UnreadResponse response = messageService.markRead(roomId, userId, lastReadSeq);
-        relay.publish(ChatEventEnvelope.read(roomId, userId, response.lastReadSeq()));
+        ChatMessageService.ReadResult result = messageService.markReadAdvancing(roomId, userId, lastReadSeq);
+        UnreadResponse response = result.response();
+        if (result.advanced()) {
+            relay.publish(ChatEventEnvelope.read(roomId, userId, response.lastReadSeq()));
+        }
         return response;
     }
 

@@ -122,16 +122,30 @@ public class ChatMessageService {
      */
     @Transactional
     public UnreadResponse markRead(Long roomId, Long userId, long lastReadSeq) {
+        return markReadAdvancing(roomId, userId, lastReadSeq).response();
+    }
+
+    /**
+     * 읽음 처리 결과. advanced 는 이번 호출이 포인터를 실제로 앞으로 옮겼는지다.
+     *
+     * 같은 위치를 다시 확인하는 호출은 아무것도 바꾸지 않으므로 알릴 것도 없다. 그런데도
+     * 알리면 그 알림을 받은 쪽이 다시 확인하고, 그 확인이 또 알림이 되어 끝나지 않는다.
+     */
+    public record ReadResult(UnreadResponse response, boolean advanced) {
+    }
+
+    @Transactional
+    public ReadResult markReadAdvancing(Long roomId, Long userId, long lastReadSeq) {
         ChatRoom room = access.requireRoom(roomId);
         ChatParticipant participant = access.requireReadableParticipant(roomId, userId);
 
         long latestSeq = latestVisible(roomId, userId);
         long target = Math.min(Math.max(lastReadSeq, 0L), latestSeq);
-        participantRepository.advanceReadPointer(roomId, userId, target);
+        int moved = participantRepository.advanceReadPointer(roomId, userId, target);
 
         long effectiveLastRead = Math.max(participant.getLastReadMessageSeq(), target);
         long unread = messageRepository.countVisibleAfter(roomId, userId, effectiveLastRead);
-        return new UnreadResponse(roomId, unread, effectiveLastRead, latestSeq);
+        return new ReadResult(new UnreadResponse(roomId, unread, effectiveLastRead, latestSeq), moved > 0);
     }
 
     /** 호출자 기준 미읽음 요약. 방의 최신 순번에서 호출자의 마지막 읽은 순번을 뺀다(음수면 0). */
