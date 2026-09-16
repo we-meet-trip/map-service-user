@@ -17,9 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * ChatParticipantService — 참가자 목록·나가기·강퇴 비즈니스 로직
  *
- * 방의 참가자를 조회하고, 스스로 나가거나(소유자가 나가면 방 종료), 소유자가 특정
- * 참가자를 내보낸다. 상태를 바꿔 소프트 제거하므로 나간/내보내진 뒤에도 메시지 기록과
- * 참가 이력은 그대로 남는다.
+ * 방의 참가자를 조회하고, 스스로 나가거나(방장이 나가면 남은 사람에게 넘기고, 아무도
+ * 없으면 방 종료), 방장이 특정 참가자를 내보낸다. 상태를 바꿔 소프트 제거하므로
+ * 나간/내보내진 뒤에도 메시지 기록과 참가 이력은 그대로 남는다.
  */
 @Service
 public class ChatParticipantService {
@@ -29,16 +29,19 @@ public class ChatParticipantService {
     private final ChatPresenceService presenceService;
     private final UserRepository userRepository;
     private final map.service.user.moderation.ChatModerationGuard moderation;
+    private final ChatSystemMessageService systemMessageService;
 
     public ChatParticipantService(ChatParticipantRepository participantRepository,
                                   ChatRoomAccessService access,
                                   ChatPresenceService presenceService,
-                                  UserRepository userRepository, map.service.user.moderation.ChatModerationGuard moderation) {
+                                  UserRepository userRepository, map.service.user.moderation.ChatModerationGuard moderation,
+                                  ChatSystemMessageService systemMessageService) {
         this.participantRepository = participantRepository;
         this.access = access;
         this.presenceService = presenceService;
         this.userRepository = userRepository;
         this.moderation = moderation;
+        this.systemMessageService = systemMessageService;
     }
 
     /** 방의 현재 온라인 사용자 식별자 목록. 호출자는 ACTIVE 참가자여야 한다. */
@@ -79,11 +82,14 @@ public class ChatParticipantService {
     /**
      * 스스로 나가기.
      *
-     * 호출자의 참가 상태를 LEFT 로 바꾼다. 호출자가 소유자이면 방을 보관 전용(read_only)
-     * 으로 전환해 방을 종료한다(이후 전송 불가). 실시간 종료 통지는 실시간 계층이 담당한다.
+     * 호출자의 참가 상태를 LEFT 로 바꾼다. 호출자가 방장이면 남아 있는 참가자 중 가장 먼저
+     * 들어온 사람에게 방장을 넘기고 방은 그대로 열어 둔다 — 한 사람이 떠난다고 나머지의
+     * 대화까지 끝낼 이유는 없다. 넘길 사람이 아무도 없을 때만 방을 보관 전용으로 닫는다.
      *
-     * 반환값: 이번 나가기로 방이 종료(read_only 전환)됐는지 여부. 소유자가 나갔을 때만 true.
-     * 컨트롤러는 이 값이 true 면 방 종료를 브로드캐스트한다.
+     * 넘길 때는 떠나는 사람의 역할도 같은 트랜잭션에서 MEMBER 로 내린다. 상태만 바꾸고 두면
+     * 회수되지 않은 초대 링크로 돌아왔을 때 방장이 둘이 되고, 서로를 내보낼 수 없다.
+     *
+     * 반환값: 이번 나가기로 방이 닫혔는지 여부. 호출자는 true 일 때만 종료를 알린다.
      */
     @Transactional
     public boolean leave(Long roomId, Long userId) {
@@ -91,10 +97,25 @@ public class ChatParticipantService {
         ChatParticipant participant = access.requireActiveParticipant(roomId, userId);
         access.closeInterval(roomId, userId, room.getNextSeq());
         participant.leave();
-        if (participant.isOwner()) {
+        if (!participant.isOwner()) {
+            return false;
+        }
+        // 위에서 LEFT 로 바꾼 것이 조회 전에 반영되므로 떠나는 사람은 결과에 없다.
+        // ponytail: 승계 순서는 joined_at 이라 나갔다 돌아온 사람이 쭉 있던 사람을 앞설 수
+        // 있다. 정확히 하려면 chat_membership_intervals.start_seq 를 봐야 한다.
+        List<ChatParticipant> remaining = participantRepository
+                .findByRoomIdAndStatusOrderByJoinedAtAscIdAsc(roomId, ChatParticipant.Status.ACTIVE);
+        if (remaining.isEmpty()) {
             room.close();
             return true;
         }
+        ChatParticipant successor = remaining.get(0);
+        successor.promoteToOwner();
+        room.transferOwnership(successor.getUserId());
+        participant.demoteToMember();
+        // 탈퇴 경로는 컨트롤러를 거치지 않으므로 여기서 알린다. 컨트롤러에서 내면
+        // 탈퇴로 넘어간 방만 조용해진다.
+        systemMessageService.emitOwnerChanged(roomId, successor.getUserId());
         return false;
     }
 

@@ -13,7 +13,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SafeStompErrorHandlerTest {
     private final SafeStompErrorHandler handler = new SafeStompErrorHandler();
     @Test void wrappedChannelRejectionProducesMachineReadablePolicyCode() {
-        for (ErrorCode code : new ErrorCode[]{ErrorCode.AGE_RESTRICTED, ErrorCode.SERVICE_POLICY_REQUIRED}) {
+        // 구독 거부도 함께 돌려준다. 가리면 클라이언트가 사유를 몰라 계속 다시 붙고,
+        // 방이 닫혀 있으면 그 시도도 같은 이유로 거절돼 재접속이 끝나지 않는다.
+        for (ErrorCode code : new ErrorCode[]{ErrorCode.AGE_RESTRICTED, ErrorCode.SERVICE_POLICY_REQUIRED,
+                ErrorCode.CHAT_ROOM_EXPIRED, ErrorCode.CHAT_NOT_PARTICIPANT}) {
             var error = handler.handleClientMessageProcessingError(null,
                     new MessagingException("untrusted payload must not escape", new CustomException(code)));
             assertThat(StompHeaderAccessor.wrap(error).getCommand()).isEqualTo(StompCommand.ERROR);

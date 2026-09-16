@@ -3,6 +3,8 @@ package map.service.user.places;
 import java.nio.charset.StandardCharsets;
 import map.service.user.places.dto.PlacePhotosResponse;
 import map.service.user.global.crypto.LocationSeal;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
@@ -22,6 +24,8 @@ import org.springframework.web.client.RestClient;
  */
 @Component
 public class PlacePhotosClient {
+
+    private static final Logger log = LoggerFactory.getLogger(PlacePhotosClient.class);
 
     private final RestClient client;
 
@@ -44,7 +48,7 @@ public class PlacePhotosClient {
      *            지점이 잡히므로 좌표를 함께 넘긴다.
      */
     public PlacePhotosResponse fetch(String query, double lat, double lng) {
-        return client.get()
+        PlacePhotosResponse response = client.get()
                 .uri(uri -> uri.path("/v1/places/photos")
                         .queryParam("query", query)
                         .queryParam("loc", seal.seal(lat, lng))
@@ -58,6 +62,16 @@ public class PlacePhotosClient {
                                     res.getStatusCode().value(), body);
                         })
                 .body(PlacePhotosResponse.class);
+        // 성공 응답인데 한 장도 없으면 남긴다.
+        //
+        // hub 는 발급처를 못 부르거나 하루 상한을 다 쓴 상황에서도 200 과 빈
+        // 목록을 돌려준다. 그래서 사진 기능이 꺼진 것과 그 장소에 사진이 없는
+        // 것이 호출 측에서 똑같이 보인다. 장소명과 좌표는 사용자가 어디를 보고
+        // 있는지 드러내므로 남기지 않는다.
+        if (response == null || response.photos() == null || response.photos().isEmpty()) {
+            log.info("hub place photos returned no items");
+        }
+        return response;
     }
 
     /**

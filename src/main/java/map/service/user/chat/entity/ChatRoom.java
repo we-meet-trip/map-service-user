@@ -179,10 +179,15 @@ public class ChatRoom {
     }
 
     /**
-     * 방을 읽기전용(보관)으로 전환한다. 만료 sweep 및 소유자 나가기 시 사용한다.
+     * 방을 읽기전용(보관)으로 전환한다. 만료 sweep 및 마지막 참가자가 나갈 때 사용한다.
      */
     public void close() {
         this.readOnly = true;
+    }
+
+    /** 방장을 다른 참가자에게 넘긴다. 권한 판정은 참가행 역할이 하고, 이 값은 표시에 쓰인다. */
+    public void transferOwnership(Long newOwnerId) {
+        this.ownerId = newOwnerId;
     }
 
     public Long getRoomId() {

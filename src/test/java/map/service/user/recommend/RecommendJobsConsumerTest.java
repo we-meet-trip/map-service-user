@@ -224,6 +224,25 @@ class RecommendJobsConsumerTest {
     }
 
     @Test
+    void 자리표시_레코드가_취소된_작업의_본문_삭제를_막지_않는다() {
+        // 컨슈머 그룹을 만들 때 넣는 자리표시에는 job_id 가 없다. 그 한 건이
+        // 스트림에 남아 있어도 취소된 작업의 본문 삭제는 계속 돌아야 한다.
+        var placeholder = StreamRecords.mapBacked(Map.of("_init", "1"))
+                .withStreamKey("agent:jobs:done").withId(RecordId.of("1-0"));
+        var cancelled = record("cancelled", "{}");
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done"), any()))
+                .thenReturn(List.of(placeholder, cancelled));
+        when(operations.range(org.mockito.ArgumentMatchers.eq("agent:jobs:done:dlq"), any()))
+                .thenReturn(List.of());
+        when(jobStore.cancelledAmong(any())).thenReturn(Set.of("cancelled"));
+
+        consumer.eraseExpiredPayloads();
+
+        verify(streams).execute(RecommendJobsConsumer.ACK_AND_DELETE,
+                List.of("agent:jobs:done"), "bff-result", cancelled.getId().getValue());
+    }
+
+    @Test
     void expiredDlqIsDeletedEvenWhenCancellationDatabaseIsUnavailable() {
         long now = System.currentTimeMillis();
         var old = record("expired", "{}").withId(RecordId.of((now - Duration.ofDays(2).toMillis()) + "-1"));
