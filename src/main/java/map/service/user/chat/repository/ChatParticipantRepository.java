@@ -21,6 +21,10 @@ public interface ChatParticipantRepository extends JpaRepository<ChatParticipant
     /** 방의 특정 상태 참가자 목록. */
     List<ChatParticipant> findByRoomIdAndStatus(Long roomId, ChatParticipant.Status status);
 
+    /** 방의 특정 상태 참가자 목록을 들어온 순서대로. 방장 승계 대상을 고를 때 쓴다. */
+    List<ChatParticipant> findByRoomIdAndStatusOrderByJoinedAtAscIdAsc(
+            Long roomId, ChatParticipant.Status status);
+
     /** 방의 특정 상태 참가자 수. 상한(10명) 검사에 사용. */
     long countByRoomIdAndStatus(Long roomId, ChatParticipant.Status status);
 

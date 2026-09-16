@@ -61,6 +61,12 @@ public class ChatSystemMessageService {
         emit(roomId, "멤버가 채팅방에서 내보내졌습니다.", payload("KICK", "user_id", userId));
     }
 
+    /** 방장 승계 안내. 누가 새 방장인지 payload 의 user_id 로 전달한다. */
+    @Transactional
+    public void emitOwnerChanged(Long roomId, Long userId) {
+        emit(roomId, "방장이 변경되었습니다.", payload("OWNER_CHANGED", "user_id", userId));
+    }
+
     /** 방 개설 시 상단에 남기는 "일정 보러가기" 카드. schedule_id 로 일정에 연결한다. */
     @Transactional
     public void emitItineraryCard(Long roomId, Long scheduleId) {

@@ -106,10 +106,18 @@ dependencies {
 }
 
 // ---- test : JUnit Platform 사용 ----
+// 동기화 도구가 ' 2' 를 붙인 사본을 빌드 산출물 안에 만들어 둔다. 클래스 이름에 빈칸이
+// 들어간 그 사본을 JUnit 이 불러들이려다 실패하면, 정작 바뀐 것이 없는데도 전체 실행이
+// 멈춘다. 실행 직전에 치워 둔다.
 tasks.named('test') {
     useJUnitPlatform()
     jvmArgs '-Dfile.encoding=UTF-8', '-Dsun.stdout.encoding=UTF-8', '-Dsun.stderr.encoding=UTF-8'
     systemProperty 'file.encoding', 'UTF-8'
+    doFirst {
+        layout.buildDirectory.get().asFile.traverse { entry ->
+            if (entry.name ==~ /.* \d+\.(class|jar)$/) entry.delete()
+        }
+    }
 }
 
 // ---- jar : plain jar 비활성화 ----

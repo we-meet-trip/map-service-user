@@ -45,6 +45,7 @@ class AccountWithdrawalServiceTest {
     private map.service.user.recommend.RecommendJobStore jobs;
     private map.service.user.recommend.DraftStore drafts;
     private map.service.user.recommend.ReuseCacheStore reuse;
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @BeforeEach
     void setUp() {
@@ -56,10 +57,10 @@ class AccountWithdrawalServiceTest {
         jobs = mock(map.service.user.recommend.RecommendJobStore.class);
         drafts = mock(map.service.user.recommend.DraftStore.class);
         reuse = mock(map.service.user.recommend.ReuseCacheStore.class);
+        jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         service = new AccountWithdrawalService(userRepository, scheduleRepository,
                 participantRepository, participantService, jwtService,
-                jobs, drafts, reuse,
-                mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                jobs, drafts, reuse, jdbc,
                 mock(map.service.user.domain.auth.apple.AppleAccountService.class));
     }
 
@@ -102,6 +103,31 @@ class AccountWithdrawalServiceTest {
         when(participantService.leave(20L, 1L)).thenReturn(false);
 
         assertThat(service.withdraw(1L, "tok")).containsExactly(10L);
+    }
+
+    @Test
+    @DisplayName("방장을 넘겨 살아남은 방도 일정 연결은 끊는다")
+    void severesScheduleEvenWhenRoomSurvives() {
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user()));
+        when(participantRepository.findByUserIdAndStatus(1L, ChatParticipant.Status.ACTIVE))
+                .thenReturn(List.of(participantOf(10L)));
+        // 방장이 남은 사람에게 넘어가 방은 닫히지 않는다.
+        when(participantService.leave(10L, 1L)).thenReturn(false);
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.contains("WHERE owner_id=?"),
+                org.mockito.ArgumentMatchers.eq(Long.class), org.mockito.ArgumentMatchers.<Object>any()))
+                .thenReturn(List.of(10L));
+
+        assertThat(service.withdraw(1L, "tok")).isEmpty();
+
+        org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(jdbc, org.mockito.Mockito.atLeastOnce())
+                .update(sql.capture(), (Object[]) org.mockito.ArgumentMatchers.any());
+        // 연결을 끊지 못하면 바로 아래 일정 삭제가 외래키 연쇄로 방과 대화까지 지운다.
+        assertThat(sql.getAllValues()).anySatisfy(statement ->
+                assertThat(statement).contains("SET schedule_id=NULL").contains("room_id IN ("));
+        // 넘겨받은 사람이 쓰고 있는 방을 닫아 버리면 안 된다.
+        assertThat(sql.getAllValues()).noneSatisfy(statement ->
+                assertThat(statement).contains("read_only=TRUE"));
     }
 
     @Test
