@@ -115,6 +115,23 @@ public class ChatParticipant {
         this.status = Status.KICKED;
     }
 
+    /** 방장 승계: 역할을 OWNER 로 올린다. */
+    public void promoteToOwner() {
+        this.role = Role.OWNER;
+    }
+
+    /**
+     * 역할을 MEMBER 로 내린다.
+     *
+     * 방장을 넘기고 떠나는 사람에게 같은 트랜잭션 안에서 적용한다. 상태만 LEFT 로 바꾸고
+     * 역할을 그대로 두면, 회수되지 않은 초대 링크로 돌아왔을 때 방에 OWNER 가 둘이 된다.
+     * 둘은 서로를 내보낼 수 없어(강퇴는 OWNER 를 대상으로 삼지 못한다) 제품 안에서
+     * 되돌릴 방법이 없어진다.
+     */
+    public void demoteToMember() {
+        this.role = Role.MEMBER;
+    }
+
     public boolean isActive() {
         return this.status == Status.ACTIVE;
     }

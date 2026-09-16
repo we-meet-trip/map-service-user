@@ -38,12 +38,15 @@ class JwtServiceTest {
 
     private JwtService jwtService;
     private User testUser;
+    private KeyPair keyPair;
+    private map.service.user.domain.user.repository.UserRepository users;
+    private map.service.user.domain.user.repository.RefreshTokenRepository refreshTokens;
 
     @BeforeEach
     void setUp() throws Exception {
         KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
         gen.initialize(2048);
-        KeyPair keyPair = gen.generateKeyPair();
+        keyPair = gen.generateKeyPair();
 
         JwtProperties props = new JwtProperties();
         props.setAccessTokenExpirySeconds(1800);
@@ -52,10 +55,10 @@ class JwtServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-        var users = org.mockito.Mockito.mock(map.service.user.domain.user.repository.UserRepository.class);
+        users = org.mockito.Mockito.mock(map.service.user.domain.user.repository.UserRepository.class);
         org.mockito.Mockito.when(users.existsById(org.mockito.ArgumentMatchers.any())).thenReturn(true);
-        jwtService = new JwtService(keyPair, props, redisTemplate, users,
-                org.mockito.Mockito.mock(map.service.user.domain.user.repository.RefreshTokenRepository.class));
+        refreshTokens = org.mockito.Mockito.mock(map.service.user.domain.user.repository.RefreshTokenRepository.class);
+        jwtService = new JwtService(keyPair, props, redisTemplate, users, refreshTokens);
 
         testUser = User.builder()
                 .email("test@example.com")
@@ -144,5 +147,53 @@ class JwtServiceTest {
         String raw = jwtService.generateRawRefreshToken();
 
         assertThat(raw).isNotBlank().hasSize(36);  // UUID 문자열 길이
+    }
+
+    /** 이미 만료된 토큰을 만들어 주는 발급기. 만료 폭을 초 단위로 지정한다. */
+    private JwtService issuerExpiredBy(long secondsAgo) {
+        JwtProperties props = new JwtProperties();
+        props.setAccessTokenExpirySeconds(-secondsAgo);
+        props.setRefreshTokenExpirySeconds(1209600);
+        return new JwtService(keyPair, props, redisTemplate, users, refreshTokens);
+    }
+
+    @Test
+    @DisplayName("만료 관용 — 유예 안이면 통과, 유예 밖이면 만료로 거절")
+    void tolerantValidation_acceptsInsideGraceRejectsOutside() {
+        String fresh = issuerExpiredBy(60).generateAccessToken(testUser);
+        assertThat(jwtService.validateAccessTokenTolerantOfExpiry(fresh).getSubject()).isEqualTo("1");
+        // 엄격 경로는 같은 토큰을 그대로 거절한다 — 보내는 쪽 기준은 바뀌지 않는다.
+        assertThatThrownBy(() -> jwtService.validateAccessToken(fresh))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.EXPIRED_TOKEN);
+
+        String stale = issuerExpiredBy(3600).generateAccessToken(testUser);
+        assertThatThrownBy(() -> jwtService.validateAccessTokenTolerantOfExpiry(stale))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.EXPIRED_TOKEN);
+    }
+
+    @Test
+    @DisplayName("만료 관용 — 폐기된 토큰은 만료를 봐주더라도 막는다")
+    void tolerantValidation_stillRejectsRevoked() {
+        String expired = issuerExpiredBy(60).generateAccessToken(testUser);
+        when(redisTemplate.hasKey(anyString())).thenReturn(true);
+
+        assertThatThrownBy(() -> jwtService.validateAccessTokenTolerantOfExpiry(expired))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.BLACKLISTED_TOKEN);
+    }
+
+    @Test
+    @DisplayName("만료 관용 — 세션이 끊긴 토큰은 만료를 봐주더라도 막는다")
+    void tolerantValidation_stillRejectsRevokedSession() {
+        String expired = issuerExpiredBy(60).generateAccessToken(testUser, "sid-1");
+        when(refreshTokens.existsBySessionIdAndRevokedAtIsNullAndExpiresAtAfter(
+                org.mockito.ArgumentMatchers.eq("sid-1"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> jwtService.validateAccessTokenTolerantOfExpiry(expired))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.BLACKLISTED_TOKEN);
     }
 }

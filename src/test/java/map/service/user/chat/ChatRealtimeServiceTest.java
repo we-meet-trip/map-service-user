@@ -91,10 +91,11 @@ class ChatRealtimeServiceTest {
     }
 
     @Test
-    @DisplayName("읽음 — 갱신 후 READ 봉투(userId, lastReadSeq)를 발행")
+    @DisplayName("읽음 — 위치가 앞으로 갔으면 READ 봉투(userId, lastReadSeq)를 발행")
     void markRead_publishesReadEnvelope() {
         UnreadResponse result = new UnreadResponse(10L, 1L, 4L, 5L);
-        when(messageService.markRead(10L, 2L, 4L)).thenReturn(result);
+        when(messageService.markReadAdvancing(10L, 2L, 4L))
+                .thenReturn(new ChatMessageService.ReadResult(result, true));
 
         realtimeService().markRead(10L, 2L, 4L);
 
@@ -105,6 +106,21 @@ class ChatRealtimeServiceTest {
         ReadEvent event = (ReadEvent) captor.getValue().data();
         assertThat(event.userId()).isEqualTo(2L);
         assertThat(event.lastReadSeq()).isEqualTo(4L);
+    }
+
+    @Test
+    @DisplayName("읽음 — 위치가 그대로면 아무것도 발행하지 않는다")
+    void markRead_silentWhenPointerDoesNotAdvance() {
+        // 이미 읽은 자리를 다시 확인하는 호출. 알리면 받은 쪽이 다시 확인하고
+        // 그 확인이 또 알림이 되어 방 안에서 끝나지 않는 되먹임이 생긴다.
+        UnreadResponse unchanged = new UnreadResponse(10L, 0L, 4L, 4L);
+        when(messageService.markReadAdvancing(10L, 2L, 4L))
+                .thenReturn(new ChatMessageService.ReadResult(unchanged, false));
+
+        UnreadResponse returned = realtimeService().markRead(10L, 2L, 4L);
+
+        assertThat(returned).isEqualTo(unchanged);
+        verify(relay, never()).publish(any());
     }
 
     @Test

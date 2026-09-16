@@ -83,9 +83,49 @@ public class JwtService {
                 .compact();
     }
 
+    /** 이미 열린 소켓에서 만료를 봐주는 폭. 토큰을 새로 받아 다시 붙는 왕복을 덮을 만큼만 둔다. */
+    private static final java.time.Duration EXPIRY_GRACE = java.time.Duration.ofMinutes(5);
+
     /** 검증 후 Claims 반환. 유효하지 않으면 CustomException 던짐. */
     public Claims validateAccessToken(String token) {
         Claims claims = parseOrThrow(token);
+        requireLiveSession(claims);
+        return claims;
+    }
+
+    /**
+     * 이미 열린 소켓으로 계속 내보내도 되는지 판정한다. 만료만 눈감고 나머지는 그대로 본다.
+     *
+     * 소켓은 붙을 때 한 번 인증하고 몇 시간이고 열려 있는데, 접근 토큰 수명은 그보다 짧다.
+     * 만료를 그대로 거절하면 수명이 지난 순간부터 받는 쪽은 아무 말도 못 받으면서 연결은
+     * 멀쩡해 보인다 — 끊기지 않으니 다시 붙지도 않는다. 그래서 전달에 한해 만료를 잠시
+     * 봐준다. 대신 로그아웃·폐기는 만료와 무관하게 그대로 막고, 봐주는 창도 GRACE 로 닫는다.
+     *
+     * 서명은 만료 판정보다 먼저 검증되므로 예외에서 꺼낸 클레임도 위조되지 않았다.
+     */
+    public Claims validateAccessTokenTolerantOfExpiry(String token) {
+        Claims claims;
+        boolean expired = false;
+        try {
+            claims = jwtParser.parseSignedClaims(token).getPayload();
+        } catch (ExpiredJwtException e) {
+            claims = e.getClaims();
+            expired = true;
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
+        if (expired) {
+            java.util.Date exp = claims.getExpiration();
+            if (exp == null || System.currentTimeMillis() > exp.getTime() + EXPIRY_GRACE.toMillis()) {
+                throw new CustomException(ErrorCode.EXPIRED_TOKEN);
+            }
+        }
+        requireLiveSession(claims);
+        return claims;
+    }
+
+    /** 계정 존재·세션 폐기·개별 토큰 폐기. 만료 여부와 무관하게 늘 본다. */
+    private void requireLiveSession(Claims claims) {
         Long userId = extractUserId(claims);
         if (!users.existsById(userId)) throw new CustomException(ErrorCode.INVALID_TOKEN);
         String session = claims.get("sid", String.class);
@@ -94,7 +134,6 @@ public class JwtService {
         if (isBlacklisted(claims.getId())) {
             throw new CustomException(ErrorCode.BLACKLISTED_TOKEN);
         }
-        return claims;
     }
 
     public Long extractUserId(Claims claims) {
