@@ -34,6 +34,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(StompAuthChannelInterceptor.class);
+
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String ROOM_TOPIC_PREFIX = "/topic/rooms/";
 
@@ -135,9 +138,23 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     }
 
     private Long validateSession(String sessionId) {
+        return validateSession(sessionId, false);
+    }
+
+    /**
+     * 세션에 매어 둔 토큰을 다시 확인한다.
+     *
+     * tolerateExpiry 는 이미 열린 소켓으로 내보낼 때만 켠다. 보내는 쪽(SEND·SUBSCRIBE)은
+     * 살아 있는 토큰을 그대로 요구한다 — 새 내용을 만드는 일과 이미 하던 것을 계속 받는
+     * 일은 기준이 달라도 된다. 어느 쪽이든 로그아웃·폐기는 똑같이 막는다.
+     */
+    private Long validateSession(String sessionId, boolean tolerateExpiry) {
         String token = sessionId == null ? null : sessionTokens.get(sessionId);
         if (token == null) throw new MessagingException("unauthenticated session");
-        Long userId = jwtService.extractUserId(jwtService.validateAccessToken(token));
+        Claims claims = tolerateExpiry
+                ? jwtService.validateAccessTokenTolerantOfExpiry(token)
+                : jwtService.validateAccessToken(token);
+        Long userId = jwtService.extractUserId(claims);
         policy.requireEligible(userId);
         return userId;
     }
@@ -146,17 +163,27 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
     public Message<?> authorizeOutbound(Message<?> message) {
         var headers = org.springframework.messaging.simp.SimpMessageHeaderAccessor.wrap(message);
         if (headers.getMessageType() != org.springframework.messaging.simp.SimpMessageType.MESSAGE) return message;
+        String destination = headers.getDestination();
+        boolean roomTopic = destination != null && destination.startsWith(ROOM_TOPIC_PREFIX);
         try {
-            Long uid = validateSession(headers.getSessionId());
-            String destination = headers.getDestination();
-            if (destination != null && destination.startsWith(ROOM_TOPIC_PREFIX)) {
+            Long uid = validateSession(headers.getSessionId(), roomTopic);
+            if (roomTopic) {
                 Long room = parseRoomId(destination);
                 if (room == null) return null;
                 access.requireActiveParticipant(room, uid);
                 if (!moderation.mayDeliver(uid, room, message.getPayload())) return null;
             }
             return message;
-        } catch (RuntimeException denied) {
+        } catch (CustomException denied) {
+            // 계약된 거부다(나간 방·차단·자격 상실). 정상 동작이라 조용히 버린다.
+            return null;
+        } catch (RuntimeException failed) {
+            // 여기는 거부가 아니라 판정 자체를 못 한 경우다. 버리는 것은 같지만 흔적이
+            // 없으면 대화가 사라진 이유를 밖에서 알 길이 없다. 본문과 토큰은 남기지 않는다.
+            // ponytail: 판정 불가 프레임은 버리고 다시 시도하지 않는다. 회복은 클라이언트가
+            // 다시 붙을 때 이력을 받아 오는 경로에 맡긴다.
+            log.warn("chat outbound authorization failed destination={} session={} cause={}",
+                    destination, headers.getSessionId(), failed.getClass().getSimpleName());
             return null;
         }
     }

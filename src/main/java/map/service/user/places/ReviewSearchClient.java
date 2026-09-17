@@ -2,6 +2,8 @@ package map.service.user.places;
 
 import java.nio.charset.StandardCharsets;
 import map.service.user.places.dto.ReviewSearchResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,8 @@ import org.springframework.web.client.RestClient;
  */
 @Component
 public class ReviewSearchClient {
+
+    private static final Logger log = LoggerFactory.getLogger(ReviewSearchClient.class);
 
     private final RestClient client;
 
@@ -40,7 +44,7 @@ public class ReviewSearchClient {
     public ReviewSearchResponse search(
             String query, Integer display, Integer start, String sort
     ) {
-        return client.get()
+        ReviewSearchResponse response = client.get()
                 .uri(uri -> {
                     uri.path("/v1/reviews").queryParam("query", query);
                     if (display != null) {
@@ -63,6 +67,16 @@ public class ReviewSearchClient {
                                     res.getStatusCode().value(), body);
                         })
                 .body(ReviewSearchResponse.class);
+        // 성공 응답인데 한 건도 없으면 남긴다.
+        //
+        // hub 는 발급처를 못 부르는 상황에서도 200 과 빈 목록을 돌려준다.
+        // 그래서 기능이 통째로 꺼진 것과 그 장소에 글이 없는 것이 호출 측에서
+        // 똑같이 보인다. 질의어는 사용자가 무엇을 보고 있는지 드러내므로
+        // 남기지 않고, 비었다는 사실만 남긴다.
+        if (response == null || response.reviews() == null || response.reviews().isEmpty()) {
+            log.info("hub reviews returned no items");
+        }
+        return response;
     }
 
     /**

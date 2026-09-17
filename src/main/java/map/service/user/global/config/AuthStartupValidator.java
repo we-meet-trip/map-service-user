@@ -17,10 +17,15 @@ import org.springframework.stereotype.Component;
  *   재시작/다중 인스턴스 간 토큰 검증이 깨진다 → IllegalStateException.
  * - CORS: allowed-origins 가 와일드카드('*')이면 자격증명 비포함이라 해도 인가 시행
  *   환경에서 부적절 → IllegalStateException.
+ * - 내부 서비스 토큰: 비어 있으면 hub·agent 호출에 헤더를 붙이지 않는데, 두 서비스는
+ *   같은 플래그에서 헤더를 요구해 전부 401 로 막힌다. hub 는 빈 값에 기동을 거부하지만
+ *   이쪽은 그대로 떠서, 장애가 부팅이 아니라 조회 결과가 비는 모습으로만 드러난다
+ *   → IllegalStateException.
  *
  * authEnforced: auth.enforced 플래그.
  * jwtProperties: jwt.private-key / jwt.public-key 조회.
  * corsProperties: cors.allowed-origins 조회.
+ * hubInternalToken / agentInternalToken: 내부 서비스 호출에 붙일 토큰.
  */
 @Component
 public class AuthStartupValidator {
@@ -28,15 +33,21 @@ public class AuthStartupValidator {
     private final boolean authEnforced;
     private final JwtProperties jwtProperties;
     private final CorsProperties corsProperties;
+    private final String hubInternalToken;
+    private final String agentInternalToken;
 
     public AuthStartupValidator(
             @Value("${auth.enforced:false}") boolean authEnforced,
             JwtProperties jwtProperties,
-            CorsProperties corsProperties
+            CorsProperties corsProperties,
+            @Value("${hub.internal-token:}") String hubInternalToken,
+            @Value("${agent.internal-token:}") String agentInternalToken
     ) {
         this.authEnforced = authEnforced;
         this.jwtProperties = jwtProperties;
         this.corsProperties = corsProperties;
+        this.hubInternalToken = hubInternalToken;
+        this.agentInternalToken = agentInternalToken;
     }
 
     /**
@@ -55,6 +66,10 @@ public class AuthStartupValidator {
         if (isWildcardOrigin(corsProperties.getAllowedOrigins())) {
             throw new IllegalStateException(
                     "AUTH_ENFORCED=true forbids CORS wildcard");
+        }
+        if (isBlank(hubInternalToken) || isBlank(agentInternalToken)) {
+            throw new IllegalStateException(
+                    "AUTH_ENFORCED=true requires INTERNAL_SERVICE_TOKEN");
         }
     }
 
