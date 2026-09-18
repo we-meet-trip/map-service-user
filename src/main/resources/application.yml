@@ -180,6 +180,14 @@ recommend:
   cache-refresh-queue-capacity: ${RECOMMEND_CACHE_REFRESH_QUEUE_CAPACITY:100}
 
 # ---- weather-watch : 저장된 일정의 날씨 변화 감시 ----
+# TransitRouteController(POST /api/v1/transit/routes/walk) 가 본 섹션을 참조한다.
+# 대중교통 경로 지도에서 구간 사이 도보 연결선(회색 직선)을 실제 보행 경로로
+# 바꿔 그리기 위한 조회. 미완성 머지용 스위치라 기본 꺼짐 — 꺼져 있으면 hub 를
+# 부르지 않고 "unavailable" 을 답해, 앱은 지금처럼 직선을 그린다.
+# - enabled : 조회 사용 여부
+transit-walk:
+  enabled: ${TRANSIT_WALK_ENABLED:false}
+
 # ScheduleWeatherWatcher 가 본 섹션을 참조한다.
 # 아직 끝나지 않은 일정의 예보를 주기적으로 다시 받아, 저장 시점 예보와 견줘
 # 실내/야외 판단이 뒤집히면 일정에 알림을 걸어 둔다(앱은 배너 + 1클릭 재추천).
