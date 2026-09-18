@@ -1,5 +1,6 @@
 package map.service.user.transit;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -7,12 +8,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
 import map.service.user.global.ratelimit.RateLimitFilter;
 import map.service.user.global.security.JwtAuthenticationFilter;
+import map.service.user.transit.dto.TransitLaneRequest;
+import map.service.user.transit.dto.TransitLaneResponse;
 import map.service.user.transit.dto.TransitRouteLeg;
 import map.service.user.transit.dto.TransitRouteOption;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
@@ -205,5 +209,59 @@ class TransitRouteControllerTest {
 
         verify(client, never())
                 .fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString());
+    }
+
+    // ── POST /api/v1/transit/routes/lane ─────────────────────────────
+
+    private static final String LANE_URL = "/api/v1/transit/routes/lane";
+
+    @Test
+    @DisplayName("노선 좌표 — 본문을 그대로 넘기고 geometries 를 돌려준다")
+    void lane_valid_returns200() throws Exception {
+        when(client.fetchLane(any())).thenReturn(new TransitLaneResponse(
+                "ok", List.of(List.of(), List.of(List.of(37.5663, 126.9779)))));
+
+        mockMvc.perform(post(LANE_URL)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"map_obj\":\"18:2:132:136@204:2:917:915\","
+                                + "\"types\":[\"walk\",\"subway\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"))
+                .andExpect(jsonPath("$.geometries.length()").value(2))
+                .andExpect(jsonPath("$.geometries[1][0][0]").value(37.5663));
+
+        verify(client).fetchLane(new TransitLaneRequest(
+                "18:2:132:136@204:2:917:915", List.of("walk", "subway")));
+    }
+
+    @Test
+    @DisplayName("노선 좌표 — hub 가 못 주면 200 + unavailable(client 는 직선 유지)")
+    void lane_unavailable_passesThrough() throws Exception {
+        when(client.fetchLane(any())).thenReturn(TransitLaneResponse.unavailable());
+
+        mockMvc.perform(post(LANE_URL)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"map_obj\":\"1:2:3:4\",\"types\":[\"subway\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("unavailable"))
+                .andExpect(jsonPath("$.geometries.length()").value(0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"map_obj\":\"1:2;DROP\",\"types\":[\"subway\"]}",  // 허용 안 된 문자
+            "{\"map_obj\":\"\",\"types\":[\"subway\"]}",           // 빈 값
+            "{\"map_obj\":\"1:2:3:4\",\"types\":[]}",              // 구간 없음
+            "{\"map_obj\":\"1:2:3:4\",\"types\":[\"taxi\"]}",      // 모르는 종류
+            "{\"types\":[\"subway\"]}"                             // map_obj 누락
+    })
+    @DisplayName("노선 좌표 — 형식이 틀리면 400 이며 hub 를 부르지 않는다")
+    void lane_invalidBody_returns400(String body) throws Exception {
+        mockMvc.perform(post(LANE_URL)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verify(client, never()).fetchLane(any());
     }
 }
