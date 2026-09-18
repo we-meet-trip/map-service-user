@@ -60,13 +60,15 @@ class TransitRouteControllerTest {
                                         "subway", "수도권 9호선", "언주", "신논현",
                                         2, 1, 1200,
                                         List.of(List.of(37.507323, 127.033909)),
-                                        List.of("언주", "신논현")))),
+                                        List.of("언주", "신논현"))),
+                                "18:2:132:136@204:2:917:915"),
                         new TransitRouteOption(44, 1750, 2, 314, 1200, 8300, 0.874,
                                 List.of("subway", "bus"),
                                 List.of(new TransitRouteLeg(
                                         "bus", null, "신림동별빛거리입구", "여의도역3번출구",
                                         20, 11, 8300,
-                                        List.of(), List.of())))));
+                                        List.of(), List.of())),
+                                null)));
         when(client.fetch(anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyString()))
                 .thenReturn(response);
 
