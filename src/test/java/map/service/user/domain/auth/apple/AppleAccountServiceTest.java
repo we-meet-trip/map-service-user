@@ -27,12 +27,15 @@ class AppleAccountServiceTest {
     String aad() { return PayloadCipher.aad("apple_accounts","refresh_token","7"); }
 
     @Test void withdrawalRevokesDecryptedCredentialAndProviderFailureKeepsIt() {
+        // 발급처가 멈춰도 예외를 밖으로 내지 않는다. 이 호출은 탈퇴 트랜잭션
+        // 안에서 돌아, 예외가 넘어가면 계정이 아예 지워지지 않는다. 대신
+        // 암호문을 남겨 나중에 다시 거둘 수 있게 둔다.
         String encrypted = cipher.encrypt("test-refresh",aad());
         AppleAccount account = new AppleAccount(7L,"apple-sub",encrypted);
         when(links.findById(7L)).thenReturn(Optional.of(account));
         doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE))
                 .when(apple).revoke("test-refresh");
-        assertThatThrownBy(() -> service().revokeForWithdrawal(7L)).isInstanceOf(ResponseStatusException.class);
+        assertThatCode(() -> service().revokeForWithdrawal(7L)).doesNotThrowAnyException();
         assertThat(account.getRefreshTokenCiphertext()).isEqualTo(encrypted);
         doNothing().when(apple).revoke("test-refresh");
         service().revokeForWithdrawal(7L);

@@ -1,79 +1,52 @@
 package map.service.user.global.config;
 
 import java.net.URI;
-import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+/**
+ * 카카오 로그인 설정.
+ *
+ * 앱이 카카오 SDK 로 직접 로그인해 액세스 토큰을 들고 오므로, 서버는 인가 주소를
+ * 만들지도 인가 코드를 토큰으로 바꾸지도 않는다. 서버가 하는 일은 받은 토큰이
+ * <b>우리 앱에 발급된 것인지</b> 확인하고 그 토큰으로 사용자 정보를 읽는 것뿐이라,
+ * 필요한 값도 앱 식별자와 두 개의 조회 주소로 줄었다.
+ *
+ * appId 가 비어 있으면 카카오 로그인이 꺼진 것으로 본다. 이메일 로그인과 CI 픽스처는
+ * 카카오 설정 없이도 떠야 하기 때문이다.
+ */
 @Getter
 @Setter
 @ConfigurationProperties(prefix = "kakao")
 public class KakaoProperties implements InitializingBean {
 
-    private String clientId;
-    private String clientSecret;
-    private String redirectUri;
-    private String authorizeUri;
-    private String tokenUri;
-    private String userInfoUri;
-    private String nativeEnvironment = "local";
-    private String publicOrigin;
-    private boolean authEnforced;
+    /** 카카오가 앱마다 부여하는 번호. 받은 토큰이 이 앱 것인지 대조하는 기준이다. */
+    private Long appId;
 
-    /** Complete fixed callback URI, not a caller-selected scheme. */
-    private String appCallbackScheme;
+    /** 토큰 정보 보기. 토큰에 묶인 앱 번호와 회원번호를 돌려준다. */
+    private String tokenInfoUri;
+
+    /** 사용자 정보 가져오기. 닉네임 등 프로필을 돌려준다. */
+    private String userInfoUri;
 
     @Override
     public void afterPropertiesSet() {
-        // A disabled provider must not prevent email login or the isolated CI fixture.
-        if (clientId == null || clientId.isBlank()) return;
-        if ("local".equals(nativeEnvironment) && !authEnforced) {
-            URI redirect = parse(redirectUri);
-            require("http".equals(redirect.getScheme())
-                    && Set.of("localhost", "127.0.0.1", "[::1]").contains(redirect.getHost())
-                    && clean(redirect) && "/api/v1/auth/kakao/callback".equals(redirect.getRawPath()),
-                    "Local Kakao redirect must use the loopback callback");
-            require("mapauth-test://kakao".equals(appCallbackScheme),
-                    "Local Kakao callback must use the test app");
-            return;
-        }
-        require(Set.of("test", "prod").contains(nativeEnvironment),
-                "Configured Kakao requires APP_ENV=test or prod");
-        URI origin = parse(publicOrigin);
-        require("https".equals(origin.getScheme()) && clean(origin)
-                && origin.getHost() != null && origin.getHost().contains(".")
-                && origin.getPort() == -1 && origin.getRawPath().isEmpty()
-                && !origin.getHost().matches("[0-9.]+")
-                && !origin.getHost().endsWith(".localhost"),
-                "KAKAO_PUBLIC_ORIGIN must be an explicit HTTPS DNS origin without a port or path");
-        require((publicOrigin + "/api/v1/auth/kakao/callback").equals(redirectUri),
-                "KAKAO_OAUTH_REDIRECT_URI must match the public origin callback exactly");
-        require(("test".equals(nativeEnvironment) ? "mapauth-test://kakao" : "mapauth://kakao")
-                .equals(appCallbackScheme), "Kakao app callback must match APP_ENV");
-        if ("prod".equals(nativeEnvironment)) {
-            String host = origin.getHost().toLowerCase(java.util.Locale.ROOT);
-            require(!host.equals("mapapptest.duckdns.org") && !host.endsWith(".web.app")
-                    && !host.endsWith(".firebaseapp.com"), "Production Kakao forbids known test origins");
-        }
-        require("https://kauth.kakao.com/oauth/authorize".equals(authorizeUri)
-                && "https://kauth.kakao.com/oauth/token".equals(tokenUri)
-                && "https://kapi.kakao.com/v2/user/me".equals(userInfoUri),
-                "Deployed Kakao endpoints must use the fixed provider HTTPS APIs");
+        // 꺼진 제공자가 다른 로그인 수단까지 막아서는 안 된다.
+        if (appId == null) return;
+        require(appId > 0, "KAKAO_APP_ID must be a positive application identifier");
+        // 조회 주소가 바뀌면 토큰이 어디로 나가는지가 바뀐다. 값으로 열어 두지 않고 고정한다.
+        require(fixed(tokenInfoUri, "https://kapi.kakao.com/v1/user/access_token_info")
+                && fixed(userInfoUri, "https://kapi.kakao.com/v2/user/me"),
+                "Kakao lookup endpoints must use the fixed provider HTTPS APIs");
     }
 
-    private static boolean clean(URI uri) {
-        return uri.getRawUserInfo() == null && uri.getRawQuery() == null && uri.getRawFragment() == null;
-    }
-
-    private static URI parse(String value) {
-        try {
-            require(value != null && !value.isBlank() && value.equals(value.trim()), "Kakao URI is missing or invalid");
-            return URI.create(value);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("Kakao URI is invalid");
-        }
+    private static boolean fixed(String value, String expected) {
+        if (value == null || !value.equals(expected)) return false;
+        URI uri = URI.create(value);
+        return "https".equals(uri.getScheme()) && uri.getRawUserInfo() == null
+                && uri.getRawQuery() == null && uri.getRawFragment() == null;
     }
 
     private static void require(boolean condition, String message) {

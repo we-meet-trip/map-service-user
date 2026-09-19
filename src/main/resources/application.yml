@@ -180,6 +180,14 @@ recommend:
   cache-refresh-queue-capacity: ${RECOMMEND_CACHE_REFRESH_QUEUE_CAPACITY:100}
 
 # ---- weather-watch : 저장된 일정의 날씨 변화 감시 ----
+# TransitRouteController(POST /api/v1/transit/routes/walk) 가 본 섹션을 참조한다.
+# 대중교통 경로 지도에서 구간 사이 도보 연결선(회색 직선)을 실제 보행 경로로
+# 바꿔 그리기 위한 조회. 미완성 머지용 스위치라 기본 꺼짐 — 꺼져 있으면 hub 를
+# 부르지 않고 "unavailable" 을 답해, 앱은 지금처럼 직선을 그린다.
+# - enabled : 조회 사용 여부
+transit-walk:
+  enabled: ${TRANSIT_WALK_ENABLED:false}
+
 # ScheduleWeatherWatcher 가 본 섹션을 참조한다.
 # 아직 끝나지 않은 일정의 예보를 주기적으로 다시 받아, 저장 시점 예보와 견줘
 # 실내/야외 판단이 뒤집히면 일정에 알림을 걸어 둔다(앱은 배너 + 1클릭 재추천).
@@ -322,15 +330,12 @@ jwt:
 # - app-callback-scheme       : 인가 코드 캡처 후 앱으로 복귀시킬 커스텀 스킴 (GET 바운스 콜백 대상)
 # - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
 kakao:
-  native-environment: ${APP_ENV:local}
-  public-origin: ${KAKAO_PUBLIC_ORIGIN:}
-  auth-enforced: ${AUTH_ENFORCED:false}
-  client-id: ${KAKAO_OAUTH_CLIENT_ID:}
-  client-secret: ${KAKAO_OAUTH_CLIENT_SECRET:}
-  redirect-uri: ${KAKAO_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
-  authorize-uri: ${KAKAO_AUTHORIZE_URI:https://kauth.kakao.com/oauth/authorize}
-  app-callback-scheme: ${KAKAO_APP_CALLBACK_SCHEME:mapauth-test://kakao}
-  token-uri: ${KAKAO_TOKEN_URI:https://kauth.kakao.com/oauth/token}
+  # 앱이 카카오 SDK 로 로그인하므로 서버는 인가 주소를 만들지 않는다.
+  # 앱 번호는 비밀이 아니다 — 커스텀 스킴(kakao{키}://oauth)과 토큰 정보 응답에 그대로
+  # 드러나고, 시험과 운영이 같은 카카오 앱 하나를 쓴다. 고정된 운영 compose 가 이 이름을
+  # 컨테이너로 넘겨주지 않으므로 기본값으로 둔다. 환경에서 주면 그쪽이 이긴다.
+  app-id: ${KAKAO_APP_ID:1443373}
+  token-info-uri: ${KAKAO_TOKEN_INFO_URI:https://kapi.kakao.com/v1/user/access_token_info}
   user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
 
 # ---- cors : 교차 출처 허용 정책 ----

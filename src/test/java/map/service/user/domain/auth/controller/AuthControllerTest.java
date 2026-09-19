@@ -159,93 +159,33 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.code").value("AUTH_002"));
     }
 
-    // ── GET /api/v1/auth/kakao (authorize URL 발급) ─────────────────────────
-
-    @Test
-    @DisplayName("카카오 authorize URL — state 포함 시 200 OK 및 authorizeUrl 반환")
-    void kakaoAuthorizeUrl_withState_returns200() throws Exception {
-        when(kakaoOAuthService.buildAuthorizeUrl(any()))
-                .thenReturn("https://kauth.kakao.com/oauth/authorize?client_id=k&state=abc");
-
-        mockMvc.perform(get("/api/v1/auth/kakao").param("state", "abc"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.authorizeUrl")
-                        .value("https://kauth.kakao.com/oauth/authorize?client_id=k&state=abc"));
-    }
-
-    @Test
-    @DisplayName("카카오 authorize URL — state 누락 시 400 Bad Request")
-    void kakaoAuthorizeUrl_missingState_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/auth/kakao"))
-                .andExpect(status().isBadRequest());
-    }
-
-    // ── GET /api/v1/auth/kakao/callback (앱 스킴 바운스) ─────────────────────
-
-    @Test
-    @DisplayName("카카오 GET 바운스 — code/state 를 앱 스킴 Location 으로 302 리다이렉트")
-    void kakaoCallbackBounce_success_returns302() throws Exception {
-        when(kakaoOAuthService.buildAppCallbackLocation(any(), any(), any(), any()))
-                .thenReturn("mapauth://kakao?code=c1&state=s1");
-
-        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("code", "c1").param("state", "s1"))
-                .andExpect(status().isFound())
-                .andExpect(header().string("Location", "mapauth://kakao?code=c1&state=s1"));
-    }
-
-    @Test
-    @DisplayName("카카오 GET 바운스 — error 파라미터도 앱 스킴 Location 으로 302 전달")
-    void kakaoCallbackBounce_error_returns302() throws Exception {
-        when(kakaoOAuthService.buildAppCallbackLocation(any(), any(), any(), any()))
-                .thenReturn("mapauth://kakao?error=access_denied&state=s1");
-
-        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("error", "access_denied").param("state", "s1"))
-                .andExpect(status().isFound())
-                .andExpect(header().string("Location", "mapauth://kakao?error=access_denied&state=s1"));
-    }
-
-    @Test
-    void kakaoCallbackRejectsMissingBlankAndDuplicateParameters() throws Exception {
-        mockMvc.perform(get("/api/v1/auth/kakao/callback").param("error", "access_denied"))
-                .andExpect(status().isBadRequest());
-        for (String field : new String[] {"state", "code", "error", "error_description"}) {
-            var request = get("/api/v1/auth/kakao/callback").param("state", "s1").param("code", "c1");
-            request.queryParam(field, "a", "b");
-            mockMvc.perform(request).andExpect(status().isBadRequest());
-        }
-        mockMvc.perform(get("/api/v1/auth/kakao").param("state", "a", "b"))
-                .andExpect(status().isBadRequest());
-        mockMvc.perform(get("/api/v1/auth/kakao").param("state", " "))
-                .andExpect(status().isBadRequest());
-    }
-
     @Test
     void kakaoAccountConflictHasExplicitHttpContract() throws Exception {
         when(kakaoOAuthService.processLogin(any())).thenThrow(new CustomException(ErrorCode.KAKAO_ACCOUNT_CONFLICT));
         mockMvc.perform(post("/api/v1/auth/kakao/callback").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"synthetic\"}"))
+                        .content("{\"accessToken\":\"synthetic\"}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("KAKAO_004"));
     }
 
     // ── POST /api/v1/auth/kakao/callback ────────────────────────────────────
 
     @Test
-    @DisplayName("카카오 콜백 — 유효한 code 시 200 OK 및 토큰 반환")
-    void kakaoCallback_validCode_returns200() throws Exception {
+    @DisplayName("카카오 콜백 — 유효한 액세스 토큰 시 200 OK 및 토큰 반환")
+    void kakaoCallback_validAccessToken_returns200() throws Exception {
         when(kakaoOAuthService.processLogin(any())).thenReturn(mockAuthResponse);
 
         mockMvc.perform(post("/api/v1/auth/kakao/callback")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
-                                "code", "kakao-auth-code-12345"
+                                "accessToken", "kakao-access-token-12345"
                         ))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").exists());
     }
 
     @Test
-    @DisplayName("카카오 콜백 — code 누락 시 400 Bad Request")
-    void kakaoCallback_missingCode_returns400() throws Exception {
+    @DisplayName("카카오 콜백 — 액세스 토큰 누락 시 400 Bad Request")
+    void kakaoCallback_missingAccessToken_returns400() throws Exception {
         mockMvc.perform(post("/api/v1/auth/kakao/callback")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))

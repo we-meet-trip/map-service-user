@@ -2,11 +2,16 @@ package map.service.user.transit;
 
 import java.nio.charset.StandardCharsets;
 import map.service.user.global.crypto.LocationSeal;
+import map.service.user.transit.dto.TransitLaneRequest;
+import map.service.user.transit.dto.TransitLaneResponse;
 import map.service.user.transit.dto.TransitRouteOptionsResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * TransitRouteClient — hub /v1/transit/routes 호출 어댑터 (경계 B3)
@@ -19,6 +24,9 @@ import org.springframework.web.client.RestClient;
  */
 @Component
 public class TransitRouteClient {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(TransitRouteClient.class);
 
     private final RestClient client;
 
@@ -63,6 +71,42 @@ public class TransitRouteClient {
                                     res.getStatusCode().value(), body);
                         })
                 .body(TransitRouteOptionsResponse.class);
+    }
+
+    /**
+     * hub POST /v1/transit/routes/lane 호출 — 경로 후보 한 건의 실제 노선 좌표.
+     *
+     * fetch 와 달리 실패를 예외로 올리지 않고 "unavailable" 로 돌려준다. 이
+     * 조회가 실패해도 client 는 이미 가진 정류장 직선을 그대로 그리면 되므로
+     * 오류 화면을 띄울 일이 아니다 — HubDirectionsClient 와 같은 판단이다.
+     *
+     * 실패 로그에는 상태 코드와 예외 종류만 남긴다. mapObj 에는 타고 내린
+     * 구간이 담겨 있어, 남기면 사용자의 이동 경로가 로그에 기록된다.
+     *
+     * BFF 는 결과를 캐시하지 않는다 — hub 가 mapObj 단위로 캐시하고 하루 호출
+     * 상한도 관리한다.
+     */
+    public TransitLaneResponse fetchLane(TransitLaneRequest request) {
+        try {
+            TransitLaneResponse res = client.post()
+                    .uri("/v1/transit/routes/lane")
+                    .body(request)
+                    .retrieve()
+                    .body(TransitLaneResponse.class);
+            if (res == null || res.status() == null || res.geometries() == null) {
+                return TransitLaneResponse.unavailable();
+            }
+            return res;
+        } catch (RestClientResponseException e) {
+            log.warn("hub /v1/transit/routes/lane failed status={}",
+                    e.getStatusCode().value());
+            return TransitLaneResponse.unavailable();
+        } catch (RuntimeException e) {
+            // hub 다운·타임아웃·역직렬화 실패 등. 직선으로 물러서면 된다.
+            log.warn("hub /v1/transit/routes/lane failed cause={}",
+                    e.getClass().getSimpleName());
+            return TransitLaneResponse.unavailable();
+        }
     }
 
     /**

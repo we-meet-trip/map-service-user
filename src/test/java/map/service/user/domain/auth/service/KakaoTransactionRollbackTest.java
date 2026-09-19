@@ -42,14 +42,13 @@ class KakaoTransactionRollbackTest {
         var builder = RestClient.builder();
         var stub = MockRestServiceServer.bindTo(builder).build();
         var actualClient = builder.build();
-        when(restClient.post()).thenAnswer(invocation -> actualClient.post());
         when(restClient.get()).thenAnswer(invocation -> actualClient.get());
-        when(properties.getClientId()).thenReturn("synthetic");
-        when(properties.getRedirectUri()).thenReturn("https://test.example.invalid/api/v1/auth/kakao/callback");
-        when(properties.getTokenUri()).thenReturn("https://provider.example.invalid/token");
+        when(properties.getAppId()).thenReturn(4242L);
+        when(properties.getTokenInfoUri()).thenReturn("https://provider.example.invalid/token-info");
         when(properties.getUserInfoUri()).thenReturn("https://provider.example.invalid/me");
-        stub.expect(requestTo("https://provider.example.invalid/token"))
-                .andRespond(withSuccess("{\"access_token\":\"synthetic\"}", MediaType.APPLICATION_JSON));
+        stub.expect(requestTo("https://provider.example.invalid/token-info"))
+                .andRespond(withSuccess("{\"id\":123,\"expires_in\":21599,\"app_id\":4242}",
+                        MediaType.APPLICATION_JSON));
         stub.expect(requestTo("https://provider.example.invalid/me"))
                 .andRespond(withSuccess("{\"id\":123,\"kakao_account\":{}}", MediaType.APPLICATION_JSON));
         when(accounts.saveAndFlush(any())).thenAnswer(invocation -> {
@@ -57,7 +56,7 @@ class KakaoTransactionRollbackTest {
             throw new DataIntegrityViolationException("synthetic provider race");
         });
         var request = new KakaoLoginRequest();
-        ReflectionTestUtils.setField(request, "code", "synthetic");
+        ReflectionTestUtils.setField(request, "accessToken", "synthetic");
         assertThatThrownBy(() -> service.processLogin(request)).isInstanceOf(CustomException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KAKAO_ACCOUNT_CONFLICT);
         stub.verify();

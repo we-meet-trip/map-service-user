@@ -97,6 +97,10 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'com.h2database:h2'
+    // 로컬에서 bootRun 으로 띄워 볼 때만 쓰는 인메모리 드라이버.
+    // developmentOnly 는 bootJar 에 담기지 않으므로 운영 산출물에는 H2 가 없다
+    // (RuntimeDatabaseGuard 가 그 전제 위에서 H2 예외를 test 프로파일로 한정한다).
+    developmentOnly 'com.h2database:h2'
     testImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     testRuntimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
     testRuntimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'

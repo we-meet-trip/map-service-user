@@ -22,12 +22,12 @@ public enum ErrorCode {
     REFRESH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "JWT_006", "만료된 refresh token입니다."),
 
     // Auth — Kakao
-    KAKAO_TOKEN_EXCHANGE_FAILED(HttpStatus.BAD_GATEWAY, "KAKAO_001", "카카오 인가 코드 교환에 실패했습니다."),
+    KAKAO_TOKEN_REJECTED(HttpStatus.UNAUTHORIZED, "KAKAO_001", "카카오 로그인 정보를 확인하지 못했습니다. 다시 시도해주세요."),
     KAKAO_USER_INFO_FAILED(HttpStatus.BAD_GATEWAY, "KAKAO_002", "카카오 사용자 정보 조회에 실패했습니다."),
     KAKAO_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "KAKAO_003", "카카오 로그인이 아직 열리지 않았습니다."),
 
     KAKAO_ACCOUNT_CONFLICT(HttpStatus.CONFLICT, "KAKAO_004", "계정 정보를 자동으로 연결할 수 없습니다. 기존 로그인 방법을 이용하거나 다시 시도해주세요."),
-    KAKAO_CALLBACK_INVALID(HttpStatus.BAD_REQUEST, "KAKAO_005", "카카오 로그인 요청을 다시 시작해주세요."),
+    KAKAO_TOKEN_INFO_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "KAKAO_005", "카카오 로그인을 잠시 후 다시 시도해주세요."),
 
     // Rate Limit
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "RATE_001", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),

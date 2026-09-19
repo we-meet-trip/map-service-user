@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import map.service.user.domain.auth.dto.request.KakaoLoginRequest;
 import map.service.user.domain.auth.dto.response.AuthResponse;
-import map.service.user.domain.auth.dto.response.KakaoTokenResponse;
+import map.service.user.domain.auth.dto.response.KakaoTokenInfoResponse;
 import map.service.user.domain.auth.dto.response.KakaoUserInfoResponse;
 import map.service.user.domain.user.entity.AuthProvider;
 import map.service.user.domain.user.entity.OAuthAccount;
@@ -17,19 +17,27 @@ import map.service.user.global.config.KakaoProperties;
 import map.service.user.global.exception.CustomException;
 import map.service.user.global.exception.ErrorCode;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 
+/**
+ * 카카오 로그인.
+ *
+ * 앱이 카카오 SDK 로 로그인해 액세스 토큰을 받아 오고, 서버는 그 토큰을 검증한 뒤
+ * 우리 계정에 연결한다. 인가 주소 조립과 인가 코드 교환은 서버가 하지 않는다 —
+ * 카카오톡 앱으로 직접 전환하는 방식에는 리다이렉트가 없기 때문이다.
+ *
+ * 토큰을 받았다고 바로 믿지 않는다. 카카오 회원번호는 앱마다 따로 매겨지므로,
+ * 다른 앱에서 발급된 토큰을 그대로 받아들이면 그 앱의 회원번호가 우리 쪽 같은 번호의
+ * 계정으로 이어질 수 있다. 그래서 토큰에 묶인 앱 번호를 먼저 대조한다.
+ */
 @Slf4j
 @Service
 @Transactional(readOnly = true)
@@ -46,76 +54,21 @@ public class KakaoOAuthService {
     /** 동의항목: 닉네임만 요청(기본 제공, 비즈앱/심사 불요). 이메일은 provider_id 전용 정책상 미요청. */
     private static final String SCOPE = "profile_nickname";
 
-    /**
-     * Kakao 인가 요청 URL 을 조립한다.
-     * redirect_uri 는 토큰 교환(exchangeCodeForToken)과 동일한 kakaoProperties.getRedirectUri()
-     * 를 사용해 byte 단위 일치를 보장한다(불일치=KOE006). client_id 는 공개 식별자(REST 키)다.
-     *
-     * @param state 앱이 생성한 CSRF 방지 랜덤값(앱이 콜백에서 재검증)
-     */
-    public String buildAuthorizeUrl(String state) {
-        // 발급 식별자가 비어 있어도 주소는 만들어진다. 그 주소를 받은 앱은
-        // 바깥 브라우저를 열고, 사용자는 카카오 오류 화면을 보고, 앱은 돌아오지
-        // 않는 응답을 기다리다 한참 뒤에야 시간 초과로 접힌다. 설정이 덜 된
-        // 것을 사용자가 잘못한 것처럼 보여 주는 셈이라, 여기서 바로 끊는다.
-        String clientId = kakaoProperties.getClientId();
-        if (clientId == null || clientId.isBlank()) {
-            throw new CustomException(ErrorCode.KAKAO_NOT_CONFIGURED);
-        }
-        requireState(state);
-        return kakaoProperties.getAuthorizeUri()
-                + "?client_id="     + enc(clientId)
-                + "&redirect_uri="  + enc(kakaoProperties.getRedirectUri())
-                + "&response_type=code"
-                + "&scope="         + enc(SCOPE)
-                + "&state="         + enc(state);
-    }
-
-    /**
-     * Kakao https 콜백(GET)을 앱 커스텀 스킴으로 재작성할 Location 문자열을 만든다.
-     * 리다이렉트 대상 스킴은 설정값(kakao.app-callback-scheme)으로 고정되어 요청 입력을 받지
-     * 않으므로 open-redirect 위험이 없다. 성공 시 code/state, 실패 시 error/error_description/state 를
-     * URL-encode 하여 쿼리로 전달한다.
-     */
-    public String buildAppCallbackLocation(String code, String state, String error, String errorDescription) {
-        requireState(state);
-        if ((code == null || code.isBlank()) == (error == null || error.isBlank())) {
-            throw new CustomException(ErrorCode.KAKAO_CALLBACK_INVALID);
-        }
-        StringBuilder sb = new StringBuilder(kakaoProperties.getAppCallbackScheme());
-        sb.append('?');
-        if (error != null && !error.isBlank()) {
-            sb.append("error=").append(enc(error));
-            if (errorDescription != null && !errorDescription.isBlank()) {
-                sb.append("&error_description=").append(enc(errorDescription));
-            }
-        } else {
-            sb.append("code=").append(enc(code));
-        }
-        sb.append("&state=").append(enc(state));
-        return sb.toString();
-    }
-
-    private static void requireState(String state) {
-        if (state == null || state.isBlank() || state.length() > 512
-                || state.chars().anyMatch(Character::isISOControl)) {
-            throw new CustomException(ErrorCode.KAKAO_CALLBACK_INVALID);
-        }
-    }
-
-    private static String enc(String v) {
-        return URLEncoder.encode(v == null ? "" : v, StandardCharsets.UTF_8);
-    }
-
     @Transactional
     public AuthResponse processLogin(KakaoLoginRequest request) {
-        KakaoTokenResponse kakaoToken = exchangeCodeForToken(request.getCode());
-        if (kakaoToken == null || kakaoToken.getAccessToken() == null) {
-            throw new CustomException(ErrorCode.KAKAO_TOKEN_EXCHANGE_FAILED);
+        if (kakaoProperties.getAppId() == null) {
+            throw new CustomException(ErrorCode.KAKAO_NOT_CONFIGURED);
         }
-        KakaoUserInfoResponse userInfo = fetchUserInfo(kakaoToken.getAccessToken());
+        String accessToken = request.getAccessToken();
+        long verifiedUserId = verifyAccessToken(accessToken);
+
+        KakaoUserInfoResponse userInfo = fetchUserInfo(accessToken);
         if (userInfo == null || userInfo.getId() == null || userInfo.getId() <= 0) {
             throw new CustomException(ErrorCode.KAKAO_USER_INFO_FAILED);
+        }
+        // 두 조회가 같은 토큰을 쓰는데 회원번호가 다르면 응답을 신뢰할 수 없다.
+        if (userInfo.getId() != verifiedUserId) {
+            throw new CustomException(ErrorCode.KAKAO_TOKEN_REJECTED);
         }
 
         Optional<OAuthAccount> existingOAuth =
@@ -132,7 +85,7 @@ public class KakaoOAuthService {
                     .user(user)
                     .provider(AuthProvider.KAKAO)
                     .providerUserId(userInfo.getId())
-                    .scope(kakaoToken.getScope())
+                    .scope(SCOPE)
                     .connectedAt(parseConnectedAt(userInfo.getConnectedAt()))
                     .build();
 
@@ -157,32 +110,41 @@ public class KakaoOAuthService {
         return authService.buildAuthResponse(user);
     }
 
-    private KakaoTokenResponse exchangeCodeForToken(String code) {
+    /**
+     * 토큰이 이 앱에 발급된 것인지 확인하고 그 토큰의 회원번호를 돌려준다.
+     *
+     * 카카오는 토큰이 무효할 때 401 을, 자기 쪽 일시 장애일 때 400 을 준다. 둘을 같게
+     * 다루면 장애 중에 멀쩡한 사용자를 로그아웃시키게 되므로, 무효는 거절(401)로
+     * 장애는 잠시 후 재시도(503)로 나눈다.
+     */
+    private long verifyAccessToken(String accessToken) {
+        KakaoTokenInfoResponse info;
         try {
-            MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-            params.add("grant_type",    "authorization_code");
-            params.add("client_id",     kakaoProperties.getClientId());
-            // client_secret 은 2025-12 개편 이후 REST 키에 기본 활성이나, 콘솔에서 비활성한 앱도
-            // 있으므로 값이 있을 때만 포함한다(빈 값 전송 시 Kakao 가 오류로 처리할 수 있음).
-            String clientSecret = kakaoProperties.getClientSecret();
-            if (clientSecret != null && !clientSecret.isBlank()) {
-                params.add("client_secret", clientSecret);
-            }
-            // redirect_uri 는 authorize 단계와 byte 단위 동일해야 한다(불일치=KOE006/invalid_grant).
-            // buildAuthorizeUrl 도 동일한 kakaoProperties.getRedirectUri() 를 사용한다.
-            params.add("redirect_uri",  kakaoProperties.getRedirectUri());
-            params.add("code",          code);
-
-            return kakaoRestClient.post()
-                    .uri(kakaoProperties.getTokenUri())
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(params)
+            info = kakaoRestClient.get()
+                    .uri(kakaoProperties.getTokenInfoUri())
+                    .header("Authorization", "Bearer " + accessToken)
                     .retrieve()
-                    .body(KakaoTokenResponse.class);
+                    .body(KakaoTokenInfoResponse.class);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                log.warn("카카오 액세스 토큰 거절 (401)");
+                throw new CustomException(ErrorCode.KAKAO_TOKEN_REJECTED);
+            }
+            log.warn("카카오 토큰 정보 조회 실패 (status={})", e.getStatusCode().value());
+            throw new CustomException(ErrorCode.KAKAO_TOKEN_INFO_UNAVAILABLE);
         } catch (RestClientException e) {
-            log.warn("카카오 토큰 교환 실패 ({})", e.getClass().getSimpleName());
-            throw new CustomException(ErrorCode.KAKAO_TOKEN_EXCHANGE_FAILED);
+            log.warn("카카오 토큰 정보 조회 실패 ({})", e.getClass().getSimpleName());
+            throw new CustomException(ErrorCode.KAKAO_TOKEN_INFO_UNAVAILABLE);
         }
+        if (info == null || info.getId() == null || info.getId() <= 0 || info.getAppId() == null) {
+            throw new CustomException(ErrorCode.KAKAO_TOKEN_INFO_UNAVAILABLE);
+        }
+        if (!kakaoProperties.getAppId().equals(info.getAppId())) {
+            // 다른 앱에서 발급된 토큰이다. 그 앱의 회원번호로 우리 계정을 열어 줄 수는 없다.
+            log.warn("카카오 액세스 토큰의 앱 번호 불일치");
+            throw new CustomException(ErrorCode.KAKAO_TOKEN_REJECTED);
+        }
+        return info.getId();
     }
 
     private KakaoUserInfoResponse fetchUserInfo(String accessToken) {
