@@ -330,15 +330,10 @@ jwt:
 # - app-callback-scheme       : 인가 코드 캡처 후 앱으로 복귀시킬 커스텀 스킴 (GET 바운스 콜백 대상)
 # - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
 kakao:
-  native-environment: ${APP_ENV:local}
-  public-origin: ${KAKAO_PUBLIC_ORIGIN:}
-  auth-enforced: ${AUTH_ENFORCED:false}
-  client-id: ${KAKAO_OAUTH_CLIENT_ID:}
-  client-secret: ${KAKAO_OAUTH_CLIENT_SECRET:}
-  redirect-uri: ${KAKAO_OAUTH_REDIRECT_URI:http://localhost:8080/api/v1/auth/kakao/callback}
-  authorize-uri: ${KAKAO_AUTHORIZE_URI:https://kauth.kakao.com/oauth/authorize}
-  app-callback-scheme: ${KAKAO_APP_CALLBACK_SCHEME:mapauth-test://kakao}
-  token-uri: ${KAKAO_TOKEN_URI:https://kauth.kakao.com/oauth/token}
+  # 앱이 카카오 SDK 로 로그인하므로 서버는 인가 주소를 만들지 않는다.
+  # app-id 가 비면 카카오 로그인이 꺼진 것으로 보고 다른 로그인 수단만 연다.
+  app-id: ${KAKAO_APP_ID:}
+  token-info-uri: ${KAKAO_TOKEN_INFO_URI:https://kapi.kakao.com/v1/user/access_token_info}
   user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
 
 # ---- cors : 교차 출처 허용 정책 ----

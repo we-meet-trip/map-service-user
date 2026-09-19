@@ -60,14 +60,8 @@ training:
     enabled: false
 
 kakao:
-  native-environment: test
-  public-origin: https://test.example.com
-  client-id: test-client-id
-  client-secret: test-client-secret
-  redirect-uri: https://test.example.com/api/v1/auth/kakao/callback
-  authorize-uri: https://kauth.kakao.com/oauth/authorize
-  app-callback-scheme: mapauth-test://kakao
-  token-uri: https://kauth.kakao.com/oauth/token
+  app-id: 4242
+  token-info-uri: https://kapi.kakao.com/v1/user/access_token_info
   user-info-uri: https://kapi.kakao.com/v2/user/me
 
 # 날씨 감시 배치는 테스트에서 돌지 않는다. 컨텍스트를 띄우는 테스트가 최초 지연을

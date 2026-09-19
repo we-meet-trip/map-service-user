@@ -18,9 +18,9 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.util.Optional;
@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /** Executes the real service and both RestClient requests against an in-process provider stub. */
@@ -46,24 +47,17 @@ class KakaoOAuthServiceTest {
 
     @BeforeEach
     void setup() {
-        properties.setClientId("synthetic-provider-id");
-        properties.setRedirectUri("https://test.example.invalid/api/v1/auth/kakao/callback");
-        properties.setTokenUri("https://provider.example.invalid/token");
+        properties.setAppId(4242L);
+        properties.setTokenInfoUri("https://provider.example.invalid/token-info");
         properties.setUserInfoUri("https://provider.example.invalid/me");
         RestClient.Builder builder = RestClient.builder();
         provider = MockRestServiceServer.bindTo(builder).build();
         service = new KakaoOAuthService(properties, users, accounts, devices, auth, builder.build());
     }
 
+    /** 토큰 정보 조회와 사용자 정보 조회를 차례로 세운다. 토큰의 회원번호는 123 으로 고정한다. */
     private void providerReturns(String email, String id) {
-        var form = new LinkedMultiValueMap<String, String>();
-        form.add("grant_type", "authorization_code");
-        form.add("client_id", "synthetic-provider-id");
-        form.add("redirect_uri", properties.getRedirectUri());
-        form.add("code", "synthetic-code");
-        provider.expect(requestTo(properties.getTokenUri())).andExpect(method(HttpMethod.POST))
-                .andExpect(content().formData(form))
-                .andRespond(withSuccess("{\"access_token\":\"synthetic-provider-token\",\"scope\":\"profile_nickname\"}", MediaType.APPLICATION_JSON));
+        tokenInfoReturns(123L, 4242L);
         String account = email == null ? "{}" : "{\"email\":\"" + email
                 + "\",\"email_needs_agreement\":false,\"is_email_verified\":true,\"is_email_valid\":true}";
         provider.expect(requestTo(properties.getUserInfoUri())).andExpect(method(HttpMethod.GET))
@@ -71,9 +65,22 @@ class KakaoOAuthServiceTest {
                 .andRespond(withSuccess("{\"id\":" + id + ",\"kakao_account\":" + account + "}", MediaType.APPLICATION_JSON));
     }
 
+    private void tokenInfoReturns(long userId, long appId) {
+        provider.expect(requestTo(properties.getTokenInfoUri())).andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer synthetic-provider-token"))
+                .andRespond(withSuccess("{\"id\":" + userId + ",\"expires_in\":21599,\"app_id\":" + appId + "}",
+                        MediaType.APPLICATION_JSON));
+    }
+
+    private void expectRejected() {
+        assertThatThrownBy(this::login).isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException)e).getErrorCode()).isEqualTo(ErrorCode.KAKAO_TOKEN_REJECTED);
+        verifyNoInteractions(users, accounts, auth, devices);
+    }
+
     private AuthResponse login() {
         var request = new KakaoLoginRequest();
-        org.springframework.test.util.ReflectionTestUtils.setField(request, "code", "synthetic-code");
+        org.springframework.test.util.ReflectionTestUtils.setField(request, "accessToken", "synthetic-provider-token");
         try { return service.processLogin(request); }
         finally { provider.verify(); }
     }
@@ -168,11 +175,41 @@ class KakaoOAuthServiceTest {
     }
 
     @Test
-    void productionTokenExchangeUsesTheSameExactConfiguredRedirect() {
-        properties.setRedirectUri("https://prod.example.invalid/api/v1/auth/kakao/callback");
-        providerReturns(null, "123");
-        when(users.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(auth.buildAuthResponse(any())).thenReturn(response);
-        assertThat(login()).isSameAs(response);
+    void tokenIssuedToAnotherApplicationIsRefusedBeforeAnyLookup() {
+        tokenInfoReturns(123L, 9999L);
+        expectRejected();
+    }
+
+    @Test
+    void refusedTokenIsNotTreatedAsAProviderOutage() {
+        provider.expect(requestTo(properties.getTokenInfoUri()))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+        expectRejected();
+    }
+
+    @Test
+    void providerOutageAsksForARetryInsteadOfSigningTheUserOut() {
+        provider.expect(requestTo(properties.getTokenInfoUri()))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+        assertThatThrownBy(this::login).isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException)e).getErrorCode())
+                .isEqualTo(ErrorCode.KAKAO_TOKEN_INFO_UNAVAILABLE);
+        verifyNoInteractions(users, accounts, auth, devices);
+    }
+
+    @Test
+    void twoLookupsDisagreeingOnTheMemberNumberAreRefused() {
+        tokenInfoReturns(123L, 4242L);
+        provider.expect(requestTo(properties.getUserInfoUri()))
+                .andRespond(withSuccess("{\"id\":456,\"kakao_account\":{}}", MediaType.APPLICATION_JSON));
+        expectRejected();
+    }
+
+    @Test
+    void disabledProviderRefusesLoginWithoutCallingKakao() {
+        properties.setAppId(null);
+        assertThatThrownBy(this::login).isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException)e).getErrorCode()).isEqualTo(ErrorCode.KAKAO_NOT_CONFIGURED);
+        verifyNoInteractions(users, accounts, auth, devices);
     }
 }
