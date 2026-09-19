@@ -610,10 +610,11 @@ public class RecommendService {
      * agent 에 위임한다(재탐색 제외 목록). draft 가 없거나 파싱 불가하면
      * exclude 없이 진행한다(기존 동작 보존).
      *
-     * 재추천 일일 한도(ResearchLimitService)를 가장 먼저 검사한다. scheduleId 가
-     * 있으면 일정 단위("sched:{id}"), 없으면 잡 단위("job:{jobId}") 버킷으로
-     * 카운트한다. 한도 초과 시 CustomException(RESEARCH_LIMIT_EXCEEDED, 409)을
-     * 던지며, 이때 draft 삭제·agent 호출은 수행하지 않는다.
+     * 재추천 일일 한도(ResearchLimitService)를 가장 먼저 검사한다. 로그인한
+     * 호출은 계정 단위("user:{id}") 버킷으로 세고, 로그인 정보가 없는 호출만
+     * 일정("sched:{id}") 또는 잡("job:{jobId}") 버킷으로 떨어진다. 한도 초과 시
+     * CustomException(RESEARCH_LIMIT_EXCEEDED, 409)을 던지며, 이때 draft
+     * 삭제·agent 호출은 수행하지 않는다.
      *
      * jobId: 폐기할 기존 작업 식별자.
      * request: 신규 추천에 사용할 RecommendRequest.
@@ -671,9 +672,15 @@ public class RecommendService {
             if (schedules.findByScheduleIdAndUserId(schedule, userId).isEmpty())
                 throw new CustomException(ErrorCode.RECOMMEND_NOT_OWNER);
         }
-        String limitKey = (request.scheduleId() != null && !request.scheduleId().isBlank())
-                ? "sched:" + request.scheduleId()
-                : "job:" + jobId;
+        // 한도는 계정으로 센다. 일정이나 잡으로 세면 새 잡을 하나 더 띄우는
+        // 것만으로 버킷이 새로 생겨, 한 계정이 그날 AI 예산을 혼자 다 태울 수
+        // 있다. 날짜 구분은 카운터가 KST 자정에 만료되는 것으로 이미 선다.
+        // 로그인 정보가 없는 호출만 예전 버킷으로 떨어진다.
+        String limitKey = userId != null
+                ? "user:" + userId
+                : (request.scheduleId() != null && !request.scheduleId().isBlank())
+                        ? "sched:" + request.scheduleId()
+                        : "job:" + jobId;
         if (!researchLimitService.tryConsume(limitKey)) {
             throw new CustomException(ErrorCode.RESEARCH_LIMIT_EXCEEDED);
         }

@@ -18,6 +18,9 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class AppleAccountService {
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AppleAccountService.class);
+
     private final AppleSettings settings;
     private final AppleChallengeStore challenges;
     private final AppleProviderClient apple;
@@ -55,12 +58,27 @@ public class AppleAccountService {
         }
         return auth.buildAuthResponse(user);
     }
+    /**
+     * 탈퇴하면서 Apple 쪽 토큰도 함께 거둔다.
+     *
+     * 실패해도 예외를 밖으로 내지 않는다. 이 호출은 탈퇴 트랜잭션 안에서
+     * 도는데, 여기서 예외가 넘어가면 트랜잭션이 통째로 되돌아가 계정이
+     * 지워지지 않는다. 그러면 Apple 장애나 자격 오설정이 곧 "앱에서 계정을
+     * 지울 수 없음"이 된다 — 지울 수 있어야 한다는 것이 더 앞선 요구다.
+     *
+     * 거두지 못했으면 암호문을 그대로 남겨 나중에 다시 시도할 수 있게 둔다.
+     */
     @Transactional
     public void revokeForWithdrawal(Long userId) {
         links.findById(userId).ifPresent(link -> {
-            if (link.getRefreshTokenCiphertext()!=null) {
-                requireConfigured(); apple.revoke(cipher.decrypt(link.getRefreshTokenCiphertext(),aad(userId)));
+            if (link.getRefreshTokenCiphertext()==null) return;
+            try {
+                requireConfigured();
+                apple.revoke(cipher.decrypt(link.getRefreshTokenCiphertext(),aad(userId)));
                 link.refresh(null);
+            } catch (RuntimeException failed) {
+                log.warn("Apple 토큰 회수 실패 — 탈퇴는 그대로 진행한다. userId={} 사유={}",
+                        userId, failed.toString());
             }
         });
     }

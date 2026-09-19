@@ -246,6 +246,33 @@ class RecommendServiceTest {
     }
 
     @Test
+    void researchCountsPerAccountWhenCallerKnown() {
+        // 한도를 잡이나 일정으로 세면 새 잡을 띄우는 것만으로 버킷이 새로
+        // 생겨 한 계정이 그날 AI 예산을 혼자 다 태울 수 있다. 누가 불렀는지
+        // 알면 계정 버킷으로 센다.
+        RecommendRequest noSchedule = new RecommendRequest(
+                new DateRange(
+                        LocalDate.of(2026, 7, 6),
+                        LocalDate.of(2026, 7, 6),
+                        LocalTime.of(9, 0),
+                        LocalTime.of(18, 0)),
+                null,
+                List.of("산책"),
+                null,
+                "서울특별시",
+                "강남구",
+                null,
+                null,
+                null,
+                null);
+
+        service.research("job-1", noSchedule, 7L);
+
+        verify(researchLimitService).tryConsume("user:7");
+        verify(researchLimitService, never()).tryConsume("job:job-1");
+    }
+
+    @Test
     void researchOverLimitThrowsConflictAndSkipsSideEffects() {
         when(researchLimitService.tryConsume(anyString())).thenReturn(false);
 
