@@ -60,7 +60,8 @@ training:
     enabled: false
 
 kakao:
-  app-id: 4242
+  # 앱 번호를 여기서 주지 않는다 — 운영도 환경에서 받지 못하므로, 테스트가
+  # application.yml 의 기본값을 그대로 쓰는 것이 실제 기동 조건과 같다.
   token-info-uri: https://kapi.kakao.com/v1/user/access_token_info
   user-info-uri: https://kapi.kakao.com/v2/user/me
 

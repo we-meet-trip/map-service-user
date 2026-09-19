@@ -331,8 +331,10 @@ jwt:
 # - token-uri / user-info-uri : Kakao 토큰 교환 / 사용자 정보 조회 엔드포인트
 kakao:
   # 앱이 카카오 SDK 로 로그인하므로 서버는 인가 주소를 만들지 않는다.
-  # app-id 가 비면 카카오 로그인이 꺼진 것으로 보고 다른 로그인 수단만 연다.
-  app-id: ${KAKAO_APP_ID:}
+  # 앱 번호는 비밀이 아니다 — 커스텀 스킴(kakao{키}://oauth)과 토큰 정보 응답에 그대로
+  # 드러나고, 시험과 운영이 같은 카카오 앱 하나를 쓴다. 고정된 운영 compose 가 이 이름을
+  # 컨테이너로 넘겨주지 않으므로 기본값으로 둔다. 환경에서 주면 그쪽이 이긴다.
+  app-id: ${KAKAO_APP_ID:1443373}
   token-info-uri: ${KAKAO_TOKEN_INFO_URI:https://kapi.kakao.com/v1/user/access_token_info}
   user-info-uri: ${KAKAO_USER_INFO_URI:https://kapi.kakao.com/v2/user/me}
 
