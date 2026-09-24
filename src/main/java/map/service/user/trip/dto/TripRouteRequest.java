@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Set;
 import map.service.user.recommend.dto.SelectedPlace;
 
 /**
@@ -29,9 +30,26 @@ public record TripRouteRequest(
         @NotBlank String transport,
         @Valid @NotNull Location location,
         @Valid @NotNull @Size(min = 2, max = 10) List<SelectedPlace> places,
-        boolean optimize
+        boolean optimize,
+        String entry
 ) {
+    /**
+     * 동선 요청이 시작된 화면. 직접 계획하기·일정 고치기 가운데 어디서
+     * 왔는지 로그로 세어, AI 추천 대신 이 길을 고른 비율을 본다.
+     */
+    private static final Set<String> ENTRIES = Set.of("plan_start", "edit");
+
     public TripRouteRequest(Schedule schedule, String transport, Location location, List<SelectedPlace> places) {
-        this(schedule, transport, location, places, false);
+        this(schedule, transport, location, places, false, null);
+    }
+
+    public TripRouteRequest(Schedule schedule, String transport, Location location,
+                            List<SelectedPlace> places, boolean optimize) {
+        this(schedule, transport, location, places, optimize, null);
+    }
+
+    /** 로그에 남길 진입 화면. 모르는 값은 그대로 싣지 않고 unknown 으로 접는다. */
+    public String entryTag() {
+        return entry != null && ENTRIES.contains(entry) ? entry : "unknown";
     }
 }

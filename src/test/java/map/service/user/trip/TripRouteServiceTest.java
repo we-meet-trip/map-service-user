@@ -282,4 +282,30 @@ class TripRouteServiceTest {
         assertThat(failure.failure().code()).isEqualTo(code);
     }
 
+    @Test
+    void entryTagKeepsKnownScreensAndFoldsTheRest() {
+        TripRouteRequest base = request();
+        java.util.function.Function<String, String> tagOf = entry -> new TripRouteRequest(
+                base.schedule(), base.transport(), base.location(), base.places(), false, entry)
+                .entryTag();
+        org.assertj.core.api.Assertions.assertThat(tagOf.apply("plan_start")).isEqualTo("plan_start");
+        org.assertj.core.api.Assertions.assertThat(tagOf.apply("edit")).isEqualTo("edit");
+        org.assertj.core.api.Assertions.assertThat(tagOf.apply("x\nforged=1")).isEqualTo("unknown");
+        org.assertj.core.api.Assertions.assertThat(tagOf.apply(null)).isEqualTo("unknown");
+    }
+
+    @Test
+    void entryIsReadFromJsonAndIsOptional() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        String body = "{\"schedule\":{\"start_date\":\"2026-07-06\",\"end_date\":\"2026-07-06\","
+                + "\"active_start_hour\":9,\"active_end_hour\":18},\"transport\":\"walk\","
+                + "\"location\":{\"province\":\"강원도\",\"city\":\"속초시\"},"
+                + "\"places\":[],\"optimize\":true%s}";
+        TripRouteRequest tagged = mapper.readValue(
+                String.format(body, ",\"entry\":\"plan_start\""), TripRouteRequest.class);
+        TripRouteRequest untagged = mapper.readValue(String.format(body, ""), TripRouteRequest.class);
+        org.assertj.core.api.Assertions.assertThat(tagged.entryTag()).isEqualTo("plan_start");
+        org.assertj.core.api.Assertions.assertThat(tagged.optimize()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(untagged.entryTag()).isEqualTo("unknown");
+    }
 }
