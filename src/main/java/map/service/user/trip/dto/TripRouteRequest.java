@@ -34,10 +34,10 @@ public record TripRouteRequest(
         String entry
 ) {
     /**
-     * 동선 요청이 시작된 화면. 직접 계획하기·랜덤 여행·일정 고치기 가운데 어디서
+     * 동선 요청이 시작된 화면. 직접 계획하기·일정 고치기 가운데 어디서
      * 왔는지 로그로 세어, AI 추천 대신 이 길을 고른 비율을 본다.
      */
-    private static final Set<String> ENTRIES = Set.of("plan_start", "random_mission", "edit");
+    private static final Set<String> ENTRIES = Set.of("plan_start", "edit");
 
     public TripRouteRequest(Schedule schedule, String transport, Location location, List<SelectedPlace> places) {
         this(schedule, transport, location, places, false, null);

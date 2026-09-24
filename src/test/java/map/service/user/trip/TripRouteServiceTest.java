@@ -289,7 +289,6 @@ class TripRouteServiceTest {
                 base.schedule(), base.transport(), base.location(), base.places(), false, entry)
                 .entryTag();
         org.assertj.core.api.Assertions.assertThat(tagOf.apply("plan_start")).isEqualTo("plan_start");
-        org.assertj.core.api.Assertions.assertThat(tagOf.apply("random_mission")).isEqualTo("random_mission");
         org.assertj.core.api.Assertions.assertThat(tagOf.apply("edit")).isEqualTo("edit");
         org.assertj.core.api.Assertions.assertThat(tagOf.apply("x\nforged=1")).isEqualTo("unknown");
         org.assertj.core.api.Assertions.assertThat(tagOf.apply(null)).isEqualTo("unknown");
@@ -303,9 +302,9 @@ class TripRouteServiceTest {
                 + "\"location\":{\"province\":\"강원도\",\"city\":\"속초시\"},"
                 + "\"places\":[],\"optimize\":true%s}";
         TripRouteRequest tagged = mapper.readValue(
-                String.format(body, ",\"entry\":\"random_mission\""), TripRouteRequest.class);
+                String.format(body, ",\"entry\":\"plan_start\""), TripRouteRequest.class);
         TripRouteRequest untagged = mapper.readValue(String.format(body, ""), TripRouteRequest.class);
-        org.assertj.core.api.Assertions.assertThat(tagged.entryTag()).isEqualTo("random_mission");
+        org.assertj.core.api.Assertions.assertThat(tagged.entryTag()).isEqualTo("plan_start");
         org.assertj.core.api.Assertions.assertThat(tagged.optimize()).isTrue();
         org.assertj.core.api.Assertions.assertThat(untagged.entryTag()).isEqualTo("unknown");
     }
