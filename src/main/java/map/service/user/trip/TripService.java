@@ -268,8 +268,8 @@ public class TripService {
 
         JobAccepted accepted = recommendService.createRouteJob(recommendRequest, userId);
         String jobId = accepted.jobId();
-        log.info("trip route started job_id={} places={}",
-                jobId, request.places().size());
+        log.info("trip route started job_id={} places={} entry={}",
+                jobId, request.places().size(), request.entryTag());
 
         RecommendResponse result = parseDraft(jobId, awaitDraft(jobId));
 
